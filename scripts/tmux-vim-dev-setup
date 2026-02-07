@@ -1,0 +1,82 @@
+#!/usr/bin/env sh
+
+DEFAULT_SESSION_NAME="cargo-changeset"
+
+SCRIPT_DIR="$(dirname "$(readlink -f "$0")")"
+PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
+
+SESSION_NAME="$DEFAULT_SESSION_NAME"
+
+# Check if session already exists, if true attach and early return
+tmux has-session -t "$SESSION_NAME" 2>/dev/null
+if [ $? == 0 ]; then
+  tmux attach-session -t "$SESSION_NAME"
+  exit 0
+fi
+
+echo "Preparing session..."
+
+tmux new-session -d -s "$SESSION_NAME" -c "$PROJECT_DIR" -n "edit"
+TMUX_BASE_INDEX="$(tmux show-options -gv base-index)"
+TMUX_PANE_BASE_INDEX="$(tmux show-options -gv pane-base-index)"
+
+# window "edit"
+tmux select-window -t "$SESSION_NAME:edit"
+tmux split-window -v -c "$PROJECT_DIR" -l 21%
+tmux select-layout main-horizontal
+tmux select-pane -t "$SESSION_NAME:edit.$(($TMUX_PANE_BASE_INDEX + 1))"
+tmux split-window -h -c "$PROJECT_DIR"
+
+# window "AI"
+tmux new-window -n "AI" -c "${PROJECT_DIR}"
+tmux split-window -v -c "${PROJECT_DIR}"
+tmux select-layout even-vertical
+tmux select-pane -t "$SESSION_NAME:AI.$(($TMUX_PANE_BASE_INDEX + 0))"
+tmux split-window -h -c "${PROJECT_DIR}"
+tmux select-pane -t "$SESSION_NAME:AI.$(($TMUX_PANE_BASE_INDEX + 2))"
+tmux split-window -h -c "${PROJECT_DIR}"
+
+# window "run"
+tmux new-window -n "run" -c "${PROJECT_DIR}"
+tmux split-window -v -c "${PROJECT_DIR}"
+tmux select-layout even-vertical
+tmux select-pane -t "$SESSION_NAME:run.$(($TMUX_PANE_BASE_INDEX + 0))"
+tmux split-window -h -c "${PROJECT_DIR}"
+tmux select-pane -t "$SESSION_NAME:run.$(($TMUX_PANE_BASE_INDEX + 2))"
+tmux split-window -h -c "${PROJECT_DIR}"
+
+# Wait for all propts to have initialized
+sleep 1
+
+# # Activate the virtualenv everywhere
+# tmux select-window -t "$SESSION_NAME:edit"
+# tmux setw synchronize-panes on
+# tmux send-keys "source .venv/bin/activate" C-m
+# tmux select-window -t "$SESSION_NAME:run"
+# tmux setw synchronize-panes on
+# tmux send-keys "source .venv/bin/activate" C-m
+# sleep 1
+# tmux select-window -t "$SESSION_NAME:edit"
+# tmux send-keys "clear" C-m
+# tmux select-window -t "$SESSION_NAME:run"
+# tmux send-keys "clear" C-m
+# sleep 0.1
+# tmux select-window -t "$SESSION_NAME:edit"
+# tmux list-panes -s | sed 's/:.*//g' | xargs -n 1 tmux clear-history -t
+# tmux setw synchronize-panes off
+# tmux select-window -t "$SESSION_NAME:run"
+# tmux list-panes -s | sed 's/:.*//g' | xargs -n 1 tmux clear-history -t
+# tmux setw synchronize-panes off
+
+# start all the processes
+tmux send-keys -t "$SESSION_NAME:edit.$(($TMUX_PANE_BASE_INDEX + 0))" "vim ." C-m
+tmux send-keys -t "$SESSION_NAME:edit.$(($TMUX_PANE_BASE_INDEX + 1))" "git status" C-m
+
+# Select the location we wish to start off the session at
+tmux select-window -t "$SESSION_NAME:edit"
+tmux select-pane -Z -t "$SESSION_NAME:edit.$(($TMUX_PANE_BASE_INDEX + 0))"
+
+# attach to the newly created session
+tmux attach-session -t "$SESSION_NAME"
+
+tmux find-window -Z -t "$SESSION_NAME:edit.$(($TMUX_PANE_BASE_INDEX + 0))"

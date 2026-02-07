@@ -1,0 +1,12 @@
+[package]
+name = "changeset-git"
+version = "0.0.0"
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+description = "Git operations for cargo-changeset"
+
+[dependencies]
+changeset-core = { workspace = true }
+anyhow = { workspace = true }
