@@ -1,8 +1,7 @@
-use changeset_core::{Changeset, ChangesetError, Result};
+use changeset_core::{Changeset, Result};
 
 pub fn parse_changeset(content: &str) -> Result<Changeset> {
-    serde_json::from_str(content)
-        .map_err(|e| ChangesetError::Parse(format!("Failed to parse changeset: {}", e)))
+    Ok(serde_json::from_str(content)?)
 }
 
 #[cfg(test)]
