@@ -1,6 +1,6 @@
 use indexmap::IndexMap;
 use serde::Deserialize;
-use serde_with::{serde_as, MapPreventDuplicates};
+use serde_with::{MapPreventDuplicates, serde_as};
 
 use changeset_core::{BumpType, Changeset, PackageRelease};
 
@@ -108,7 +108,10 @@ Fix critical bug in authentication flow.
         assert_eq!(changeset.releases.len(), 1);
         assert_eq!(changeset.releases[0].name, "my-package");
         assert_eq!(changeset.releases[0].bump_type, BumpType::Patch);
-        assert_eq!(changeset.summary, "Fix critical bug in authentication flow.");
+        assert_eq!(
+            changeset.summary,
+            "Fix critical bug in authentication flow."
+        );
     }
 
     #[test]
