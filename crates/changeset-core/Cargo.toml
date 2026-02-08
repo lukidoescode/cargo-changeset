@@ -10,6 +10,5 @@ description = "Core types and traits for cargo-changeset"
 
 [dependencies]
 serde = { workspace = true }
-serde_json = { workspace = true }
 semver = { workspace = true }
 thiserror = { workspace = true }
