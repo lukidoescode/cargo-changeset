@@ -126,8 +126,8 @@ fn not_found_error_for_nonexistent_path() {
 
 #[test]
 fn ensure_changeset_dir_creates_directory() {
-    let fixture = fixtures_dir().join("single_crate");
-    let workspace = discover_workspace(&fixture).expect("should discover workspace");
+    let temp_dir = create_temp_single_crate();
+    let workspace = discover_workspace(temp_dir.path()).expect("should discover workspace");
 
     let changeset_dir =
         changeset_workspace::ensure_changeset_dir(&workspace).expect("should create dir");
@@ -135,6 +135,4 @@ fn ensure_changeset_dir_creates_directory() {
     assert!(changeset_dir.exists());
     assert!(changeset_dir.is_dir());
     assert_eq!(changeset_dir, workspace.root.join(".changeset"));
-
-    std::fs::remove_dir(&changeset_dir).expect("cleanup");
 }
