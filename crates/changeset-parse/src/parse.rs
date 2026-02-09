@@ -2,7 +2,7 @@ use indexmap::IndexMap;
 use serde::Deserialize;
 use serde_with::{MapPreventDuplicates, serde_as};
 
-use changeset_core::{BumpType, Changeset, PackageRelease};
+use changeset_core::{BumpType, ChangeCategory, Changeset, PackageRelease};
 
 use crate::error::{FormatError, FrontMatterError, ValidationError};
 
@@ -12,7 +12,9 @@ const MAX_INPUT_SIZE: usize = 100 * 1024 * 1024;
 
 #[serde_as]
 #[derive(Deserialize)]
-struct ReleasesMap {
+struct FrontMatter {
+    #[serde(default)]
+    category: ChangeCategory,
     #[serde(flatten)]
     #[serde_as(as = "MapPreventDuplicates<_, _>")]
     releases: IndexMap<String, BumpType>,
@@ -74,14 +76,14 @@ pub fn parse_changeset(content: &str) -> Result<Changeset, FormatError> {
 
     let (yaml_content, body) = extract_front_matter(content)?;
 
-    let parsed: ReleasesMap = serde_yml::from_str(yaml_content)?;
-    let releases_map = parsed.releases;
+    let parsed: FrontMatter = serde_yml::from_str(yaml_content)?;
 
-    if releases_map.is_empty() {
+    if parsed.releases.is_empty() {
         return Err(ValidationError::NoReleases.into());
     }
 
-    let releases = releases_map
+    let releases = parsed
+        .releases
         .into_iter()
         .map(|(name, bump_type)| PackageRelease { name, bump_type })
         .collect();
@@ -89,6 +91,7 @@ pub fn parse_changeset(content: &str) -> Result<Changeset, FormatError> {
     Ok(Changeset {
         summary: body.trim().to_string(),
         releases,
+        category: parsed.category,
     })
 }
 
@@ -317,5 +320,109 @@ Some summary.
             err_str.contains("duplicate"),
             "Expected 'duplicate' in error message, got: {err_str}"
         );
+    }
+
+    #[test]
+    fn category_defaults_to_changed() {
+        let content = r#"---
+"my-crate": patch
+---
+Some summary.
+"#;
+
+        let changeset = parse_changeset(content).expect("should parse");
+        assert_eq!(changeset.category, ChangeCategory::Changed);
+    }
+
+    #[test]
+    fn parses_category_fixed() {
+        let content = r#"---
+category: fixed
+"my-crate": patch
+---
+Fixed a bug.
+"#;
+
+        let changeset = parse_changeset(content).expect("should parse");
+        assert_eq!(changeset.category, ChangeCategory::Fixed);
+        assert_eq!(changeset.releases[0].name, "my-crate");
+    }
+
+    #[test]
+    fn parses_category_added() {
+        let content = r#"---
+category: added
+"my-feature": minor
+---
+Added new feature.
+"#;
+
+        let changeset = parse_changeset(content).expect("should parse");
+        assert_eq!(changeset.category, ChangeCategory::Added);
+    }
+
+    #[test]
+    fn parses_category_deprecated() {
+        let content = r#"---
+category: deprecated
+"old-api": minor
+---
+Deprecated old API.
+"#;
+
+        let changeset = parse_changeset(content).expect("should parse");
+        assert_eq!(changeset.category, ChangeCategory::Deprecated);
+    }
+
+    #[test]
+    fn parses_category_removed() {
+        let content = r#"---
+category: removed
+"old-feature": major
+---
+Removed old feature.
+"#;
+
+        let changeset = parse_changeset(content).expect("should parse");
+        assert_eq!(changeset.category, ChangeCategory::Removed);
+    }
+
+    #[test]
+    fn parses_category_security() {
+        let content = r#"---
+category: security
+"auth-module": patch
+---
+Fixed security vulnerability.
+"#;
+
+        let changeset = parse_changeset(content).expect("should parse");
+        assert_eq!(changeset.category, ChangeCategory::Security);
+    }
+
+    #[test]
+    fn parses_category_changed() {
+        let content = r#"---
+category: changed
+"my-crate": minor
+---
+Changed behavior.
+"#;
+
+        let changeset = parse_changeset(content).expect("should parse");
+        assert_eq!(changeset.category, ChangeCategory::Changed);
+    }
+
+    #[test]
+    fn error_invalid_category() {
+        let content = r#"---
+category: unknown
+"my-crate": patch
+---
+Some summary.
+"#;
+
+        let err = parse_changeset(content).expect_err("should fail");
+        assert!(err.to_string().contains("YAML"));
     }
 }

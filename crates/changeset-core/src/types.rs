@@ -1,3 +1,5 @@
+use std::fmt;
+
 use semver::Version;
 use serde::{Deserialize, Serialize};
 
@@ -7,6 +9,34 @@ pub enum BumpType {
     Major,
     Minor,
     Patch,
+}
+
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, Default,
+)]
+#[serde(rename_all = "lowercase")]
+pub enum ChangeCategory {
+    Added,
+    #[default]
+    Changed,
+    Deprecated,
+    Removed,
+    Fixed,
+    Security,
+}
+
+impl fmt::Display for ChangeCategory {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let s = match self {
+            Self::Added => "Added",
+            Self::Changed => "Changed",
+            Self::Deprecated => "Deprecated",
+            Self::Removed => "Removed",
+            Self::Fixed => "Fixed",
+            Self::Security => "Security",
+        };
+        write!(f, "{s}")
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -19,6 +49,8 @@ pub struct PackageRelease {
 pub struct Changeset {
     pub summary: String,
     pub releases: Vec<PackageRelease>,
+    #[serde(default)]
+    pub category: ChangeCategory,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
