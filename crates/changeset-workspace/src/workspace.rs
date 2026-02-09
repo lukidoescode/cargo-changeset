@@ -1,7 +1,7 @@
 use std::path::{Path, PathBuf};
 
 use changeset_core::PackageInfo;
-use glob::glob;
+use globset::GlobBuilder;
 use semver::Version;
 
 use crate::error::WorkspaceError;
@@ -223,37 +223,63 @@ fn expand_glob_pattern(
     pattern: &str,
     excludes: &[String],
 ) -> Result<Vec<PathBuf>, WorkspaceError> {
-    let full_pattern = root.join(pattern);
-    let pattern_str = full_pattern.to_string_lossy();
+    let glob = GlobBuilder::new(pattern)
+        .literal_separator(true)
+        .build()
+        .map_err(|source| WorkspaceError::GlobPattern {
+            pattern: pattern.to_string(),
+            source,
+        })?
+        .compile_matcher();
 
-    let entries = glob(&pattern_str).map_err(|source| WorkspaceError::GlobPattern {
-        pattern: pattern.to_string(),
-        source,
-    })?;
+    let exclude_matchers: Vec<_> = excludes
+        .iter()
+        .filter_map(|ex| {
+            GlobBuilder::new(ex)
+                .literal_separator(true)
+                .build()
+                .ok()
+                .map(|g| g.compile_matcher())
+        })
+        .collect();
 
     let mut dirs = Vec::new();
+    collect_matching_dirs(root, root, &glob, &exclude_matchers, &mut dirs)?;
+
+    Ok(dirs)
+}
+
+fn collect_matching_dirs(
+    base: &Path,
+    current: &Path,
+    glob: &globset::GlobMatcher,
+    excludes: &[globset::GlobMatcher],
+    results: &mut Vec<PathBuf>,
+) -> Result<(), WorkspaceError> {
+    let entries = std::fs::read_dir(current)?;
+
     for entry in entries {
-        let path = entry?;
+        let entry = entry?;
+        let path = entry.path();
+
         if !path.is_dir() {
             continue;
         }
 
-        let relative = path
-            .strip_prefix(root)
-            .unwrap_or(&path)
-            .to_string_lossy()
-            .to_string();
+        let relative = path.strip_prefix(base).unwrap_or(&path);
 
-        let is_excluded = excludes
-            .iter()
-            .any(|ex| relative == *ex || relative.starts_with(&format!("{ex}/")));
-
-        if !is_excluded {
-            dirs.push(path);
+        if excludes.iter().any(|ex| ex.is_match(relative)) {
+            continue;
         }
+
+        if glob.is_match(relative) {
+            results.push(path.clone());
+        }
+
+        collect_matching_dirs(base, &path, glob, excludes, results)?;
     }
 
-    Ok(dirs)
+    Ok(())
 }
 
 #[cfg(test)]

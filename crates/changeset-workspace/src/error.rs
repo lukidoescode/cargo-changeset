@@ -13,9 +13,6 @@ pub enum WorkspaceError {
     #[error("no Cargo.toml found traversing from '{start_dir}'")]
     NotFound { start_dir: PathBuf },
 
-    #[error("workspace member pattern '{pattern}' matched no directories")]
-    NoMemberMatches { pattern: String },
-
     #[error("failed to read manifest at '{path}'")]
     ManifestRead {
         path: PathBuf,
@@ -41,13 +38,10 @@ pub enum WorkspaceError {
         source: semver::Error,
     },
 
-    #[error("failed to expand glob pattern '{pattern}'")]
+    #[error("invalid glob pattern '{pattern}'")]
     GlobPattern {
         pattern: String,
         #[source]
-        source: glob::PatternError,
+        source: globset::Error,
     },
-
-    #[error("glob iteration error")]
-    GlobIteration(#[from] glob::GlobError),
 }

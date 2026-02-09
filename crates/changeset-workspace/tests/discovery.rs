@@ -1,6 +1,8 @@
 use std::path::PathBuf;
 
-use changeset_workspace::{WorkspaceKind, discover_workspace};
+use changeset_workspace::{
+    WorkspaceError, WorkspaceKind, discover_workspace, discover_workspace_from_cwd,
+};
 
 fn fixtures_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures")
@@ -135,4 +137,104 @@ fn ensure_changeset_dir_creates_directory() {
     assert!(changeset_dir.exists());
     assert!(changeset_dir.is_dir());
     assert_eq!(changeset_dir, workspace.root.join(".changeset"));
+}
+
+#[test]
+fn malformed_toml_returns_manifest_parse_error() {
+    let temp_dir = tempfile::tempdir().expect("create temp dir");
+    std::fs::write(
+        temp_dir.path().join("Cargo.toml"),
+        "this is not valid toml {{{",
+    )
+    .expect("write cargo toml");
+
+    let result = discover_workspace(temp_dir.path());
+    assert!(matches!(result, Err(WorkspaceError::ManifestParse { .. })));
+}
+
+#[test]
+fn missing_package_version_returns_missing_field_error() {
+    let temp_dir = tempfile::tempdir().expect("create temp dir");
+    std::fs::write(
+        temp_dir.path().join("Cargo.toml"),
+        r#"[package]
+name = "no-version"
+"#,
+    )
+    .expect("write cargo toml");
+
+    let result = discover_workspace(temp_dir.path());
+    assert!(matches!(
+        result,
+        Err(WorkspaceError::MissingField {
+            field: "package.version",
+            ..
+        })
+    ));
+}
+
+#[test]
+fn invalid_semver_returns_invalid_version_error() {
+    let temp_dir = tempfile::tempdir().expect("create temp dir");
+    std::fs::write(
+        temp_dir.path().join("Cargo.toml"),
+        r#"[package]
+name = "bad-version"
+version = "not.a.version"
+"#,
+    )
+    .expect("write cargo toml");
+
+    let result = discover_workspace(temp_dir.path());
+    assert!(
+        matches!(result, Err(WorkspaceError::InvalidVersion { version, .. }) if version == "not.a.version")
+    );
+}
+
+#[test]
+fn invalid_glob_pattern_returns_glob_pattern_error() {
+    let temp_dir = tempfile::tempdir().expect("create temp dir");
+    std::fs::write(
+        temp_dir.path().join("Cargo.toml"),
+        r#"[workspace]
+members = ["[invalid"]
+"#,
+    )
+    .expect("write cargo toml");
+
+    let result = discover_workspace(temp_dir.path());
+    assert!(
+        matches!(result, Err(WorkspaceError::GlobPattern { pattern, .. }) if pattern == "[invalid")
+    );
+}
+
+#[test]
+fn workspace_exclude_patterns_work() {
+    let fixture = fixtures_dir().join("workspace_with_exclude");
+    let workspace = discover_workspace(&fixture).expect("should discover workspace");
+
+    assert_eq!(workspace.kind, WorkspaceKind::Virtual);
+    assert_eq!(workspace.packages.len(), 1);
+
+    let names: Vec<_> = workspace.packages.iter().map(|p| p.name.as_str()).collect();
+    assert!(names.contains(&"included"));
+    assert!(!names.contains(&"excluded"));
+}
+
+#[test]
+fn ensure_changeset_dir_is_idempotent() {
+    let temp_dir = create_temp_single_crate();
+    let workspace = discover_workspace(temp_dir.path()).expect("should discover workspace");
+
+    let first = changeset_workspace::ensure_changeset_dir(&workspace).expect("first call");
+    let second = changeset_workspace::ensure_changeset_dir(&workspace).expect("second call");
+
+    assert_eq!(first, second);
+    assert!(first.exists());
+}
+
+#[test]
+fn discover_workspace_from_cwd_works() {
+    let result = discover_workspace_from_cwd();
+    assert!(result.is_ok());
 }

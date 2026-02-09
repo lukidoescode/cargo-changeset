@@ -10,7 +10,7 @@ description = "Cargo workspace discovery and management for changesets"
 
 [dependencies]
 changeset-core = { workspace = true }
-glob = "0.3.3"
+globset = "0.4"
 semver = { workspace = true }
 serde = { workspace = true }
 thiserror = { workspace = true }
