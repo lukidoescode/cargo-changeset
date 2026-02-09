@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use changeset_workspace::{discover_workspace, WorkspaceKind};
+use changeset_workspace::{WorkspaceKind, discover_workspace};
 
 fn fixtures_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures")

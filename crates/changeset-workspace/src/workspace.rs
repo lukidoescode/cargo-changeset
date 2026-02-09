@@ -93,11 +93,10 @@ fn find_workspace_root(start_dir: &Path) -> Result<(PathBuf, CargoManifest), Wor
 }
 
 fn read_manifest(path: &Path) -> Result<CargoManifest, WorkspaceError> {
-    let content =
-        std::fs::read_to_string(path).map_err(|source| WorkspaceError::ManifestRead {
-            path: path.to_path_buf(),
-            source,
-        })?;
+    let content = std::fs::read_to_string(path).map_err(|source| WorkspaceError::ManifestRead {
+        path: path.to_path_buf(),
+        source,
+    })?;
 
     toml::from_str(&content).map_err(|source| WorkspaceError::ManifestParse {
         path: path.to_path_buf(),
@@ -196,14 +195,12 @@ fn resolve_version(
 ) -> Result<Version, WorkspaceError> {
     let version_str = match version_field {
         Some(VersionField::Literal(v)) => v.clone(),
-        Some(VersionField::Inherited(inherited)) if inherited.workspace => {
-            workspace_version
-                .ok_or_else(|| WorkspaceError::MissingField {
-                    path: manifest_path.to_path_buf(),
-                    field: "workspace.package.version",
-                })?
-                .clone()
-        }
+        Some(VersionField::Inherited(inherited)) if inherited.workspace => workspace_version
+            .ok_or_else(|| WorkspaceError::MissingField {
+                path: manifest_path.to_path_buf(),
+                field: "workspace.package.version",
+            })?
+            .clone(),
         Some(VersionField::Inherited(_)) | None => {
             return Err(WorkspaceError::MissingField {
                 path: manifest_path.to_path_buf(),
@@ -229,11 +226,10 @@ fn expand_glob_pattern(
     let full_pattern = root.join(pattern);
     let pattern_str = full_pattern.to_string_lossy();
 
-    let entries =
-        glob(&pattern_str).map_err(|source| WorkspaceError::GlobPattern {
-            pattern: pattern.to_string(),
-            source,
-        })?;
+    let entries = glob(&pattern_str).map_err(|source| WorkspaceError::GlobPattern {
+        pattern: pattern.to_string(),
+        source,
+    })?;
 
     let mut dirs = Vec::new();
     for entry in entries {
@@ -248,9 +244,9 @@ fn expand_glob_pattern(
             .to_string_lossy()
             .to_string();
 
-        let is_excluded = excludes.iter().any(|ex| {
-            relative == *ex || relative.starts_with(&format!("{ex}/"))
-        });
+        let is_excluded = excludes
+            .iter()
+            .any(|ex| relative == *ex || relative.starts_with(&format!("{ex}/")));
 
         if !is_excluded {
             dirs.push(path);

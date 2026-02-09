@@ -4,8 +4,7 @@ mod workspace;
 
 pub use error::WorkspaceError;
 pub use workspace::{
-    discover_workspace, discover_workspace_from_cwd, ensure_changeset_dir, Workspace,
-    WorkspaceKind,
+    Workspace, WorkspaceKind, discover_workspace, discover_workspace_from_cwd, ensure_changeset_dir,
 };
 
 pub type Result<T> = std::result::Result<T, WorkspaceError>;
