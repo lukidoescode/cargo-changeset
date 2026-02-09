@@ -1,9 +1,22 @@
 use indexmap::IndexMap;
+use serde::Serialize;
 
-use changeset_core::{BumpType, Changeset};
+use changeset_core::{BumpType, ChangeCategory, Changeset};
 
 use crate::error::{FormatError, ValidationError};
 use crate::parse::FRONT_MATTER_DELIMITER;
+
+#[derive(Serialize)]
+struct FrontMatterOutput<'a> {
+    #[serde(skip_serializing_if = "is_default_category")]
+    category: ChangeCategory,
+    #[serde(flatten)]
+    releases: IndexMap<&'a str, BumpType>,
+}
+
+fn is_default_category(category: &ChangeCategory) -> bool {
+    *category == ChangeCategory::default()
+}
 
 #[must_use = "serialization result should be handled"]
 pub fn serialize_changeset(changeset: &Changeset) -> Result<String, FormatError> {
@@ -17,7 +30,12 @@ pub fn serialize_changeset(changeset: &Changeset) -> Result<String, FormatError>
         .map(|r| (r.name.as_str(), r.bump_type))
         .collect();
 
-    let yaml = serde_yml::to_string(&releases_map)?;
+    let front_matter = FrontMatterOutput {
+        category: changeset.category,
+        releases: releases_map,
+    };
+
+    let yaml = serde_yml::to_string(&front_matter)?;
 
     let mut output = String::new();
     output.push_str(FRONT_MATTER_DELIMITER);
@@ -55,6 +73,7 @@ mod tests {
                     bump_type: BumpType::Patch,
                 },
             ],
+            category: ChangeCategory::default(),
         };
 
         let serialized = serialize_changeset(&original).expect("should serialize");
@@ -62,6 +81,7 @@ mod tests {
 
         assert_eq!(parsed.summary, original.summary);
         assert_eq!(parsed.releases.len(), original.releases.len());
+        assert_eq!(parsed.category, original.category);
 
         for (original_release, parsed_release) in
             original.releases.iter().zip(parsed.releases.iter())
@@ -89,6 +109,7 @@ mod tests {
                     bump_type: BumpType::Patch,
                 },
             ],
+            category: ChangeCategory::default(),
         };
 
         let serialized = serialize_changeset(&original).expect("should serialize");
@@ -104,9 +125,64 @@ mod tests {
         let changeset = Changeset {
             summary: "Some summary".to_string(),
             releases: vec![],
+            category: ChangeCategory::default(),
         };
 
         let err = serialize_changeset(&changeset).expect_err("should fail");
         assert!(err.to_string().contains("at least one release"));
+    }
+
+    #[test]
+    fn roundtrip_with_category() {
+        let original = Changeset {
+            summary: "Fixed a bug".to_string(),
+            releases: vec![PackageRelease {
+                name: "my-crate".to_string(),
+                bump_type: BumpType::Patch,
+            }],
+            category: ChangeCategory::Fixed,
+        };
+
+        let serialized = serialize_changeset(&original).expect("should serialize");
+        let parsed = parse_changeset(&serialized).expect("should parse");
+
+        assert_eq!(parsed.category, ChangeCategory::Fixed);
+        assert_eq!(parsed.summary, original.summary);
+    }
+
+    #[test]
+    fn default_category_not_serialized() {
+        let changeset = Changeset {
+            summary: "Some change".to_string(),
+            releases: vec![PackageRelease {
+                name: "my-crate".to_string(),
+                bump_type: BumpType::Minor,
+            }],
+            category: ChangeCategory::Changed,
+        };
+
+        let serialized = serialize_changeset(&changeset).expect("should serialize");
+        assert!(
+            !serialized.contains("category:"),
+            "Default category should not be serialized"
+        );
+    }
+
+    #[test]
+    fn non_default_category_serialized() {
+        let changeset = Changeset {
+            summary: "Security fix".to_string(),
+            releases: vec![PackageRelease {
+                name: "my-crate".to_string(),
+                bump_type: BumpType::Patch,
+            }],
+            category: ChangeCategory::Security,
+        };
+
+        let serialized = serialize_changeset(&changeset).expect("should serialize");
+        assert!(
+            serialized.contains("category: security"),
+            "Non-default category should be serialized"
+        );
     }
 }

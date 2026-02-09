@@ -22,6 +22,7 @@ changeset-parse = { path = "crates/changeset-parse" }
 changeset-git = { path = "crates/changeset-git" }
 changeset-version = { path = "crates/changeset-version" }
 changeset-workspace = { path = "crates/changeset-workspace" }
+changeset-changelog = { path = "crates/changeset-changelog" }
 
 # External dependencies
 anyhow = "1"
