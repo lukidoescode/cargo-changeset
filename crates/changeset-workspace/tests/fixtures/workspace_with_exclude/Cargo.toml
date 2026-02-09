@@ -1,0 +1,6 @@
+[workspace]
+members = ["crates/*"]
+exclude = ["crates/excluded"]
+
+[workspace.package]
+version = "1.0.0"

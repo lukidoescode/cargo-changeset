@@ -1,0 +1,23 @@
+[package]
+name = "changeset-workspace"
+version = "0.0.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+description = "Cargo workspace discovery and management for changesets"
+
+[dependencies]
+changeset-core = { workspace = true }
+globset = "0.4"
+semver = { workspace = true }
+serde = { workspace = true }
+thiserror = { workspace = true }
+toml = { workspace = true }
+
+[dev-dependencies]
+tempfile = "3.25.0"
+
+[lints]
+workspace = true

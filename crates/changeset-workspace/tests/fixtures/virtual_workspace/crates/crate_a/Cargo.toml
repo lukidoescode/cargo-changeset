@@ -1,0 +1,3 @@
+[package]
+name = "crate-a"
+version.workspace = true
