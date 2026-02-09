@@ -28,8 +28,11 @@ pub enum ChangelogError {
         source: url::ParseError,
     },
 
-    #[error("invalid date format '{date}'")]
-    InvalidDate { date: String },
+    #[error("invalid repository path in URL '{url}': expected owner/repo format")]
+    InvalidRepositoryPath { url: String },
+
+    #[error("invalid changelog format at '{path}': missing required header")]
+    InvalidChangelogFormat { path: PathBuf },
 
     #[error("failed to parse version '{version}'")]
     VersionParse {

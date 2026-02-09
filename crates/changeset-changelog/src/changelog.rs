@@ -38,6 +38,22 @@ impl Changelog {
         Ok(Self { content })
     }
 
+    /// # Errors
+    ///
+    /// Returns `ChangelogError::Read` if the file cannot be read.
+    /// Returns `ChangelogError::InvalidChangelogFormat` if the file does not contain a valid changelog header.
+    pub fn from_file_validated(path: &Path) -> Result<Self, ChangelogError> {
+        let changelog = Self::from_file(path)?;
+
+        if !changelog.content.contains("# Changelog") {
+            return Err(ChangelogError::InvalidChangelogFormat {
+                path: path.to_path_buf(),
+            });
+        }
+
+        Ok(changelog)
+    }
+
     #[must_use]
     pub fn content(&self) -> &str {
         &self.content
@@ -237,5 +253,65 @@ mod tests {
             header_pos < version_pos,
             "Version section should appear after header"
         );
+    }
+
+    #[test]
+    fn from_file_reads_content() {
+        let temp_dir = tempfile::tempdir().expect("create temp dir");
+        let file_path = temp_dir.path().join("CHANGELOG.md");
+
+        let content = "# Changelog\n\n## [1.0.0] - 2025-01-01\n\n### Added\n\n- Initial release\n";
+        std::fs::write(&file_path, content).expect("write file");
+
+        let changelog = Changelog::from_file(&file_path).expect("read file");
+        assert_eq!(changelog.content(), content);
+    }
+
+    #[test]
+    fn from_file_returns_error_for_missing_file() {
+        let temp_dir = tempfile::tempdir().expect("create temp dir");
+        let file_path = temp_dir.path().join("nonexistent.md");
+
+        let result = Changelog::from_file(&file_path);
+        assert!(matches!(result, Err(ChangelogError::Read { .. })));
+    }
+
+    #[test]
+    fn write_to_file_creates_file() {
+        let temp_dir = tempfile::tempdir().expect("create temp dir");
+        let file_path = temp_dir.path().join("CHANGELOG.md");
+
+        let changelog = Changelog::new();
+        changelog.write_to_file(&file_path).expect("write file");
+
+        let read_content = std::fs::read_to_string(&file_path).expect("read file");
+        assert_eq!(read_content, changelog.content());
+    }
+
+    #[test]
+    fn from_file_validated_accepts_valid_changelog() {
+        let temp_dir = tempfile::tempdir().expect("create temp dir");
+        let file_path = temp_dir.path().join("CHANGELOG.md");
+
+        let content = "# Changelog\n\nAll notable changes...\n";
+        std::fs::write(&file_path, content).expect("write file");
+
+        let changelog = Changelog::from_file_validated(&file_path).expect("read file");
+        assert_eq!(changelog.content(), content);
+    }
+
+    #[test]
+    fn from_file_validated_rejects_invalid_changelog() {
+        let temp_dir = tempfile::tempdir().expect("create temp dir");
+        let file_path = temp_dir.path().join("CHANGELOG.md");
+
+        let content = "This is not a changelog\n";
+        std::fs::write(&file_path, content).expect("write file");
+
+        let result = Changelog::from_file_validated(&file_path);
+        assert!(matches!(
+            result,
+            Err(ChangelogError::InvalidChangelogFormat { .. })
+        ));
     }
 }

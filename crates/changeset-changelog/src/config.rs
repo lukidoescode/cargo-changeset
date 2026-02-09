@@ -67,4 +67,14 @@ mod tests {
         assert_eq!(config.comparison_links, ComparisonLinksSetting::Disabled);
         assert!(config.comparison_links_template.is_none());
     }
+
+    #[test]
+    fn deserialize_invalid_changelog_value_fails() {
+        let toml = r#"
+            changelog = "invalid-value"
+        "#;
+
+        let result: Result<ChangelogConfig, _> = toml::from_str(toml);
+        assert!(result.is_err());
+    }
 }

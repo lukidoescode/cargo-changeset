@@ -37,14 +37,11 @@ impl RepositoryInfo {
         let forge = detect_forge(host);
         let (owner, repo) = extract_owner_repo(&url)?;
 
-        let base_url = Url::parse(&format!(
-            "{}://{}",
-            url.scheme(),
-            url.host_str().unwrap_or("github.com")
-        ))
-        .map_err(|source| ChangelogError::UrlParse {
-            url: url_str.to_string(),
-            source,
+        let base_url = Url::parse(&format!("{}://{}", url.scheme(), host)).map_err(|source| {
+            ChangelogError::UrlParse {
+                url: url_str.to_string(),
+                source,
+            }
         })?;
 
         Ok(Self {
@@ -106,13 +103,12 @@ fn extract_owner_repo(url: &Url) -> Result<(String, String), ChangelogError> {
     let segments: Vec<&str> = path.split('/').filter(|s| !s.is_empty()).collect();
 
     if segments.len() < 2 {
-        return Err(ChangelogError::UrlParse {
+        return Err(ChangelogError::InvalidRepositoryPath {
             url: url.to_string(),
-            source: url::ParseError::EmptyHost,
         });
     }
 
-    let owner = segments[0].to_string();
+    let owner = segments[0].trim_start_matches('~').to_string();
     let repo = segments[1].to_string();
 
     Ok((owner, repo))
@@ -171,7 +167,7 @@ mod tests {
     fn detect_sourcehut_from_url() {
         let info = RepositoryInfo::from_url("https://git.sr.ht/~owner/repo").expect("should parse");
         assert_eq!(info.forge, Forge::SourceHut);
-        assert_eq!(info.owner, "~owner");
+        assert_eq!(info.owner, "owner");
         assert_eq!(info.repo, "repo");
     }
 
@@ -214,7 +210,7 @@ mod tests {
     fn sourcehut_comparison_url() {
         let info = RepositoryInfo::from_url("https://git.sr.ht/~owner/repo").expect("should parse");
         let url = info.comparison_url("v1.0.0", "v1.1.0");
-        assert_eq!(url, "https://git.sr.ht/~~owner/repo/log/v1.0.0..v1.1.0");
+        assert_eq!(url, "https://git.sr.ht/~owner/repo/log/v1.0.0..v1.1.0");
     }
 
     #[test]
@@ -253,5 +249,25 @@ mod tests {
         let info =
             RepositoryInfo::from_url("https://example.com/owner/repo").expect("should parse");
         assert_eq!(info.forge, Forge::GitHub);
+    }
+
+    #[test]
+    fn error_single_path_segment() {
+        let result = RepositoryInfo::from_url("https://github.com/owner");
+        assert!(matches!(
+            result,
+            Err(ChangelogError::InvalidRepositoryPath { .. })
+        ));
+    }
+
+    #[test]
+    fn sourcehut_produces_single_tilde_in_url() {
+        let info = RepositoryInfo::from_url("https://git.sr.ht/~owner/repo").expect("should parse");
+        let url = info.comparison_url("v1.0.0", "v1.1.0");
+
+        assert!(
+            url.contains("/~owner/") && !url.contains("/~~"),
+            "URL should contain single tilde: {url}"
+        );
     }
 }
