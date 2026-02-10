@@ -4,6 +4,12 @@ use thiserror::Error;
 
 #[derive(Debug, Error)]
 pub enum CliError {
+    #[error(transparent)]
+    Core(#[from] changeset_core::ChangesetError),
+
+    #[error(transparent)]
+    Git(#[from] changeset_git::GitError),
+
     #[error("workspace error")]
     Workspace(#[from] changeset_workspace::WorkspaceError),
 

@@ -8,6 +8,8 @@ use clap::Parser;
 use crate::commands::Commands;
 use crate::error::CliError;
 
+use error::Result;
+
 #[derive(Parser)]
 #[command(name = "cargo-changeset")]
 #[command(bin_name = "cargo-changeset")]
@@ -25,7 +27,7 @@ fn main() -> ExitCode {
     ExitCode::SUCCESS
 }
 
-fn run() -> error::Result<()> {
+fn run() -> Result<()> {
     let cli = Cli::parse();
     cli.command.execute()
 }
