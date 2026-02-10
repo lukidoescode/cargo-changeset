@@ -47,7 +47,7 @@ fn select_single_crate(package: &PackageInfo) -> Vec<PackageInfo> {
 }
 
 fn select_multiple_crates(packages: &[PackageInfo]) -> Result<Vec<PackageInfo>> {
-    if !std::io::stdin().is_terminal() {
+    if !is_interactive() {
         return Err(CliError::NotATty);
     }
 
@@ -73,6 +73,10 @@ fn format_package_items(packages: &[PackageInfo]) -> Vec<String> {
         .iter()
         .map(|p| format!("{} ({})", p.name, p.version))
         .collect()
+}
+
+fn is_interactive() -> bool {
+    std::env::var("CARGO_CHANGESET_FORCE_TTY").is_ok() || std::io::stdin().is_terminal()
 }
 
 #[cfg(test)]

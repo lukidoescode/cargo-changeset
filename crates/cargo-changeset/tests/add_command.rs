@@ -121,6 +121,7 @@ mod interactive {
         let mut cmd = Command::new(bin_path);
         cmd.arg("add");
         cmd.current_dir(workspace.path());
+        cmd.env("CARGO_CHANGESET_FORCE_TTY", "1");
 
         let mut session = OsSession::spawn(cmd).expect("failed to spawn session");
         session.set_expect_timeout(Some(Duration::from_secs(30)));
