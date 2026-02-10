@@ -116,16 +116,63 @@ mod non_interactive {
     }
 
     #[test]
-    fn add_single_crate_succeeds_without_tty() {
+    fn add_single_crate_without_bump_fails() {
         let workspace = create_single_crate_workspace();
 
         assert_cmd::cargo::cargo_bin_cmd!("cargo-changeset")
             .arg("add")
             .current_dir(workspace.path())
             .assert()
+            .failure()
+            .stderr(contains("missing bump type"));
+    }
+
+    #[test]
+    fn add_single_crate_without_message_fails() {
+        let workspace = create_single_crate_workspace();
+
+        assert_cmd::cargo::cargo_bin_cmd!("cargo-changeset")
+            .arg("add")
+            .arg("--bump")
+            .arg("patch")
+            .current_dir(workspace.path())
+            .assert()
+            .failure()
+            .stderr(contains("missing description"));
+    }
+
+    #[test]
+    fn add_single_crate_with_bump_and_message_succeeds() {
+        let workspace = create_single_crate_workspace();
+
+        assert_cmd::cargo::cargo_bin_cmd!("cargo-changeset")
+            .arg("add")
+            .arg("--bump")
+            .arg("patch")
+            .arg("-m")
+            .arg("Fixed a bug")
+            .current_dir(workspace.path())
+            .assert()
             .success()
             .stdout(contains("Using crate: test-crate"))
-            .stdout(contains("Selected 1 crate"));
+            .stdout(contains("Created changeset"))
+            .stdout(contains("Fixed a bug"));
+
+        let changeset_dir = workspace.path().join(".changeset");
+        assert!(changeset_dir.exists(), ".changeset directory should exist");
+
+        let files: Vec<_> = fs::read_dir(&changeset_dir)
+            .expect("read dir")
+            .filter_map(|e| e.ok())
+            .filter(|e| e.path().extension().is_some_and(|ext| ext == "md"))
+            .collect();
+
+        assert_eq!(files.len(), 1, "should have one changeset file");
+
+        let content = fs::read_to_string(files[0].path()).expect("read changeset file");
+        assert!(content.contains("test-crate"), "should contain crate name");
+        assert!(content.contains("patch"), "should contain bump type");
+        assert!(content.contains("Fixed a bug"), "should contain message");
     }
 
     #[test]
@@ -141,22 +188,26 @@ mod non_interactive {
     }
 
     #[test]
-    fn add_with_single_crate_flag_selects_specified_crate() {
+    fn add_with_single_crate_flag_and_bump_selects_specified_crate() {
         let workspace = create_virtual_workspace();
 
         assert_cmd::cargo::cargo_bin_cmd!("cargo-changeset")
             .arg("add")
             .arg("--crate")
             .arg("crate-a")
+            .arg("--bump")
+            .arg("minor")
+            .arg("-m")
+            .arg("Added feature")
             .current_dir(workspace.path())
             .assert()
             .success()
-            .stdout(contains("Selected 1 crate"))
-            .stdout(contains("crate-a (0.1.0)"));
+            .stdout(contains("Created changeset"))
+            .stdout(contains("crate-a"));
     }
 
     #[test]
-    fn add_with_multiple_crate_flags_selects_all_specified_crates() {
+    fn add_with_multiple_crate_flags_and_bump_selects_all_specified_crates() {
         let workspace = create_virtual_workspace();
 
         assert_cmd::cargo::cargo_bin_cmd!("cargo-changeset")
@@ -165,26 +216,78 @@ mod non_interactive {
             .arg("crate-a")
             .arg("--crate")
             .arg("crate-b")
+            .arg("--bump")
+            .arg("patch")
+            .arg("-m")
+            .arg("Multiple crates")
             .current_dir(workspace.path())
             .assert()
             .success()
-            .stdout(contains("Selected 2 crate"))
-            .stdout(contains("crate-a (0.1.0)"))
-            .stdout(contains("crate-b (0.2.0)"));
+            .stdout(contains("Created changeset"))
+            .stdout(contains("crate-a"))
+            .stdout(contains("crate-b"));
     }
 
     #[test]
-    fn add_with_crate_flag_bypasses_tty_requirement() {
+    fn add_with_crate_bump_flag() {
+        let workspace = create_virtual_workspace();
+
+        assert_cmd::cargo::cargo_bin_cmd!("cargo-changeset")
+            .arg("add")
+            .arg("--crate-bump")
+            .arg("crate-a:major")
+            .arg("-m")
+            .arg("Breaking change")
+            .current_dir(workspace.path())
+            .assert()
+            .success()
+            .stdout(contains("Created changeset"))
+            .stdout(contains("crate-a"))
+            .stdout(contains("Major"));
+    }
+
+    #[test]
+    fn add_with_multiple_crate_bump_flags() {
+        let workspace = create_virtual_workspace();
+
+        assert_cmd::cargo::cargo_bin_cmd!("cargo-changeset")
+            .arg("add")
+            .arg("--crate-bump")
+            .arg("crate-a:major")
+            .arg("--crate-bump")
+            .arg("crate-b:patch")
+            .arg("-m")
+            .arg("Mixed changes")
+            .current_dir(workspace.path())
+            .assert()
+            .success()
+            .stdout(contains("crate-a"))
+            .stdout(contains("Major"))
+            .stdout(contains("crate-b"))
+            .stdout(contains("Patch"));
+    }
+
+    #[test]
+    fn add_mixing_crate_and_crate_bump_flags() {
         let workspace = create_virtual_workspace();
 
         assert_cmd::cargo::cargo_bin_cmd!("cargo-changeset")
             .arg("add")
             .arg("--crate")
-            .arg("crate-a")
+            .arg("crate-b")
+            .arg("--crate-bump")
+            .arg("crate-a:major")
+            .arg("--bump")
+            .arg("minor")
+            .arg("-m")
+            .arg("Mixed")
             .current_dir(workspace.path())
             .assert()
             .success()
-            .stdout(contains("Selected 1 crate"));
+            .stdout(contains("crate-a"))
+            .stdout(contains("Major"))
+            .stdout(contains("crate-b"))
+            .stdout(contains("Minor"));
     }
 
     #[test]
@@ -195,6 +298,10 @@ mod non_interactive {
             .arg("add")
             .arg("--crate")
             .arg("nonexistent")
+            .arg("--bump")
+            .arg("patch")
+            .arg("-m")
+            .arg("test")
             .current_dir(workspace.path())
             .assert()
             .failure()
@@ -204,69 +311,79 @@ mod non_interactive {
     }
 
     #[test]
-    fn add_with_crate_flag_in_single_crate_workspace_succeeds() {
-        let workspace = create_single_crate_workspace();
-
-        assert_cmd::cargo::cargo_bin_cmd!("cargo-changeset")
-            .arg("add")
-            .arg("--crate")
-            .arg("test-crate")
-            .current_dir(workspace.path())
-            .assert()
-            .success()
-            .stdout(contains("Selected 1 crate"))
-            .stdout(contains("test-crate (1.0.0)"));
-    }
-
-    #[test]
-    fn add_with_mix_of_valid_and_invalid_crates_fails_on_first_invalid() {
+    fn add_with_invalid_crate_bump_format_fails() {
         let workspace = create_virtual_workspace();
 
         assert_cmd::cargo::cargo_bin_cmd!("cargo-changeset")
             .arg("add")
-            .arg("--crate")
-            .arg("crate-a")
-            .arg("--crate")
-            .arg("invalid")
-            .arg("--crate")
-            .arg("crate-b")
+            .arg("--crate-bump")
+            .arg("no-colon-here")
+            .arg("-m")
+            .arg("test")
             .current_dir(workspace.path())
             .assert()
             .failure()
-            .stderr(contains("unknown crate 'invalid'"));
+            .stderr(contains("invalid --crate-bump format"));
     }
 
     #[test]
-    fn add_with_crate_flag_in_single_crate_workspace_wrong_name_fails() {
-        let workspace = create_single_crate_workspace();
-
-        assert_cmd::cargo::cargo_bin_cmd!("cargo-changeset")
-            .arg("add")
-            .arg("--crate")
-            .arg("wrong-name")
-            .current_dir(workspace.path())
-            .assert()
-            .failure()
-            .stderr(contains("unknown crate 'wrong-name'"))
-            .stderr(contains("test-crate"));
-    }
-
-    #[test]
-    fn add_with_duplicate_crate_flags_deduplicates() {
+    fn add_with_invalid_bump_type_fails() {
         let workspace = create_virtual_workspace();
 
         assert_cmd::cargo::cargo_bin_cmd!("cargo-changeset")
             .arg("add")
-            .arg("--crate")
-            .arg("crate-a")
-            .arg("--crate")
-            .arg("crate-b")
-            .arg("--crate")
-            .arg("crate-a")
+            .arg("--crate-bump")
+            .arg("crate-a:huge")
+            .arg("-m")
+            .arg("test")
+            .current_dir(workspace.path())
+            .assert()
+            .failure()
+            .stderr(contains("invalid bump type 'huge'"));
+    }
+
+    #[test]
+    fn add_with_empty_message_fails() {
+        let workspace = create_single_crate_workspace();
+
+        assert_cmd::cargo::cargo_bin_cmd!("cargo-changeset")
+            .arg("add")
+            .arg("--bump")
+            .arg("patch")
+            .arg("-m")
+            .arg("   ")
+            .current_dir(workspace.path())
+            .assert()
+            .failure()
+            .stderr(contains("empty"));
+    }
+
+    #[test]
+    fn add_with_category_flag() {
+        let workspace = create_single_crate_workspace();
+
+        assert_cmd::cargo::cargo_bin_cmd!("cargo-changeset")
+            .arg("add")
+            .arg("--bump")
+            .arg("patch")
+            .arg("-c")
+            .arg("fixed")
+            .arg("-m")
+            .arg("Fixed a bug")
             .current_dir(workspace.path())
             .assert()
             .success()
-            .stdout(contains("Selected 2 crate"));
+            .stdout(contains("Category: Fixed"));
+
+        let changeset_dir = workspace.path().join(".changeset");
+        let files: Vec<_> = fs::read_dir(&changeset_dir)
+            .expect("read dir")
+            .filter_map(|e| e.ok())
+            .filter(|e| e.path().extension().is_some_and(|ext| ext == "md"))
+            .collect();
+
+        let content = fs::read_to_string(files[0].path()).expect("read file");
+        assert!(content.contains("category: fixed"));
     }
 
     #[test]
@@ -277,6 +394,10 @@ mod non_interactive {
             .arg("add")
             .arg("--crate")
             .arg("Crate-A")
+            .arg("--bump")
+            .arg("patch")
+            .arg("-m")
+            .arg("test")
             .current_dir(workspace.path())
             .assert()
             .failure()
@@ -291,19 +412,65 @@ mod non_interactive {
             .arg("add")
             .arg("--crate")
             .arg("crate-one")
+            .arg("--bump")
+            .arg("patch")
+            .arg("-m")
+            .arg("test")
             .current_dir(workspace.path())
             .assert()
             .failure()
             .stderr(contains("unknown crate 'crate-one'"))
             .stderr(contains("crate_one"));
     }
+
+    #[test]
+    fn add_generates_unique_filenames() {
+        let workspace = create_single_crate_workspace();
+
+        for i in 0..3 {
+            assert_cmd::cargo::cargo_bin_cmd!("cargo-changeset")
+                .arg("add")
+                .arg("--bump")
+                .arg("patch")
+                .arg("-m")
+                .arg(format!("Change {i}"))
+                .current_dir(workspace.path())
+                .assert()
+                .success();
+        }
+
+        let changeset_dir = workspace.path().join(".changeset");
+        let files: Vec<_> = fs::read_dir(&changeset_dir)
+            .expect("read dir")
+            .filter_map(|e| e.ok())
+            .filter(|e| e.path().extension().is_some_and(|ext| ext == "md"))
+            .collect();
+
+        assert_eq!(files.len(), 3, "should have three unique changeset files");
+    }
+
+    #[test]
+    fn add_with_stdin_message() {
+        let workspace = create_single_crate_workspace();
+
+        assert_cmd::cargo::cargo_bin_cmd!("cargo-changeset")
+            .arg("add")
+            .arg("--bump")
+            .arg("patch")
+            .arg("-m")
+            .arg("-")
+            .write_stdin("Message from stdin")
+            .current_dir(workspace.path())
+            .assert()
+            .success()
+            .stdout(contains("Message from stdin"));
+    }
 }
 
-// Interactive tests are skipped on Windows because the console crate's TTY detection
-// (GetConsoleMode) doesn't work properly with ConPTY in GitHub Actions CI.
-// See: https://github.com/lukidoescode/cargo-changeset/issues/23
 #[cfg(not(windows))]
 mod interactive {
+    use std::os::unix::fs::PermissionsExt;
+
     use expectrl::Expect;
     use expectrl::session::OsSession;
 
@@ -322,6 +489,36 @@ mod interactive {
         session
     }
 
+    fn spawn_add_with_editor(workspace: &TempDir, editor_path: &std::path::Path) -> OsSession {
+        let bin_path = assert_cmd::cargo::cargo_bin!("cargo-changeset");
+
+        let mut cmd = Command::new(bin_path);
+        cmd.arg("add");
+        cmd.arg("--editor");
+        cmd.current_dir(workspace.path());
+        cmd.env("CARGO_CHANGESET_FORCE_TTY", "1");
+        cmd.env("EDITOR", editor_path);
+
+        let mut session = OsSession::spawn(cmd).expect("failed to spawn session");
+        session.set_expect_timeout(Some(Duration::from_secs(30)));
+        session
+    }
+
+    fn create_mock_editor(workspace: &TempDir, content: &str) -> std::path::PathBuf {
+        let script_path = workspace.path().join("mock_editor.sh");
+        let script_content = format!(
+            r#"#!/bin/sh
+cat > "$1" << 'MOCK_EDITOR_EOF'
+{content}
+MOCK_EDITOR_EOF
+"#
+        );
+        fs::write(&script_path, script_content).expect("write mock editor");
+        fs::set_permissions(&script_path, std::fs::Permissions::from_mode(0o755))
+            .expect("make executable");
+        script_path
+    }
+
     #[test]
     fn interactive_selection_shows_prompt() {
         let workspace = create_virtual_workspace();
@@ -337,21 +534,6 @@ mod interactive {
         let mut session = spawn_add_in_workspace(&workspace);
 
         session.expect("crate-a").expect("Expected to see crate-a");
-    }
-
-    #[test]
-    fn interactive_select_and_confirm() {
-        let workspace = create_virtual_workspace();
-        let mut session = spawn_add_in_workspace(&workspace);
-
-        session.expect("Select crates").expect("Expected prompt");
-
-        session.send(" ").expect("failed to send space");
-        session.send("\n").expect("failed to send enter");
-
-        session
-            .expect("Selected")
-            .expect("Expected to see selection confirmation");
     }
 
     #[test]
@@ -380,6 +562,209 @@ mod interactive {
         assert!(
             wait_result.is_ok(),
             "Process should exit cleanly after cancellation"
+        );
+    }
+
+    #[test]
+    fn interactive_select_crate_and_bump_type() {
+        let workspace = create_virtual_workspace();
+        let mut session = spawn_add_in_workspace(&workspace);
+
+        session
+            .expect("Select crates")
+            .expect("Expected crate selection prompt");
+        session.send(" ").expect("failed to select first crate");
+        session.send("\n").expect("failed to confirm selection");
+
+        session
+            .expect("bump type")
+            .expect("Expected bump type prompt");
+        session.send("\n").expect("failed to select bump type");
+
+        session
+            .expect("category")
+            .expect("Expected category prompt");
+    }
+
+    #[test]
+    fn interactive_full_flow_single_crate() {
+        let workspace = create_single_crate_workspace();
+        let mut session = spawn_add_in_workspace(&workspace);
+
+        session
+            .expect("Using crate: test-crate")
+            .expect("Expected single crate auto-selection");
+
+        session
+            .expect("bump type")
+            .expect("Expected bump type prompt");
+        session.send("\n").expect("failed to select bump type");
+
+        session
+            .expect("category")
+            .expect("Expected category prompt");
+        session.send("\n").expect("failed to select category");
+
+        session
+            .expect("description")
+            .expect("Expected description prompt");
+
+        session
+            .send_line("Test description line 1")
+            .expect("failed to send line 1");
+        session
+            .send_line("Test description line 2")
+            .expect("failed to send line 2");
+        session.send_line("").expect("failed to send empty line 1");
+        session.send_line("").expect("failed to send empty line 2");
+
+        session
+            .expect("Created changeset")
+            .expect("Expected success message");
+
+        let wait_result = session.expect(expectrl::Eof);
+        assert!(wait_result.is_ok(), "Process should exit cleanly");
+
+        let changeset_dir = workspace.path().join(".changeset");
+        assert!(changeset_dir.exists(), ".changeset directory should exist");
+
+        let files: Vec<_> = fs::read_dir(&changeset_dir)
+            .expect("read dir")
+            .filter_map(|e| e.ok())
+            .filter(|e| e.path().extension().is_some_and(|ext| ext == "md"))
+            .collect();
+        assert_eq!(files.len(), 1, "should have one changeset file");
+
+        let content = fs::read_to_string(files[0].path()).expect("read file");
+        assert!(content.contains("test-crate"));
+        assert!(content.contains("patch"));
+        assert!(content.contains("Test description line 1"));
+        assert!(content.contains("Test description line 2"));
+    }
+
+    #[test]
+    fn interactive_full_flow_multi_crate() {
+        let workspace = create_virtual_workspace();
+        let mut session = spawn_add_in_workspace(&workspace);
+
+        session
+            .expect("Select crates")
+            .expect("Expected crate selection prompt");
+        session.send(" ").expect("failed to select first crate");
+        session.send("\n").expect("failed to confirm selection");
+
+        session
+            .expect("bump type")
+            .expect("Expected bump type prompt");
+        session.send("\n").expect("failed to select bump type");
+
+        session
+            .expect("category")
+            .expect("Expected category prompt");
+        session.send("\n").expect("failed to select category");
+
+        session
+            .expect("description")
+            .expect("Expected description prompt");
+
+        session
+            .send_line("Multi-crate changeset")
+            .expect("failed to send description");
+        session.send_line("").expect("failed to send empty line 1");
+        session.send_line("").expect("failed to send empty line 2");
+
+        session
+            .expect("Created changeset")
+            .expect("Expected success message");
+
+        let wait_result = session.expect(expectrl::Eof);
+        assert!(wait_result.is_ok(), "Process should exit cleanly");
+    }
+
+    #[test]
+    fn interactive_with_editor_flag() {
+        let workspace = create_single_crate_workspace();
+        let editor = create_mock_editor(&workspace, "Description from mock editor");
+
+        let mut session = spawn_add_with_editor(&workspace, &editor);
+
+        session
+            .expect("Using crate: test-crate")
+            .expect("Expected single crate auto-selection");
+
+        session
+            .expect("bump type")
+            .expect("Expected bump type prompt");
+        session.send("\n").expect("failed to select bump type");
+
+        session
+            .expect("category")
+            .expect("Expected category prompt");
+        session.send("\n").expect("failed to select category");
+
+        session
+            .expect("Created changeset")
+            .expect("Expected success message");
+
+        let wait_result = session.expect(expectrl::Eof);
+        assert!(wait_result.is_ok(), "Process should exit cleanly");
+
+        let changeset_dir = workspace.path().join(".changeset");
+        let files: Vec<_> = fs::read_dir(&changeset_dir)
+            .expect("read dir")
+            .filter_map(|e| e.ok())
+            .filter(|e| e.path().extension().is_some_and(|ext| ext == "md"))
+            .collect();
+
+        let content = fs::read_to_string(files[0].path()).expect("read file");
+        assert!(
+            content.contains("Description from mock editor"),
+            "File should contain editor content: {content}"
+        );
+    }
+
+    #[test]
+    fn interactive_editor_filters_comments() {
+        let workspace = create_single_crate_workspace();
+        let editor = create_mock_editor(
+            &workspace,
+            "# This is a comment\nActual description\n# Another comment",
+        );
+
+        let mut session = spawn_add_with_editor(&workspace, &editor);
+
+        session
+            .expect("Using crate: test-crate")
+            .expect("Expected single crate auto-selection");
+
+        session
+            .expect("bump type")
+            .expect("Expected bump type prompt");
+        session.send("\n").expect("failed to select bump type");
+
+        session
+            .expect("category")
+            .expect("Expected category prompt");
+        session.send("\n").expect("failed to select category");
+
+        session
+            .expect("Created changeset")
+            .expect("Expected success message");
+
+        session.expect(expectrl::Eof).ok();
+
+        let changeset_dir = workspace.path().join(".changeset");
+        let files: Vec<_> = fs::read_dir(&changeset_dir)
+            .expect("read dir")
+            .filter_map(|e| e.ok())
+            .filter(|e| e.path().extension().is_some_and(|ext| ext == "md"))
+            .collect();
+
+        let content = fs::read_to_string(files[0].path()).expect("read file");
+        assert!(content.contains("Actual description"));
+        assert!(
+            !content.contains("# This is a comment"),
+            "Comments should be filtered"
         );
     }
 }

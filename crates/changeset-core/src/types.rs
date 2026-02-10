@@ -1,9 +1,10 @@
 use std::fmt;
 
+use clap::ValueEnum;
 use semver::Version;
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ValueEnum)]
 #[serde(rename_all = "lowercase")]
 pub enum BumpType {
     Major,
@@ -12,7 +13,18 @@ pub enum BumpType {
 }
 
 #[derive(
-    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, Default,
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
+    Serialize,
+    Deserialize,
+    Default,
+    ValueEnum,
 )]
 #[serde(rename_all = "lowercase")]
 pub enum ChangeCategory {

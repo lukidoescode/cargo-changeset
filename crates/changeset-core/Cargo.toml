@@ -9,6 +9,7 @@ authors.workspace = true
 description = "Core types and traits for cargo-changeset"
 
 [dependencies]
+clap = { workspace = true }
 serde = { workspace = true }
 semver = { workspace = true }
 thiserror = { workspace = true }
