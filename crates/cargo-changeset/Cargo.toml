@@ -21,6 +21,8 @@ changeset-workspace = { workspace = true }
 clap = { workspace = true }
 dialoguer = { workspace = true }
 indexmap = { workspace = true }
+petname = { workspace = true }
+tempfile = "3.25"
 thiserror = { workspace = true }
 
 [dev-dependencies]
