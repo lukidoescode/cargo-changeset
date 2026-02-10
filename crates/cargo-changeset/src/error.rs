@@ -1,3 +1,5 @@
+use std::path::PathBuf;
+
 use thiserror::Error;
 
 #[derive(Debug, Error)]
@@ -7,6 +9,112 @@ pub enum CliError {
 
     #[error(transparent)]
     Git(#[from] changeset_git::GitError),
+
+    #[error("workspace error")]
+    Workspace(#[from] changeset_workspace::WorkspaceError),
+
+    #[error("IO error")]
+    Io(#[from] std::io::Error),
+
+    #[error("operation cancelled by user")]
+    Cancelled,
+
+    #[error("no packages found in workspace at '{0}'")]
+    EmptyWorkspace(PathBuf),
+
+    #[error("interactive mode requires a terminal")]
+    NotATty,
+
+    #[error("internal error: single-crate workspace has no packages")]
+    WorkspaceInvariantViolation,
+
+    #[error("unknown crate '{name}' (available: {available})")]
+    UnknownCrate { name: String, available: String },
 }
 
 pub type Result<T> = std::result::Result<T, CliError>;
+
+#[cfg(test)]
+mod tests {
+    use std::path::PathBuf;
+
+    use super::CliError;
+
+    #[test]
+    fn empty_workspace_error_includes_path() {
+        let err = CliError::EmptyWorkspace(PathBuf::from("/my/workspace"));
+
+        let msg = err.to_string();
+
+        assert!(msg.contains("/my/workspace"));
+    }
+
+    #[test]
+    fn io_error_converts_via_from() {
+        let io_err = std::io::Error::new(std::io::ErrorKind::NotFound, "test");
+
+        let cli_err: CliError = io_err.into();
+
+        assert!(matches!(cli_err, CliError::Io(_)));
+    }
+
+    #[test]
+    fn workspace_error_converts_via_from() {
+        let workspace_err = changeset_workspace::WorkspaceError::NotFound {
+            start_dir: PathBuf::from("/test"),
+        };
+
+        let cli_err: CliError = workspace_err.into();
+
+        assert!(matches!(cli_err, CliError::Workspace(_)));
+    }
+
+    #[test]
+    fn workspace_error_has_source_chain() {
+        let workspace_err = changeset_workspace::WorkspaceError::NotFound {
+            start_dir: PathBuf::from("/test"),
+        };
+        let cli_err: CliError = workspace_err.into();
+
+        let source = std::error::Error::source(&cli_err);
+
+        assert!(source.is_some());
+    }
+
+    #[test]
+    fn not_a_tty_error_message() {
+        let err = CliError::NotATty;
+
+        assert!(err.to_string().contains("terminal"));
+    }
+
+    #[test]
+    fn cancelled_error_message() {
+        let err = CliError::Cancelled;
+
+        assert!(err.to_string().contains("cancelled"));
+    }
+
+    #[test]
+    fn workspace_invariant_violation_message() {
+        let err = CliError::WorkspaceInvariantViolation;
+
+        let msg = err.to_string();
+
+        assert!(msg.contains("internal error"));
+        assert!(msg.contains("single-crate"));
+    }
+
+    #[test]
+    fn unknown_crate_error_includes_name_and_available() {
+        let err = CliError::UnknownCrate {
+            name: "missing".to_string(),
+            available: "foo, bar".to_string(),
+        };
+
+        let msg = err.to_string();
+
+        assert!(msg.contains("missing"));
+        assert!(msg.contains("foo, bar"));
+    }
+}
