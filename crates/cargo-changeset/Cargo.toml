@@ -17,5 +17,14 @@ changeset-core = { workspace = true }
 changeset-parse = { workspace = true }
 changeset-git = { workspace = true }
 changeset-version = { workspace = true }
+changeset-workspace = { workspace = true }
 clap = { workspace = true }
-anyhow = { workspace = true }
+dialoguer = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+assert_cmd = "2.1"
+predicates = "3.1"
+expectrl = "0.8"
+tempfile = "3.25"
+semver = { workspace = true }

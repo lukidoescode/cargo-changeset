@@ -1,4 +1,12 @@
-use clap::{Parser, Subcommand};
+mod commands;
+mod error;
+
+use std::process::ExitCode;
+
+use clap::Parser;
+
+use crate::commands::Commands;
+use crate::error::CliError;
 
 #[derive(Parser)]
 #[command(name = "cargo-changeset")]
@@ -9,35 +17,25 @@ struct Cli {
     command: Commands,
 }
 
-#[derive(Subcommand)]
-enum Commands {
-    /// Add a new changeset
-    Add,
-    /// Show status of changesets
-    Status,
-    /// Bump versions based on changesets
-    Version,
-    /// Initialize changeset configuration
-    Init,
+fn main() -> ExitCode {
+    if let Err(e) = run() {
+        print_error(&e);
+        return ExitCode::FAILURE;
+    }
+    ExitCode::SUCCESS
 }
 
-fn main() -> anyhow::Result<()> {
+fn run() -> error::Result<()> {
     let cli = Cli::parse();
+    cli.command.execute()
+}
 
-    match cli.command {
-        Commands::Add => {
-            println!("Add command not yet implemented");
-        }
-        Commands::Status => {
-            println!("Status command not yet implemented");
-        }
-        Commands::Version => {
-            println!("Version command not yet implemented");
-        }
-        Commands::Init => {
-            println!("Init command not yet implemented");
-        }
+fn print_error(error: &CliError) {
+    eprintln!("error: {error}");
+
+    let mut source = std::error::Error::source(error);
+    while let Some(cause) = source {
+        eprintln!("caused by: {cause}");
+        source = std::error::Error::source(cause);
     }
-
-    Ok(())
 }
