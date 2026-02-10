@@ -6,7 +6,7 @@ use tempfile::TempDir;
 
 fn init_git_repo(dir: &TempDir) {
     Command::new("git")
-        .args(["init"])
+        .args(["init", "--initial-branch=main"])
         .current_dir(dir.path())
         .output()
         .expect("failed to init git repo");
