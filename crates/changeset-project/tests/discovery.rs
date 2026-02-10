@@ -1,14 +1,12 @@
 use std::path::PathBuf;
 
-use changeset_workspace::{
-    WorkspaceError, WorkspaceKind, discover_workspace, discover_workspace_from_cwd,
-};
+use changeset_project::{ProjectError, ProjectKind, discover_project, discover_project_from_cwd};
 
 fn fixtures_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures")
 }
 
-fn create_temp_single_crate() -> tempfile::TempDir {
+fn create_temp_single_package() -> tempfile::TempDir {
     let temp_dir = tempfile::tempdir().expect("create temp dir");
     std::fs::write(
         temp_dir.path().join("Cargo.toml"),
@@ -24,49 +22,49 @@ version = "3.0.0"
 #[test]
 fn discovers_virtual_workspace_from_root() {
     let fixture = fixtures_dir().join("virtual_workspace");
-    let workspace = discover_workspace(&fixture).expect("should discover workspace");
+    let project = discover_project(&fixture).expect("should discover project");
 
-    assert_eq!(workspace.kind, WorkspaceKind::Virtual);
-    assert_eq!(workspace.root, fixture.canonicalize().expect("path exists"));
-    assert_eq!(workspace.packages.len(), 2);
+    assert_eq!(project.kind, ProjectKind::VirtualWorkspace);
+    assert_eq!(project.root, fixture.canonicalize().expect("path exists"));
+    assert_eq!(project.packages.len(), 2);
 
-    let names: Vec<_> = workspace.packages.iter().map(|p| p.name.as_str()).collect();
+    let names: Vec<_> = project.packages.iter().map(|p| p.name.as_str()).collect();
     assert!(names.contains(&"crate-a"));
     assert!(names.contains(&"crate-b"));
 }
 
 #[test]
-fn discovers_workspace_from_nested_member() {
+fn discovers_project_from_nested_member() {
     let fixture = fixtures_dir().join("virtual_workspace/crates/crate_a");
-    let workspace = discover_workspace(&fixture).expect("should discover workspace");
+    let project = discover_project(&fixture).expect("should discover project");
 
-    assert_eq!(workspace.kind, WorkspaceKind::Virtual);
+    assert_eq!(project.kind, ProjectKind::VirtualWorkspace);
     assert_eq!(
-        workspace.root,
+        project.root,
         fixtures_dir()
             .join("virtual_workspace")
             .canonicalize()
             .expect("path exists")
     );
-    assert_eq!(workspace.packages.len(), 2);
+    assert_eq!(project.packages.len(), 2);
 }
 
 #[test]
-fn discovers_root_package_workspace() {
+fn discovers_workspace_with_root_package() {
     let fixture = fixtures_dir().join("root_package_workspace");
-    let workspace = discover_workspace(&fixture).expect("should discover workspace");
+    let project = discover_project(&fixture).expect("should discover project");
 
-    assert_eq!(workspace.kind, WorkspaceKind::RootPackage);
-    assert_eq!(workspace.packages.len(), 2);
+    assert_eq!(project.kind, ProjectKind::WorkspaceWithRoot);
+    assert_eq!(project.packages.len(), 2);
 
-    let root_pkg = workspace
+    let root_pkg = project
         .packages
         .iter()
         .find(|p| p.name == "root-pkg")
         .expect("should have root package");
     assert_eq!(root_pkg.version.to_string(), "0.1.0");
 
-    let member = workspace
+    let member = project
         .packages
         .iter()
         .find(|p| p.name == "member")
@@ -75,24 +73,24 @@ fn discovers_root_package_workspace() {
 }
 
 #[test]
-fn discovers_single_crate() {
-    let temp_dir = create_temp_single_crate();
-    let workspace = discover_workspace(temp_dir.path()).expect("should discover workspace");
+fn discovers_single_package() {
+    let temp_dir = create_temp_single_package();
+    let project = discover_project(temp_dir.path()).expect("should discover project");
 
-    assert_eq!(workspace.kind, WorkspaceKind::SingleCrate);
-    assert_eq!(workspace.packages.len(), 1);
-    assert_eq!(workspace.packages[0].name, "single");
-    assert_eq!(workspace.packages[0].version.to_string(), "3.0.0");
+    assert_eq!(project.kind, ProjectKind::SinglePackage);
+    assert_eq!(project.packages.len(), 1);
+    assert_eq!(project.packages[0].name, "single");
+    assert_eq!(project.packages[0].version.to_string(), "3.0.0");
 }
 
 #[test]
 fn discovers_from_deeply_nested_path() {
     let fixture = fixtures_dir().join("nested/packages/inner");
-    let workspace = discover_workspace(&fixture).expect("should discover workspace");
+    let project = discover_project(&fixture).expect("should discover project");
 
-    assert_eq!(workspace.kind, WorkspaceKind::Virtual);
+    assert_eq!(project.kind, ProjectKind::VirtualWorkspace);
     assert_eq!(
-        workspace.root,
+        project.root,
         fixtures_dir()
             .join("nested")
             .canonicalize()
@@ -103,16 +101,16 @@ fn discovers_from_deeply_nested_path() {
 #[test]
 fn version_inheritance_works() {
     let fixture = fixtures_dir().join("virtual_workspace");
-    let workspace = discover_workspace(&fixture).expect("should discover workspace");
+    let project = discover_project(&fixture).expect("should discover project");
 
-    let crate_a = workspace
+    let crate_a = project
         .packages
         .iter()
         .find(|p| p.name == "crate-a")
         .expect("should have crate-a");
     assert_eq!(crate_a.version.to_string(), "1.0.0");
 
-    let crate_b = workspace
+    let crate_b = project
         .packages
         .iter()
         .find(|p| p.name == "crate-b")
@@ -122,21 +120,21 @@ fn version_inheritance_works() {
 
 #[test]
 fn not_found_error_for_nonexistent_path() {
-    let result = discover_workspace(&PathBuf::from("/nonexistent/path"));
+    let result = discover_project(&PathBuf::from("/nonexistent/path"));
     assert!(result.is_err());
 }
 
 #[test]
 fn ensure_changeset_dir_creates_directory() {
-    let temp_dir = create_temp_single_crate();
-    let workspace = discover_workspace(temp_dir.path()).expect("should discover workspace");
+    let temp_dir = create_temp_single_package();
+    let project = discover_project(temp_dir.path()).expect("should discover project");
 
     let changeset_dir =
-        changeset_workspace::ensure_changeset_dir(&workspace).expect("should create dir");
+        changeset_project::ensure_changeset_dir(&project).expect("should create dir");
 
     assert!(changeset_dir.exists());
     assert!(changeset_dir.is_dir());
-    assert_eq!(changeset_dir, workspace.root.join(".changeset"));
+    assert_eq!(changeset_dir, project.root.join(".changeset"));
 }
 
 #[test]
@@ -148,8 +146,8 @@ fn malformed_toml_returns_manifest_parse_error() {
     )
     .expect("write cargo toml");
 
-    let result = discover_workspace(temp_dir.path());
-    assert!(matches!(result, Err(WorkspaceError::ManifestParse { .. })));
+    let result = discover_project(temp_dir.path());
+    assert!(matches!(result, Err(ProjectError::ManifestParse { .. })));
 }
 
 #[test]
@@ -163,10 +161,10 @@ name = "no-version"
     )
     .expect("write cargo toml");
 
-    let result = discover_workspace(temp_dir.path());
+    let result = discover_project(temp_dir.path());
     assert!(matches!(
         result,
-        Err(WorkspaceError::MissingField {
+        Err(ProjectError::MissingField {
             field: "package.version",
             ..
         })
@@ -185,9 +183,9 @@ version = "not.a.version"
     )
     .expect("write cargo toml");
 
-    let result = discover_workspace(temp_dir.path());
+    let result = discover_project(temp_dir.path());
     assert!(
-        matches!(result, Err(WorkspaceError::InvalidVersion { version, .. }) if version == "not.a.version")
+        matches!(result, Err(ProjectError::InvalidVersion { version, .. }) if version == "not.a.version")
     );
 }
 
@@ -202,39 +200,39 @@ members = ["[invalid"]
     )
     .expect("write cargo toml");
 
-    let result = discover_workspace(temp_dir.path());
+    let result = discover_project(temp_dir.path());
     assert!(
-        matches!(result, Err(WorkspaceError::GlobPattern { pattern, .. }) if pattern == "[invalid")
+        matches!(result, Err(ProjectError::GlobPattern { pattern, .. }) if pattern == "[invalid")
     );
 }
 
 #[test]
 fn workspace_exclude_patterns_work() {
     let fixture = fixtures_dir().join("workspace_with_exclude");
-    let workspace = discover_workspace(&fixture).expect("should discover workspace");
+    let project = discover_project(&fixture).expect("should discover project");
 
-    assert_eq!(workspace.kind, WorkspaceKind::Virtual);
-    assert_eq!(workspace.packages.len(), 1);
+    assert_eq!(project.kind, ProjectKind::VirtualWorkspace);
+    assert_eq!(project.packages.len(), 1);
 
-    let names: Vec<_> = workspace.packages.iter().map(|p| p.name.as_str()).collect();
+    let names: Vec<_> = project.packages.iter().map(|p| p.name.as_str()).collect();
     assert!(names.contains(&"included"));
     assert!(!names.contains(&"excluded"));
 }
 
 #[test]
 fn ensure_changeset_dir_is_idempotent() {
-    let temp_dir = create_temp_single_crate();
-    let workspace = discover_workspace(temp_dir.path()).expect("should discover workspace");
+    let temp_dir = create_temp_single_package();
+    let project = discover_project(temp_dir.path()).expect("should discover project");
 
-    let first = changeset_workspace::ensure_changeset_dir(&workspace).expect("first call");
-    let second = changeset_workspace::ensure_changeset_dir(&workspace).expect("second call");
+    let first = changeset_project::ensure_changeset_dir(&project).expect("first call");
+    let second = changeset_project::ensure_changeset_dir(&project).expect("second call");
 
     assert_eq!(first, second);
     assert!(first.exists());
 }
 
 #[test]
-fn discover_workspace_from_cwd_works() {
-    let result = discover_workspace_from_cwd();
+fn discover_project_from_cwd_works() {
+    let result = discover_project_from_cwd();
     assert!(result.is_ok());
 }

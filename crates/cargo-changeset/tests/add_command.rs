@@ -154,7 +154,7 @@ mod non_interactive {
             .current_dir(workspace.path())
             .assert()
             .success()
-            .stdout(contains("Using crate: test-crate"))
+            .stdout(contains("Using package: test-crate"))
             .stdout(contains("Created changeset"))
             .stdout(contains("Fixed a bug"));
 
@@ -184,16 +184,16 @@ mod non_interactive {
             .current_dir(dir.path())
             .assert()
             .failure()
-            .stderr(contains("workspace error"));
+            .stderr(contains("project error"));
     }
 
     #[test]
-    fn add_with_single_crate_flag_and_bump_selects_specified_crate() {
+    fn add_with_single_package_flag_and_bump_selects_specified_package() {
         let workspace = create_virtual_workspace();
 
         assert_cmd::cargo::cargo_bin_cmd!("cargo-changeset")
             .arg("add")
-            .arg("--crate")
+            .arg("--package")
             .arg("crate-a")
             .arg("--bump")
             .arg("minor")
@@ -207,19 +207,19 @@ mod non_interactive {
     }
 
     #[test]
-    fn add_with_multiple_crate_flags_and_bump_selects_all_specified_crates() {
+    fn add_with_multiple_package_flags_and_bump_selects_all_specified_packages() {
         let workspace = create_virtual_workspace();
 
         assert_cmd::cargo::cargo_bin_cmd!("cargo-changeset")
             .arg("add")
-            .arg("--crate")
+            .arg("--package")
             .arg("crate-a")
-            .arg("--crate")
+            .arg("--package")
             .arg("crate-b")
             .arg("--bump")
             .arg("patch")
             .arg("-m")
-            .arg("Multiple crates")
+            .arg("Multiple packages")
             .current_dir(workspace.path())
             .assert()
             .success()
@@ -229,12 +229,12 @@ mod non_interactive {
     }
 
     #[test]
-    fn add_with_crate_bump_flag() {
+    fn add_with_package_bump_flag() {
         let workspace = create_virtual_workspace();
 
         assert_cmd::cargo::cargo_bin_cmd!("cargo-changeset")
             .arg("add")
-            .arg("--crate-bump")
+            .arg("--package-bump")
             .arg("crate-a:major")
             .arg("-m")
             .arg("Breaking change")
@@ -247,14 +247,14 @@ mod non_interactive {
     }
 
     #[test]
-    fn add_with_multiple_crate_bump_flags() {
+    fn add_with_multiple_package_bump_flags() {
         let workspace = create_virtual_workspace();
 
         assert_cmd::cargo::cargo_bin_cmd!("cargo-changeset")
             .arg("add")
-            .arg("--crate-bump")
+            .arg("--package-bump")
             .arg("crate-a:major")
-            .arg("--crate-bump")
+            .arg("--package-bump")
             .arg("crate-b:patch")
             .arg("-m")
             .arg("Mixed changes")
@@ -268,14 +268,14 @@ mod non_interactive {
     }
 
     #[test]
-    fn add_mixing_crate_and_crate_bump_flags() {
+    fn add_mixing_package_and_package_bump_flags() {
         let workspace = create_virtual_workspace();
 
         assert_cmd::cargo::cargo_bin_cmd!("cargo-changeset")
             .arg("add")
-            .arg("--crate")
+            .arg("--package")
             .arg("crate-b")
-            .arg("--crate-bump")
+            .arg("--package-bump")
             .arg("crate-a:major")
             .arg("--bump")
             .arg("minor")
@@ -291,12 +291,12 @@ mod non_interactive {
     }
 
     #[test]
-    fn add_with_unknown_crate_fails_with_helpful_error() {
+    fn add_with_unknown_package_fails_with_helpful_error() {
         let workspace = create_virtual_workspace();
 
         assert_cmd::cargo::cargo_bin_cmd!("cargo-changeset")
             .arg("add")
-            .arg("--crate")
+            .arg("--package")
             .arg("nonexistent")
             .arg("--bump")
             .arg("patch")
@@ -305,25 +305,25 @@ mod non_interactive {
             .current_dir(workspace.path())
             .assert()
             .failure()
-            .stderr(contains("unknown crate 'nonexistent'"))
+            .stderr(contains("unknown package 'nonexistent'"))
             .stderr(contains("crate-a"))
             .stderr(contains("crate-b"));
     }
 
     #[test]
-    fn add_with_invalid_crate_bump_format_fails() {
+    fn add_with_invalid_package_bump_format_fails() {
         let workspace = create_virtual_workspace();
 
         assert_cmd::cargo::cargo_bin_cmd!("cargo-changeset")
             .arg("add")
-            .arg("--crate-bump")
+            .arg("--package-bump")
             .arg("no-colon-here")
             .arg("-m")
             .arg("test")
             .current_dir(workspace.path())
             .assert()
             .failure()
-            .stderr(contains("invalid --crate-bump format"));
+            .stderr(contains("invalid --package-bump format"));
     }
 
     #[test]
@@ -332,7 +332,7 @@ mod non_interactive {
 
         assert_cmd::cargo::cargo_bin_cmd!("cargo-changeset")
             .arg("add")
-            .arg("--crate-bump")
+            .arg("--package-bump")
             .arg("crate-a:huge")
             .arg("-m")
             .arg("test")
@@ -387,12 +387,12 @@ mod non_interactive {
     }
 
     #[test]
-    fn add_with_crate_flag_case_sensitivity() {
+    fn add_with_package_flag_case_sensitivity() {
         let workspace = create_virtual_workspace();
 
         assert_cmd::cargo::cargo_bin_cmd!("cargo-changeset")
             .arg("add")
-            .arg("--crate")
+            .arg("--package")
             .arg("Crate-A")
             .arg("--bump")
             .arg("patch")
@@ -401,16 +401,16 @@ mod non_interactive {
             .current_dir(workspace.path())
             .assert()
             .failure()
-            .stderr(contains("unknown crate 'Crate-A'"));
+            .stderr(contains("unknown package 'Crate-A'"));
     }
 
     #[test]
-    fn add_with_crate_flag_hyphen_underscore_distinction() {
+    fn add_with_package_flag_hyphen_underscore_distinction() {
         let workspace = create_workspace_with_underscored_crate();
 
         assert_cmd::cargo::cargo_bin_cmd!("cargo-changeset")
             .arg("add")
-            .arg("--crate")
+            .arg("--package")
             .arg("crate-one")
             .arg("--bump")
             .arg("patch")
@@ -419,7 +419,7 @@ mod non_interactive {
             .current_dir(workspace.path())
             .assert()
             .failure()
-            .stderr(contains("unknown crate 'crate-one'"))
+            .stderr(contains("unknown package 'crate-one'"))
             .stderr(contains("crate_one"));
     }
 
@@ -524,8 +524,8 @@ MOCK_EDITOR_EOF
         let workspace = create_virtual_workspace();
         let mut session = spawn_add_in_workspace(&workspace);
 
-        let result = session.expect("Select crates");
-        assert!(result.is_ok(), "Expected to see 'Select crates' prompt");
+        let result = session.expect("Select packages");
+        assert!(result.is_ok(), "Expected to see 'Select packages' prompt");
     }
 
     #[test]
@@ -541,7 +541,7 @@ MOCK_EDITOR_EOF
         let workspace = create_virtual_workspace();
         let mut session = spawn_add_in_workspace(&workspace);
 
-        session.expect("Select crates").expect("Expected prompt");
+        session.expect("Select packages").expect("Expected prompt");
 
         session.send("\n").expect("failed to send enter");
 
@@ -554,7 +554,7 @@ MOCK_EDITOR_EOF
         let workspace = create_virtual_workspace();
         let mut session = spawn_add_in_workspace(&workspace);
 
-        session.expect("Select crates").expect("Expected prompt");
+        session.expect("Select packages").expect("Expected prompt");
 
         session.send("\x1b").expect("failed to send escape");
 
@@ -566,14 +566,14 @@ MOCK_EDITOR_EOF
     }
 
     #[test]
-    fn interactive_select_crate_and_bump_type() {
+    fn interactive_select_package_and_bump_type() {
         let workspace = create_virtual_workspace();
         let mut session = spawn_add_in_workspace(&workspace);
 
         session
-            .expect("Select crates")
-            .expect("Expected crate selection prompt");
-        session.send(" ").expect("failed to select first crate");
+            .expect("Select packages")
+            .expect("Expected package selection prompt");
+        session.send(" ").expect("failed to select first package");
         session.send("\n").expect("failed to confirm selection");
 
         session
@@ -587,13 +587,13 @@ MOCK_EDITOR_EOF
     }
 
     #[test]
-    fn interactive_full_flow_single_crate() {
+    fn interactive_full_flow_single_package() {
         let workspace = create_single_crate_workspace();
         let mut session = spawn_add_in_workspace(&workspace);
 
         session
-            .expect("Using crate: test-crate")
-            .expect("Expected single crate auto-selection");
+            .expect("Using package: test-crate")
+            .expect("Expected single package auto-selection");
 
         session
             .expect("bump type")
@@ -643,14 +643,14 @@ MOCK_EDITOR_EOF
     }
 
     #[test]
-    fn interactive_full_flow_multi_crate() {
+    fn interactive_full_flow_multi_package() {
         let workspace = create_virtual_workspace();
         let mut session = spawn_add_in_workspace(&workspace);
 
         session
-            .expect("Select crates")
-            .expect("Expected crate selection prompt");
-        session.send(" ").expect("failed to select first crate");
+            .expect("Select packages")
+            .expect("Expected package selection prompt");
+        session.send(" ").expect("failed to select first package");
         session.send("\n").expect("failed to confirm selection");
 
         session
@@ -668,7 +668,7 @@ MOCK_EDITOR_EOF
             .expect("Expected description prompt");
 
         session
-            .send_line("Multi-crate changeset")
+            .send_line("Multi-package changeset")
             .expect("failed to send description");
         session.send_line("").expect("failed to send empty line 1");
         session.send_line("").expect("failed to send empty line 2");
@@ -689,8 +689,8 @@ MOCK_EDITOR_EOF
         let mut session = spawn_add_with_editor(&workspace, &editor);
 
         session
-            .expect("Using crate: test-crate")
-            .expect("Expected single crate auto-selection");
+            .expect("Using package: test-crate")
+            .expect("Expected single package auto-selection");
 
         session
             .expect("bump type")
@@ -734,8 +734,8 @@ MOCK_EDITOR_EOF
         let mut session = spawn_add_with_editor(&workspace, &editor);
 
         session
-            .expect("Using crate: test-crate")
-            .expect("Expected single crate auto-selection");
+            .expect("Using package: test-crate")
+            .expect("Expected single package auto-selection");
 
         session
             .expect("bump type")

@@ -21,11 +21,10 @@ changeset-core = { path = "crates/changeset-core" }
 changeset-parse = { path = "crates/changeset-parse" }
 changeset-git = { path = "crates/changeset-git" }
 changeset-version = { path = "crates/changeset-version" }
-changeset-workspace = { path = "crates/changeset-workspace" }
+changeset-project = { path = "crates/changeset-project" }
 changeset-changelog = { path = "crates/changeset-changelog" }
 
 # External dependencies
-anyhow = "1"
 indexmap = { version = "2.7.1", features = ["serde"] }
 thiserror = "2.0.18"
 serde = { version = "1.0.228", features = ["derive"] }

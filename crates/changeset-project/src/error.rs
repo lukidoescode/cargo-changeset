@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use thiserror::Error;
 
 #[derive(Debug, Error)]
-pub enum WorkspaceError {
+pub enum ProjectError {
     #[error("IO error")]
     Io(#[from] std::io::Error),
 

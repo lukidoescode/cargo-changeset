@@ -10,8 +10,8 @@ pub enum CliError {
     #[error(transparent)]
     Git(#[from] changeset_git::GitError),
 
-    #[error("workspace error")]
-    Workspace(#[from] changeset_workspace::WorkspaceError),
+    #[error("project error")]
+    Project(#[from] changeset_project::ProjectError),
 
     #[error("IO error")]
     Io(#[from] std::io::Error),
@@ -22,20 +22,20 @@ pub enum CliError {
     #[error("operation cancelled by user")]
     Cancelled,
 
-    #[error("no packages found in workspace at '{0}'")]
-    EmptyWorkspace(PathBuf),
+    #[error("no packages found in project at '{0}'")]
+    EmptyProject(PathBuf),
 
     #[error("interactive mode requires a terminal")]
     NotATty,
 
-    #[error("internal error: single-crate workspace has no packages")]
-    WorkspaceInvariantViolation,
+    #[error("internal error: single-package project has no packages")]
+    ProjectInvariantViolation,
 
-    #[error("unknown crate '{name}' (available: {available})")]
-    UnknownCrate { name: String, available: String },
+    #[error("unknown package '{name}' (available: {available})")]
+    UnknownPackage { name: String, available: String },
 
-    #[error("missing bump type for crate '{crate_name}' (use --bump or --crate-bump)")]
-    MissingBumpType { crate_name: String },
+    #[error("missing bump type for package '{package_name}' (use --bump or --package-bump)")]
+    MissingBumpType { package_name: String },
 
     #[error("missing description (use -m or provide interactively)")]
     MissingDescription,
@@ -43,8 +43,8 @@ pub enum CliError {
     #[error("description cannot be empty")]
     EmptyDescription,
 
-    #[error("invalid --crate-bump format '{input}' (expected 'crate-name:bump-type')")]
-    InvalidCrateBumpFormat { input: String },
+    #[error("invalid --package-bump format '{input}' (expected 'package-name:bump-type')")]
+    InvalidPackageBumpFormat { input: String },
 
     #[error("invalid bump type '{input}' (expected major, minor, or patch)")]
     InvalidBumpType { input: String },
@@ -53,6 +53,30 @@ pub enum CliError {
     EditorFailed {
         #[source]
         source: std::io::Error,
+    },
+
+    #[error("{uncovered_count} package(s) have changes without changeset coverage")]
+    VerificationFailed { uncovered_count: usize },
+
+    #[error("failed to read changeset directory '{path}'")]
+    ChangesetDirRead {
+        path: PathBuf,
+        #[source]
+        source: std::io::Error,
+    },
+
+    #[error("failed to read changeset file '{path}'")]
+    ChangesetFileRead {
+        path: PathBuf,
+        #[source]
+        source: std::io::Error,
+    },
+
+    #[error("failed to parse changeset file '{path}'")]
+    ChangesetParse {
+        path: PathBuf,
+        #[source]
+        source: changeset_parse::FormatError,
     },
 }
 
@@ -65,12 +89,12 @@ mod tests {
     use super::CliError;
 
     #[test]
-    fn empty_workspace_error_includes_path() {
-        let err = CliError::EmptyWorkspace(PathBuf::from("/my/workspace"));
+    fn empty_project_error_includes_path() {
+        let err = CliError::EmptyProject(PathBuf::from("/my/project"));
 
         let msg = err.to_string();
 
-        assert!(msg.contains("/my/workspace"));
+        assert!(msg.contains("/my/project"));
     }
 
     #[test]
@@ -83,22 +107,22 @@ mod tests {
     }
 
     #[test]
-    fn workspace_error_converts_via_from() {
-        let workspace_err = changeset_workspace::WorkspaceError::NotFound {
+    fn project_error_converts_via_from() {
+        let project_err = changeset_project::ProjectError::NotFound {
             start_dir: PathBuf::from("/test"),
         };
 
-        let cli_err: CliError = workspace_err.into();
+        let cli_err: CliError = project_err.into();
 
-        assert!(matches!(cli_err, CliError::Workspace(_)));
+        assert!(matches!(cli_err, CliError::Project(_)));
     }
 
     #[test]
-    fn workspace_error_has_source_chain() {
-        let workspace_err = changeset_workspace::WorkspaceError::NotFound {
+    fn project_error_has_source_chain() {
+        let project_err = changeset_project::ProjectError::NotFound {
             start_dir: PathBuf::from("/test"),
         };
-        let cli_err: CliError = workspace_err.into();
+        let cli_err: CliError = project_err.into();
 
         let source = std::error::Error::source(&cli_err);
 
@@ -120,18 +144,18 @@ mod tests {
     }
 
     #[test]
-    fn workspace_invariant_violation_message() {
-        let err = CliError::WorkspaceInvariantViolation;
+    fn project_invariant_violation_message() {
+        let err = CliError::ProjectInvariantViolation;
 
         let msg = err.to_string();
 
         assert!(msg.contains("internal error"));
-        assert!(msg.contains("single-crate"));
+        assert!(msg.contains("single-package"));
     }
 
     #[test]
-    fn unknown_crate_error_includes_name_and_available() {
-        let err = CliError::UnknownCrate {
+    fn unknown_package_error_includes_name_and_available() {
+        let err = CliError::UnknownPackage {
             name: "missing".to_string(),
             available: "foo, bar".to_string(),
         };
@@ -143,14 +167,14 @@ mod tests {
     }
 
     #[test]
-    fn missing_bump_type_error_includes_crate_name() {
+    fn missing_bump_type_error_includes_package_name() {
         let err = CliError::MissingBumpType {
-            crate_name: "my-crate".to_string(),
+            package_name: "my-package".to_string(),
         };
 
         let msg = err.to_string();
 
-        assert!(msg.contains("my-crate"));
+        assert!(msg.contains("my-package"));
         assert!(msg.contains("--bump"));
     }
 
@@ -172,15 +196,15 @@ mod tests {
     }
 
     #[test]
-    fn invalid_crate_bump_format_error_includes_input() {
-        let err = CliError::InvalidCrateBumpFormat {
+    fn invalid_package_bump_format_error_includes_input() {
+        let err = CliError::InvalidPackageBumpFormat {
             input: "bad-format".to_string(),
         };
 
         let msg = err.to_string();
 
         assert!(msg.contains("bad-format"));
-        assert!(msg.contains("crate-name:bump-type"));
+        assert!(msg.contains("package-name:bump-type"));
     }
 
     #[test]

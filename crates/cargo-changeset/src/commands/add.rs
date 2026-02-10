@@ -6,8 +6,8 @@ use std::process::Command;
 
 use changeset_core::{BumpType, ChangeCategory, Changeset, PackageInfo, PackageRelease};
 use changeset_parse::serialize_changeset;
-use changeset_workspace::{
-    Workspace, WorkspaceKind, discover_workspace_from_cwd, ensure_changeset_dir,
+use changeset_project::{
+    CargoProject, ProjectKind, discover_project_from_cwd, ensure_changeset_dir,
 };
 use dialoguer::{MultiSelect, Select};
 use indexmap::IndexSet;
@@ -17,23 +17,23 @@ use crate::error::{CliError, Result};
 
 const MAX_FILENAME_ATTEMPTS: usize = 100;
 
-fn validate_crate_bump_args(crate_bumps: &[String]) -> Result<()> {
-    for input in crate_bumps {
-        parse_crate_bump(input)?;
+fn validate_package_bump_args(package_bumps: &[String]) -> Result<()> {
+    for input in package_bumps {
+        parse_package_bump(input)?;
     }
     Ok(())
 }
 
 pub(super) fn run(args: AddArgs) -> Result<()> {
-    validate_crate_bump_args(&args.crate_bumps)?;
+    validate_package_bump_args(&args.package_bumps)?;
 
-    let workspace = discover_workspace_from_cwd()?;
+    let project = discover_project_from_cwd()?;
 
-    if workspace.packages.is_empty() {
-        return Err(CliError::EmptyWorkspace(workspace.root));
+    if project.packages.is_empty() {
+        return Err(CliError::EmptyProject(project.root));
     }
 
-    let packages = match select_crates(&workspace, &args) {
+    let packages = match select_packages(&project, &args) {
         Ok(packages) if packages.is_empty() => return Ok(()),
         Ok(packages) => packages,
         Err(CliError::Cancelled) => return Ok(()),
@@ -56,7 +56,7 @@ pub(super) fn run(args: AddArgs) -> Result<()> {
         category,
     };
 
-    let changeset_dir = ensure_changeset_dir(&workspace)?;
+    let changeset_dir = ensure_changeset_dir(&project)?;
     let filename = generate_unique_filename(&changeset_dir)?;
     let file_path = changeset_dir.join(&filename);
 
@@ -77,41 +77,41 @@ pub(super) fn run(args: AddArgs) -> Result<()> {
     Ok(())
 }
 
-fn select_crates(workspace: &Workspace, args: &AddArgs) -> Result<Vec<PackageInfo>> {
-    let explicit_crates = collect_explicit_crates(args);
+fn select_packages(project: &CargoProject, args: &AddArgs) -> Result<Vec<PackageInfo>> {
+    let explicit_packages = collect_explicit_packages(args);
 
-    if !explicit_crates.is_empty() {
-        return resolve_explicit_crates(&workspace.packages, &explicit_crates);
+    if !explicit_packages.is_empty() {
+        return resolve_explicit_packages(&project.packages, &explicit_packages);
     }
 
-    if workspace.kind == WorkspaceKind::SingleCrate {
-        let package = workspace
+    if project.kind == ProjectKind::SinglePackage {
+        let package = project
             .packages
             .first()
-            .ok_or(CliError::WorkspaceInvariantViolation)?;
-        return Ok(select_single_crate(package));
+            .ok_or(CliError::ProjectInvariantViolation)?;
+        return Ok(select_single_package(package));
     }
 
-    select_multiple_crates(&workspace.packages)
+    select_multiple_packages(&project.packages)
 }
 
-fn collect_explicit_crates(args: &AddArgs) -> Vec<String> {
-    let mut crates: IndexSet<String> = args.crates.iter().cloned().collect();
+fn collect_explicit_packages(args: &AddArgs) -> Vec<String> {
+    let mut packages: IndexSet<String> = args.packages.iter().cloned().collect();
 
-    for crate_bump in &args.crate_bumps {
-        if let Some((name, _)) = crate_bump.split_once(':') {
-            crates.insert(name.to_string());
+    for package_bump in &args.package_bumps {
+        if let Some((name, _)) = package_bump.split_once(':') {
+            packages.insert(name.to_string());
         }
     }
 
-    crates.into_iter().collect()
+    packages.into_iter().collect()
 }
 
-fn resolve_explicit_crates(
+fn resolve_explicit_packages(
     packages: &[PackageInfo],
-    crate_names: &[String],
+    package_names: &[String],
 ) -> Result<Vec<PackageInfo>> {
-    let unique_names: IndexSet<&String> = crate_names.iter().collect();
+    let unique_names: IndexSet<&String> = package_names.iter().collect();
     let mut selected = Vec::with_capacity(unique_names.len());
 
     for name in unique_names {
@@ -121,7 +121,7 @@ fn resolve_explicit_crates(
                 .map(|p| p.name.as_str())
                 .collect::<Vec<_>>()
                 .join(", ");
-            CliError::UnknownCrate {
+            CliError::UnknownPackage {
                 name: name.clone(),
                 available,
             }
@@ -132,12 +132,12 @@ fn resolve_explicit_crates(
     Ok(selected)
 }
 
-fn select_single_crate(package: &PackageInfo) -> Vec<PackageInfo> {
-    println!("Using crate: {} ({})", package.name, package.version);
+fn select_single_package(package: &PackageInfo) -> Vec<PackageInfo> {
+    println!("Using package: {} ({})", package.name, package.version);
     vec![package.clone()]
 }
 
-fn select_multiple_crates(packages: &[PackageInfo]) -> Result<Vec<PackageInfo>> {
+fn select_multiple_packages(packages: &[PackageInfo]) -> Result<Vec<PackageInfo>> {
     if !is_interactive() {
         return Err(CliError::NotATty);
     }
@@ -145,7 +145,7 @@ fn select_multiple_crates(packages: &[PackageInfo]) -> Result<Vec<PackageInfo>> 
     let items = format_package_items(packages);
 
     let selection = MultiSelect::new()
-        .with_prompt("Select crates to include in changeset")
+        .with_prompt("Select packages to include in changeset")
         .items(&items)
         .interact_opt()
         .map_err(|e| match e {
@@ -167,12 +167,12 @@ fn format_package_items(packages: &[PackageInfo]) -> Vec<String> {
 }
 
 fn collect_releases(packages: &[PackageInfo], args: &AddArgs) -> Result<Vec<PackageRelease>> {
-    let per_crate_bumps = parse_crate_bumps(&args.crate_bumps)?;
+    let per_package_bumps = parse_package_bumps(&args.package_bumps)?;
 
     let mut releases = Vec::with_capacity(packages.len());
 
     for package in packages {
-        let bump_type = if let Some(bump) = per_crate_bumps.get(&package.name) {
+        let bump_type = if let Some(bump) = per_package_bumps.get(&package.name) {
             *bump
         } else if let Some(bump) = args.bump {
             bump
@@ -180,7 +180,7 @@ fn collect_releases(packages: &[PackageInfo], args: &AddArgs) -> Result<Vec<Pack
             select_bump_type(&package.name)?
         } else {
             return Err(CliError::MissingBumpType {
-                crate_name: package.name.clone(),
+                package_name: package.name.clone(),
             });
         };
 
@@ -193,20 +193,20 @@ fn collect_releases(packages: &[PackageInfo], args: &AddArgs) -> Result<Vec<Pack
     Ok(releases)
 }
 
-fn parse_crate_bumps(crate_bumps: &[String]) -> Result<HashMap<String, BumpType>> {
+fn parse_package_bumps(package_bumps: &[String]) -> Result<HashMap<String, BumpType>> {
     let mut map = HashMap::new();
 
-    for input in crate_bumps {
-        let (name, bump_type) = parse_crate_bump(input)?;
+    for input in package_bumps {
+        let (name, bump_type) = parse_package_bump(input)?;
         map.insert(name, bump_type);
     }
 
     Ok(map)
 }
 
-fn parse_crate_bump(input: &str) -> Result<(String, BumpType)> {
+fn parse_package_bump(input: &str) -> Result<(String, BumpType)> {
     let Some((name, bump_str)) = input.split_once(':') else {
-        return Err(CliError::InvalidCrateBumpFormat {
+        return Err(CliError::InvalidPackageBumpFormat {
             input: input.to_string(),
         });
     };
@@ -225,7 +225,7 @@ fn parse_crate_bump(input: &str) -> Result<(String, BumpType)> {
     Ok((name.to_string(), bump_type))
 }
 
-fn select_bump_type(crate_name: &str) -> Result<BumpType> {
+fn select_bump_type(package_name: &str) -> Result<BumpType> {
     let items = [
         "patch - Bug fixes (backwards compatible)",
         "minor - New features (backwards compatible)",
@@ -233,7 +233,7 @@ fn select_bump_type(crate_name: &str) -> Result<BumpType> {
     ];
 
     let selection = Select::new()
-        .with_prompt(format!("Select bump type for '{crate_name}'"))
+        .with_prompt(format!("Select bump type for '{package_name}'"))
         .items(items)
         .default(0)
         .interact_opt()
@@ -284,7 +284,7 @@ fn select_category(args: &AddArgs) -> Result<ChangeCategory> {
 }
 
 fn has_explicit_args(args: &AddArgs) -> bool {
-    args.message.is_some() || !args.crates.is_empty() || !args.crate_bumps.is_empty()
+    args.message.is_some() || !args.packages.is_empty() || !args.package_bumps.is_empty()
 }
 
 fn get_description(args: &AddArgs) -> Result<String> {
@@ -406,8 +406,8 @@ mod tests {
     use semver::Version;
 
     use super::{
-        collect_explicit_crates, format_package_items, parse_crate_bump, parse_crate_bumps,
-        resolve_explicit_crates, select_single_crate,
+        collect_explicit_packages, format_package_items, parse_package_bump, parse_package_bumps,
+        resolve_explicit_packages, select_single_package,
     };
     use crate::commands::AddArgs;
     use crate::error::CliError;
@@ -422,9 +422,9 @@ mod tests {
 
     fn default_args() -> AddArgs {
         AddArgs {
-            crates: vec![],
+            packages: vec![],
             bump: None,
-            crate_bumps: vec![],
+            package_bumps: vec![],
             category: changeset_core::ChangeCategory::Changed,
             message: None,
             editor: false,
@@ -448,18 +448,18 @@ mod tests {
     }
 
     #[test]
-    fn select_single_crate_returns_cloned_package() {
-        let package = test_package("my-crate", "0.1.0");
+    fn select_single_package_returns_cloned_package() {
+        let package = test_package("my-package", "0.1.0");
 
-        let result = select_single_crate(&package);
+        let result = select_single_package(&package);
 
         assert_eq!(result.len(), 1);
-        assert_eq!(result[0].name, "my-crate");
+        assert_eq!(result[0].name, "my-package");
         assert_eq!(result[0].version, Version::new(0, 1, 0));
     }
 
     #[test]
-    fn resolve_explicit_crates_finds_matching_packages() {
+    fn resolve_explicit_packages_finds_matching_packages() {
         let packages = vec![
             test_package("foo", "1.0.0"),
             test_package("bar", "2.0.0"),
@@ -467,7 +467,7 @@ mod tests {
         ];
         let names = vec!["bar".to_string(), "foo".to_string()];
 
-        let result = resolve_explicit_crates(&packages, &names).expect("should resolve");
+        let result = resolve_explicit_packages(&packages, &names).expect("should resolve");
 
         assert_eq!(result.len(), 2);
         assert_eq!(result[0].name, "bar");
@@ -475,31 +475,31 @@ mod tests {
     }
 
     #[test]
-    fn resolve_explicit_crates_returns_error_for_unknown_crate() {
+    fn resolve_explicit_packages_returns_error_for_unknown_package() {
         let packages = vec![test_package("foo", "1.0.0"), test_package("bar", "2.0.0")];
         let names = vec!["unknown".to_string()];
 
-        let result = resolve_explicit_crates(&packages, &names);
+        let result = resolve_explicit_packages(&packages, &names);
 
         assert!(matches!(
             result,
-            Err(CliError::UnknownCrate { name, available })
+            Err(CliError::UnknownPackage { name, available })
                 if name == "unknown" && available.contains("foo") && available.contains("bar")
         ));
     }
 
     #[test]
-    fn resolve_explicit_crates_empty_names_returns_empty() {
+    fn resolve_explicit_packages_empty_names_returns_empty() {
         let packages = vec![test_package("foo", "1.0.0")];
         let names: Vec<String> = vec![];
 
-        let result = resolve_explicit_crates(&packages, &names).expect("should resolve");
+        let result = resolve_explicit_packages(&packages, &names).expect("should resolve");
 
         assert!(result.is_empty());
     }
 
     #[test]
-    fn resolve_explicit_crates_preserves_order() {
+    fn resolve_explicit_packages_preserves_order() {
         let packages = vec![
             test_package("alpha", "1.0.0"),
             test_package("beta", "2.0.0"),
@@ -507,7 +507,7 @@ mod tests {
         ];
         let names = vec!["gamma".to_string(), "alpha".to_string(), "beta".to_string()];
 
-        let result = resolve_explicit_crates(&packages, &names).expect("should resolve");
+        let result = resolve_explicit_packages(&packages, &names).expect("should resolve");
 
         assert_eq!(result.len(), 3);
         assert_eq!(result[0].name, "gamma");
@@ -516,7 +516,7 @@ mod tests {
     }
 
     #[test]
-    fn resolve_explicit_crates_deduplicates_preserving_first_occurrence() {
+    fn resolve_explicit_packages_deduplicates_preserving_first_occurrence() {
         let packages = vec![test_package("foo", "1.0.0"), test_package("bar", "2.0.0")];
         let names = vec![
             "foo".to_string(),
@@ -525,7 +525,7 @@ mod tests {
             "bar".to_string(),
         ];
 
-        let result = resolve_explicit_crates(&packages, &names).expect("should resolve");
+        let result = resolve_explicit_packages(&packages, &names).expect("should resolve");
 
         assert_eq!(result.len(), 2);
         assert_eq!(result[0].name, "foo");
@@ -533,81 +533,81 @@ mod tests {
     }
 
     #[test]
-    fn resolve_explicit_crates_fails_fast_on_first_unknown() {
+    fn resolve_explicit_packages_fails_fast_on_first_unknown() {
         let packages = vec![test_package("foo", "1.0.0"), test_package("bar", "2.0.0")];
         let names = vec!["foo".to_string(), "unknown".to_string(), "bar".to_string()];
 
-        let result = resolve_explicit_crates(&packages, &names);
+        let result = resolve_explicit_packages(&packages, &names);
 
         assert!(matches!(
             result,
-            Err(CliError::UnknownCrate { name, .. }) if name == "unknown"
+            Err(CliError::UnknownPackage { name, .. }) if name == "unknown"
         ));
     }
 
     #[test]
-    fn resolve_explicit_crates_with_hyphenated_name() {
+    fn resolve_explicit_packages_with_hyphenated_name() {
         let packages = vec![
-            test_package("my-cool-crate", "1.0.0"),
+            test_package("my-cool-package", "1.0.0"),
             test_package("another-one", "2.0.0"),
         ];
-        let names = vec!["my-cool-crate".to_string()];
+        let names = vec!["my-cool-package".to_string()];
 
-        let result = resolve_explicit_crates(&packages, &names).expect("should resolve");
+        let result = resolve_explicit_packages(&packages, &names).expect("should resolve");
 
         assert_eq!(result.len(), 1);
-        assert_eq!(result[0].name, "my-cool-crate");
+        assert_eq!(result[0].name, "my-cool-package");
     }
 
     #[test]
-    fn parse_crate_bump_valid_major() {
-        let (name, bump) = parse_crate_bump("my-crate:major").expect("should parse");
+    fn parse_package_bump_valid_major() {
+        let (name, bump) = parse_package_bump("my-package:major").expect("should parse");
 
-        assert_eq!(name, "my-crate");
+        assert_eq!(name, "my-package");
         assert_eq!(bump, BumpType::Major);
     }
 
     #[test]
-    fn parse_crate_bump_valid_minor() {
-        let (name, bump) = parse_crate_bump("my-crate:minor").expect("should parse");
+    fn parse_package_bump_valid_minor() {
+        let (name, bump) = parse_package_bump("my-package:minor").expect("should parse");
 
-        assert_eq!(name, "my-crate");
+        assert_eq!(name, "my-package");
         assert_eq!(bump, BumpType::Minor);
     }
 
     #[test]
-    fn parse_crate_bump_valid_patch() {
-        let (name, bump) = parse_crate_bump("my-crate:patch").expect("should parse");
+    fn parse_package_bump_valid_patch() {
+        let (name, bump) = parse_package_bump("my-package:patch").expect("should parse");
 
-        assert_eq!(name, "my-crate");
+        assert_eq!(name, "my-package");
         assert_eq!(bump, BumpType::Patch);
     }
 
     #[test]
-    fn parse_crate_bump_case_insensitive() {
-        let (_, bump) = parse_crate_bump("crate:MAJOR").expect("should parse");
+    fn parse_package_bump_case_insensitive() {
+        let (_, bump) = parse_package_bump("package:MAJOR").expect("should parse");
         assert_eq!(bump, BumpType::Major);
 
-        let (_, bump) = parse_crate_bump("crate:Minor").expect("should parse");
+        let (_, bump) = parse_package_bump("package:Minor").expect("should parse");
         assert_eq!(bump, BumpType::Minor);
 
-        let (_, bump) = parse_crate_bump("crate:PATCH").expect("should parse");
+        let (_, bump) = parse_package_bump("package:PATCH").expect("should parse");
         assert_eq!(bump, BumpType::Patch);
     }
 
     #[test]
-    fn parse_crate_bump_missing_colon() {
-        let result = parse_crate_bump("my-crate-patch");
+    fn parse_package_bump_missing_colon() {
+        let result = parse_package_bump("my-package-patch");
 
         assert!(matches!(
             result,
-            Err(CliError::InvalidCrateBumpFormat { input }) if input == "my-crate-patch"
+            Err(CliError::InvalidPackageBumpFormat { input }) if input == "my-package-patch"
         ));
     }
 
     #[test]
-    fn parse_crate_bump_invalid_bump_type() {
-        let result = parse_crate_bump("my-crate:huge");
+    fn parse_package_bump_invalid_bump_type() {
+        let result = parse_package_bump("my-package:huge");
 
         assert!(matches!(
             result,
@@ -616,72 +616,72 @@ mod tests {
     }
 
     #[test]
-    fn parse_crate_bumps_multiple() {
+    fn parse_package_bumps_multiple() {
         let inputs = vec!["a:major".to_string(), "b:minor".to_string()];
 
-        let map = parse_crate_bumps(&inputs).expect("should parse");
+        let map = parse_package_bumps(&inputs).expect("should parse");
 
         assert_eq!(map.get("a"), Some(&BumpType::Major));
         assert_eq!(map.get("b"), Some(&BumpType::Minor));
     }
 
     #[test]
-    fn parse_crate_bumps_empty() {
-        let map = parse_crate_bumps(&[]).expect("should parse");
+    fn parse_package_bumps_empty() {
+        let map = parse_package_bumps(&[]).expect("should parse");
 
         assert!(map.is_empty());
     }
 
     #[test]
-    fn collect_explicit_crates_from_crate_flag() {
+    fn collect_explicit_packages_from_package_flag() {
         let args = AddArgs {
-            crates: vec!["a".to_string(), "b".to_string()],
+            packages: vec!["a".to_string(), "b".to_string()],
             ..default_args()
         };
 
-        let crates = collect_explicit_crates(&args);
+        let packages = collect_explicit_packages(&args);
 
-        assert_eq!(crates.len(), 2);
-        assert!(crates.contains(&"a".to_string()));
-        assert!(crates.contains(&"b".to_string()));
+        assert_eq!(packages.len(), 2);
+        assert!(packages.contains(&"a".to_string()));
+        assert!(packages.contains(&"b".to_string()));
     }
 
     #[test]
-    fn collect_explicit_crates_from_crate_bump_flag() {
+    fn collect_explicit_packages_from_package_bump_flag() {
         let args = AddArgs {
-            crate_bumps: vec!["a:major".to_string(), "b:minor".to_string()],
+            package_bumps: vec!["a:major".to_string(), "b:minor".to_string()],
             ..default_args()
         };
 
-        let crates = collect_explicit_crates(&args);
+        let packages = collect_explicit_packages(&args);
 
-        assert_eq!(crates.len(), 2);
-        assert!(crates.contains(&"a".to_string()));
-        assert!(crates.contains(&"b".to_string()));
+        assert_eq!(packages.len(), 2);
+        assert!(packages.contains(&"a".to_string()));
+        assert!(packages.contains(&"b".to_string()));
     }
 
     #[test]
-    fn collect_explicit_crates_merges_and_deduplicates() {
+    fn collect_explicit_packages_merges_and_deduplicates() {
         let args = AddArgs {
-            crates: vec!["a".to_string(), "c".to_string()],
-            crate_bumps: vec!["a:major".to_string(), "b:minor".to_string()],
+            packages: vec!["a".to_string(), "c".to_string()],
+            package_bumps: vec!["a:major".to_string(), "b:minor".to_string()],
             ..default_args()
         };
 
-        let crates = collect_explicit_crates(&args);
+        let packages = collect_explicit_packages(&args);
 
-        assert_eq!(crates.len(), 3);
-        assert!(crates.contains(&"a".to_string()));
-        assert!(crates.contains(&"b".to_string()));
-        assert!(crates.contains(&"c".to_string()));
+        assert_eq!(packages.len(), 3);
+        assert!(packages.contains(&"a".to_string()));
+        assert!(packages.contains(&"b".to_string()));
+        assert!(packages.contains(&"c".to_string()));
     }
 
     #[test]
-    fn collect_explicit_crates_empty() {
+    fn collect_explicit_packages_empty() {
         let args = default_args();
 
-        let crates = collect_explicit_crates(&args);
+        let packages = collect_explicit_packages(&args);
 
-        assert!(crates.is_empty());
+        assert!(packages.is_empty());
     }
 }
