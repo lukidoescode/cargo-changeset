@@ -12,8 +12,8 @@ pub enum ChangesetError {
         source: semver::Error,
     },
 
-    #[error("Git error: {0}")]
-    Git(String),
+    #[error(transparent)]
+    Git(#[from] changeset_git::GitError),
 }
 
 pub type Result<T> = std::result::Result<T, ChangesetError>;

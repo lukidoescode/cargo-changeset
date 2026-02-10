@@ -1,0 +1,111 @@
+mod commit;
+mod diff;
+mod files;
+mod staging;
+mod status;
+mod tag;
+
+use std::path::{Path, PathBuf};
+
+use crate::{GitError, Result};
+
+pub struct Repository {
+    pub(crate) inner: git2::Repository,
+    root: PathBuf,
+}
+
+impl Repository {
+    /// # Errors
+    ///
+    /// Returns [`GitError::NotARepository`] if the path is not inside a git repository.
+    pub fn open(path: &Path) -> Result<Self> {
+        let inner = git2::Repository::discover(path).map_err(|_| GitError::NotARepository {
+            path: path.to_path_buf(),
+        })?;
+
+        let root = inner
+            .workdir()
+            .ok_or_else(|| GitError::NotARepository {
+                path: path.to_path_buf(),
+            })?
+            .to_path_buf();
+
+        Ok(Self { inner, root })
+    }
+
+    /// # Errors
+    ///
+    /// Returns [`GitError::NotARepository`] if the current directory is not inside a git repository.
+    pub fn open_from_cwd() -> Result<Self> {
+        let cwd = std::env::current_dir().map_err(|_| GitError::NotARepository {
+            path: PathBuf::from("."),
+        })?;
+        Self::open(&cwd)
+    }
+
+    #[must_use]
+    pub fn root(&self) -> &Path {
+        &self.root
+    }
+}
+
+#[cfg(test)]
+pub(crate) mod tests {
+    use super::*;
+    use tempfile::TempDir;
+
+    pub(crate) fn setup_test_repo() -> anyhow::Result<(TempDir, Repository)> {
+        let dir = TempDir::new()?;
+        let repo = git2::Repository::init(dir.path())?;
+
+        let sig = git2::Signature::now("Test", "test@example.com")?;
+        let tree_id = repo.index()?.write_tree()?;
+        let tree = repo.find_tree(tree_id)?;
+        repo.commit(Some("HEAD"), &sig, &sig, "Initial commit", &tree, &[])?;
+
+        let repository = Repository::open(dir.path())?;
+        Ok((dir, repository))
+    }
+
+    #[test]
+    fn open_repository() -> anyhow::Result<()> {
+        let (dir, repo) = setup_test_repo()?;
+        let expected = dir.path().canonicalize()?;
+        let actual = repo.root().canonicalize()?;
+        assert_eq!(actual, expected);
+        Ok(())
+    }
+
+    #[test]
+    fn open_nonexistent_repository() {
+        let dir = TempDir::new().expect("failed to create temp dir");
+        let result = Repository::open(dir.path());
+        assert!(matches!(result, Err(GitError::NotARepository { .. })));
+    }
+
+    #[test]
+    fn open_from_cwd_in_repo() -> anyhow::Result<()> {
+        let (dir, _repo) = setup_test_repo()?;
+        let original_cwd = std::env::current_dir()?;
+
+        std::env::set_current_dir(dir.path())?;
+        let result = Repository::open_from_cwd();
+        std::env::set_current_dir(original_cwd)?;
+
+        assert!(result.is_ok());
+        Ok(())
+    }
+
+    #[test]
+    fn open_from_cwd_not_in_repo() -> anyhow::Result<()> {
+        let temp_dir = TempDir::new()?;
+        let original_cwd = std::env::current_dir()?;
+
+        std::env::set_current_dir(temp_dir.path())?;
+        let result = Repository::open_from_cwd();
+        std::env::set_current_dir(original_cwd)?;
+
+        assert!(matches!(result, Err(GitError::NotARepository { .. })));
+        Ok(())
+    }
+}

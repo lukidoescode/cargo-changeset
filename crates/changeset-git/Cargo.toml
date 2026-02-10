@@ -9,5 +9,12 @@ authors.workspace = true
 description = "Git operations for cargo-changeset"
 
 [dependencies]
-changeset-core = { workspace = true }
+git2 = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
 anyhow = { workspace = true }
+tempfile = "3"
+
+[lints]
+workspace = true
