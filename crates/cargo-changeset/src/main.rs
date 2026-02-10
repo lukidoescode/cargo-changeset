@@ -1,4 +1,8 @@
+mod error;
+
 use clap::{Parser, Subcommand};
+
+use error::Result;
 
 #[derive(Parser)]
 #[command(name = "cargo-changeset")]
@@ -21,7 +25,7 @@ enum Commands {
     Init,
 }
 
-fn main() -> anyhow::Result<()> {
+fn main() -> Result<()> {
     let cli = Cli::parse();
 
     match cli.command {

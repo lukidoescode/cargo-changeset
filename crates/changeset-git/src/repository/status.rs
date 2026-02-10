@@ -46,6 +46,7 @@ impl Repository {
 #[cfg(test)]
 mod tests {
     use super::super::tests::setup_test_repo;
+    use crate::GitError;
     use std::fs;
 
     #[test]
@@ -78,6 +79,17 @@ mod tests {
 
         let result = repo.require_clean_working_tree();
         assert!(result.is_err());
+        Ok(())
+    }
+
+    #[test]
+    fn current_branch_detached_head_fails() -> anyhow::Result<()> {
+        let (_dir, repo) = setup_test_repo()?;
+        let head_commit = repo.inner.head()?.peel_to_commit()?;
+        repo.inner.set_head_detached(head_commit.id())?;
+
+        let result = repo.current_branch();
+        assert!(matches!(result, Err(GitError::DetachedHead)));
         Ok(())
     }
 }

@@ -25,9 +25,6 @@ pub enum GitError {
     #[error("HEAD is detached, not on a branch")]
     DetachedHead,
 
-    #[error("no commits found in repository")]
-    NoCommits,
-
     #[error("diff delta has no file path")]
     MissingDeltaPath,
 }

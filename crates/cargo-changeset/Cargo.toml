@@ -18,4 +18,4 @@ changeset-parse = { workspace = true }
 changeset-git = { workspace = true }
 changeset-version = { workspace = true }
 clap = { workspace = true }
-anyhow = { workspace = true }
+thiserror = { workspace = true }

@@ -12,7 +12,7 @@ impl Repository {
         let absolute_path = if path.is_absolute() {
             path.to_path_buf()
         } else {
-            self.root.join(path)
+            self.root().join(path)
         };
 
         std::fs::remove_file(&absolute_path).map_err(|source| GitError::FileDelete {
@@ -20,11 +20,7 @@ impl Repository {
             source,
         })?;
 
-        let relative_path = if path.is_absolute() {
-            path.strip_prefix(&self.root).unwrap_or(path)
-        } else {
-            path
-        };
+        let relative_path = self.to_relative_path(path);
 
         let mut index = self.inner.index()?;
         index.remove_path(relative_path)?;

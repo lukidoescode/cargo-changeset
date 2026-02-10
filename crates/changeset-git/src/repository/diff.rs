@@ -16,9 +16,15 @@ impl Repository {
             None => None,
         };
 
-        let diff = self
+        let mut diff = self
             .inner
             .diff_tree_to_tree(base_tree.as_ref(), Some(&head_tree), None)?;
+
+        let mut find_opts = git2::DiffFindOptions::new();
+        find_opts.renames(true);
+        find_opts.copies(true);
+        find_opts.copies_from_unmodified(true);
+        diff.find_similar(Some(&mut find_opts))?;
 
         let mut changes = Vec::new();
 
@@ -77,8 +83,9 @@ impl Repository {
 #[cfg(test)]
 mod tests {
     use super::super::tests::setup_test_repo;
-    use crate::FileStatus;
+    use crate::{FileChange, FileStatus};
     use std::fs;
+    use std::path::PathBuf;
 
     #[test]
     fn detect_added_file() -> anyhow::Result<()> {
@@ -215,28 +222,67 @@ mod tests {
         repo.inner
             .commit(Some("HEAD"), &sig, &sig, "Rename file", &tree, &[&parent])?;
 
-        let mut diff_opts = git2::DiffOptions::new();
-        diff_opts.include_untracked(false);
+        let changes = repo.changed_files_from_head("HEAD~1")?;
+        assert_eq!(changes.len(), 1);
 
-        let head_tree = repo.inner.head()?.peel_to_tree()?;
-        let parent_tree = repo.inner.head()?.peel_to_commit()?.parent(0)?.tree()?;
-        let mut diff = repo.inner.diff_tree_to_tree(
-            Some(&parent_tree),
-            Some(&head_tree),
-            Some(&mut diff_opts),
-        )?;
-
-        let mut find_opts = git2::DiffFindOptions::new();
-        find_opts.renames(true);
-        diff.find_similar(Some(&mut find_opts))?;
-
-        let has_rename = diff.deltas().any(|d| d.status() == git2::Delta::Renamed);
-
-        assert!(
-            has_rename,
-            "git2 should detect the rename with find_similar"
-        );
+        let rename = &changes[0];
+        assert_eq!(rename.status, FileStatus::Renamed);
+        assert_eq!(rename.path, PathBuf::from("renamed.txt"));
+        assert_eq!(rename.old_path, Some(PathBuf::from("original.txt")));
 
         Ok(())
+    }
+
+    #[test]
+    fn new_file_alongside_existing_is_detected_as_added() -> anyhow::Result<()> {
+        let (dir, repo) = setup_test_repo()?;
+        let path = std::path::Path::new;
+
+        let content = "This is a longer piece of content.";
+        fs::write(dir.path().join("original.txt"), content)?;
+        let mut index = repo.inner.index()?;
+        index.add_path(path("original.txt"))?;
+        index.write()?;
+
+        let sig = git2::Signature::now("Test", "test@example.com")?;
+        let tree_id = index.write_tree()?;
+        let tree = repo.inner.find_tree(tree_id)?;
+        let parent = repo.inner.head()?.peel_to_commit()?;
+        repo.inner
+            .commit(Some("HEAD"), &sig, &sig, "Add file", &tree, &[&parent])?;
+
+        fs::copy(dir.path().join("original.txt"), dir.path().join("copy.txt"))?;
+        let mut index = repo.inner.index()?;
+        index.add_path(path("copy.txt"))?;
+        index.write()?;
+
+        let tree_id = index.write_tree()?;
+        let tree = repo.inner.find_tree(tree_id)?;
+        let parent = repo.inner.head()?.peel_to_commit()?;
+        repo.inner
+            .commit(Some("HEAD"), &sig, &sig, "Copy file", &tree, &[&parent])?;
+
+        let changes = repo.changed_files_from_head("HEAD~1")?;
+        assert_eq!(changes.len(), 1);
+
+        let change = &changes[0];
+        assert!(
+            change.status == FileStatus::Added || change.status == FileStatus::Copied,
+            "new file should be detected as Added or Copied, got {:?}",
+            change.status
+        );
+        assert_eq!(change.path, PathBuf::from("copy.txt"));
+
+        Ok(())
+    }
+
+    #[test]
+    fn file_change_with_old_path() {
+        let change = FileChange::new(PathBuf::from("new.txt"), FileStatus::Renamed)
+            .with_old_path(PathBuf::from("old.txt"));
+
+        assert_eq!(change.path, PathBuf::from("new.txt"));
+        assert_eq!(change.status, FileStatus::Renamed);
+        assert_eq!(change.old_path, Some(PathBuf::from("old.txt")));
     }
 }

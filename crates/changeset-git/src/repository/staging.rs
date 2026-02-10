@@ -12,13 +12,9 @@ impl Repository {
         let mut index = self.inner.index()?;
 
         for path in paths {
-            let relative_path = if path.is_absolute() {
-                path.strip_prefix(&self.root).unwrap_or(path)
-            } else {
-                path
-            };
+            let relative_path = self.to_relative_path(path);
 
-            if path.exists() || self.root.join(relative_path).exists() {
+            if path.exists() || self.root().join(relative_path).exists() {
                 index.add_path(relative_path)?;
             } else {
                 index.remove_path(relative_path)?;

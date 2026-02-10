@@ -47,6 +47,14 @@ impl Repository {
     pub fn root(&self) -> &Path {
         &self.root
     }
+
+    pub(crate) fn to_relative_path<'a>(&self, path: &'a Path) -> &'a Path {
+        if path.is_absolute() {
+            path.strip_prefix(&self.root).unwrap_or(path)
+        } else {
+            path
+        }
+    }
 }
 
 #[cfg(test)]
