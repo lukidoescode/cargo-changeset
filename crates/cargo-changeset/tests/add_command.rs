@@ -109,6 +109,10 @@ mod non_interactive {
     }
 }
 
+// Interactive tests are skipped on Windows because the console crate's TTY detection
+// (GetConsoleMode) doesn't work properly with ConPTY in GitHub Actions CI.
+// See: https://github.com/lukidoescode/cargo-changeset/issues/23
+#[cfg(not(windows))]
 mod interactive {
     use expectrl::Expect;
     use expectrl::session::OsSession;
