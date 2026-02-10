@@ -66,6 +66,10 @@ pub(crate) mod tests {
         let dir = TempDir::new()?;
         let repo = git2::Repository::init(dir.path())?;
 
+        let mut config = repo.config()?;
+        config.set_str("user.name", "Test")?;
+        config.set_str("user.email", "test@example.com")?;
+
         let sig = git2::Signature::now("Test", "test@example.com")?;
         let tree_id = repo.index()?.write_tree()?;
         let tree = repo.find_tree(tree_id)?;
