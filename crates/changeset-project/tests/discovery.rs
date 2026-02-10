@@ -1,6 +1,8 @@
 use std::path::PathBuf;
 
-use changeset_project::{ProjectError, ProjectKind, discover_project, discover_project_from_cwd};
+use changeset_project::{
+    ProjectError, ProjectKind, discover_project, discover_project_from_cwd, parse_root_config,
+};
 
 fn fixtures_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures")
@@ -128,9 +130,10 @@ fn not_found_error_for_nonexistent_path() {
 fn ensure_changeset_dir_creates_directory() {
     let temp_dir = create_temp_single_package();
     let project = discover_project(temp_dir.path()).expect("should discover project");
+    let config = parse_root_config(&project).expect("should parse config");
 
     let changeset_dir =
-        changeset_project::ensure_changeset_dir(&project).expect("should create dir");
+        changeset_project::ensure_changeset_dir(&project, &config).expect("should create dir");
 
     assert!(changeset_dir.exists());
     assert!(changeset_dir.is_dir());
@@ -223,9 +226,10 @@ fn workspace_exclude_patterns_work() {
 fn ensure_changeset_dir_is_idempotent() {
     let temp_dir = create_temp_single_package();
     let project = discover_project(temp_dir.path()).expect("should discover project");
+    let config = parse_root_config(&project).expect("should parse config");
 
-    let first = changeset_project::ensure_changeset_dir(&project).expect("first call");
-    let second = changeset_project::ensure_changeset_dir(&project).expect("second call");
+    let first = changeset_project::ensure_changeset_dir(&project, &config).expect("first call");
+    let second = changeset_project::ensure_changeset_dir(&project, &config).expect("second call");
 
     assert_eq!(first, second);
     assert!(first.exists());

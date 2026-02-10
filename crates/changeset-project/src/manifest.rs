@@ -1,4 +1,20 @@
+use std::path::Path;
+
 use serde::Deserialize;
+
+use crate::error::ProjectError;
+
+pub(crate) fn read_manifest(path: &Path) -> Result<CargoManifest, ProjectError> {
+    let content = std::fs::read_to_string(path).map_err(|source| ProjectError::ManifestRead {
+        path: path.to_path_buf(),
+        source,
+    })?;
+
+    toml::from_str(&content).map_err(|source| ProjectError::ManifestParse {
+        path: path.to_path_buf(),
+        source,
+    })
+}
 
 #[derive(Debug, Deserialize)]
 pub(crate) struct CargoManifest {

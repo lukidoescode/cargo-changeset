@@ -7,7 +7,7 @@ use std::process::Command;
 use changeset_core::{BumpType, ChangeCategory, Changeset, PackageInfo, PackageRelease};
 use changeset_parse::serialize_changeset;
 use changeset_project::{
-    CargoProject, ProjectKind, discover_project_from_cwd, ensure_changeset_dir,
+    CargoProject, ProjectKind, discover_project_from_cwd, ensure_changeset_dir, parse_root_config,
 };
 use dialoguer::{MultiSelect, Select};
 use indexmap::IndexSet;
@@ -56,15 +56,17 @@ pub(super) fn run(args: AddArgs) -> Result<()> {
         category,
     };
 
-    let changeset_dir = ensure_changeset_dir(&project)?;
+    let config = parse_root_config(&project)?;
+    let changeset_dir = ensure_changeset_dir(&project, &config)?;
     let filename = generate_unique_filename(&changeset_dir)?;
     let file_path = changeset_dir.join(&filename);
 
     let content = serialize_changeset(&changeset)?;
     fs::write(&file_path, content)?;
 
+    let changeset_dir_display = config.changeset_dir().display();
     println!();
-    println!("Created changeset: .changeset/{filename}");
+    println!("Created changeset: {changeset_dir_display}/{filename}");
     println!();
     println!("Summary: {description}");
     println!("Category: {category}");

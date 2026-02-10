@@ -4,8 +4,9 @@ use changeset_core::PackageInfo;
 use globset::GlobBuilder;
 use semver::Version;
 
+use crate::config::RootChangesetConfig;
 use crate::error::ProjectError;
-use crate::manifest::{CargoManifest, VersionField};
+use crate::manifest::{CargoManifest, VersionField, read_manifest};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ProjectKind {
@@ -54,8 +55,11 @@ pub fn discover_project_from_cwd() -> Result<CargoProject, ProjectError> {
 /// # Errors
 ///
 /// Returns `ProjectError::Io` if directory creation fails.
-pub fn ensure_changeset_dir(project: &CargoProject) -> Result<PathBuf, ProjectError> {
-    let changeset_dir = project.root.join(crate::DEFAULT_CHANGESET_DIR);
+pub fn ensure_changeset_dir(
+    project: &CargoProject,
+    config: &RootChangesetConfig,
+) -> Result<PathBuf, ProjectError> {
+    let changeset_dir = project.root.join(config.changeset_dir());
     if !changeset_dir.exists() {
         std::fs::create_dir_all(&changeset_dir)?;
     }
@@ -90,18 +94,6 @@ fn find_project_root(start_dir: &Path) -> Result<(PathBuf, CargoManifest), Proje
             }
         }
     }
-}
-
-fn read_manifest(path: &Path) -> Result<CargoManifest, ProjectError> {
-    let content = std::fs::read_to_string(path).map_err(|source| ProjectError::ManifestRead {
-        path: path.to_path_buf(),
-        source,
-    })?;
-
-    toml::from_str(&content).map_err(|source| ProjectError::ManifestParse {
-        path: path.to_path_buf(),
-        source,
-    })
 }
 
 fn determine_project_kind(manifest: &CargoManifest) -> ProjectKind {

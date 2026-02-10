@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use globset::{Glob, GlobSet, GlobSetBuilder};
 
 use crate::error::ProjectError;
-use crate::manifest::CargoManifest;
+use crate::manifest::read_manifest;
 use crate::project::{CargoProject, ProjectKind};
 
 #[derive(Debug)]
@@ -67,18 +67,6 @@ fn build_glob_set(patterns: &[String]) -> Result<GlobSet, ProjectError> {
     }
     builder.build().map_err(|source| ProjectError::GlobPattern {
         pattern: patterns.join(", "),
-        source,
-    })
-}
-
-fn read_manifest(path: &Path) -> Result<CargoManifest, ProjectError> {
-    let content = std::fs::read_to_string(path).map_err(|source| ProjectError::ManifestRead {
-        path: path.to_path_buf(),
-        source,
-    })?;
-
-    toml::from_str(&content).map_err(|source| ProjectError::ManifestParse {
-        path: path.to_path_buf(),
         source,
     })
 }
