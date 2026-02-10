@@ -59,6 +59,8 @@ impl Repository {
 
 #[cfg(test)]
 pub(crate) mod tests {
+    use serial_test::serial;
+
     use super::*;
     use tempfile::TempDir;
 
@@ -96,6 +98,7 @@ pub(crate) mod tests {
     }
 
     #[test]
+    #[serial]
     fn open_from_cwd_in_repo() -> anyhow::Result<()> {
         let (dir, _repo) = setup_test_repo()?;
         let original_cwd = std::env::current_dir()?;
@@ -109,6 +112,7 @@ pub(crate) mod tests {
     }
 
     #[test]
+    #[serial]
     fn open_from_cwd_not_in_repo() -> anyhow::Result<()> {
         let temp_dir = TempDir::new()?;
         let original_cwd = std::env::current_dir()?;

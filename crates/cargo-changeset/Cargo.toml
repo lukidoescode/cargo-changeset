@@ -17,7 +17,7 @@ changeset-core = { workspace = true }
 changeset-parse = { workspace = true }
 changeset-git = { workspace = true }
 changeset-version = { workspace = true }
-changeset-workspace = { workspace = true }
+changeset-project = { workspace = true }
 clap = { workspace = true }
 dialoguer = { workspace = true }
 indexmap = { workspace = true }

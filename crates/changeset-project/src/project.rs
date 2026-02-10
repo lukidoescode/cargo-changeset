@@ -4,39 +4,40 @@ use changeset_core::PackageInfo;
 use globset::GlobBuilder;
 use semver::Version;
 
-use crate::error::WorkspaceError;
-use crate::manifest::{CargoManifest, VersionField};
+use crate::config::RootChangesetConfig;
+use crate::error::ProjectError;
+use crate::manifest::{CargoManifest, VersionField, read_manifest};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum WorkspaceKind {
-    Virtual,
-    RootPackage,
-    SingleCrate,
+pub enum ProjectKind {
+    VirtualWorkspace,
+    WorkspaceWithRoot,
+    SinglePackage,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Workspace {
+pub struct CargoProject {
     pub root: PathBuf,
-    pub kind: WorkspaceKind,
+    pub kind: ProjectKind,
     pub packages: Vec<PackageInfo>,
 }
 
 /// # Errors
 ///
-/// Returns `WorkspaceError` if no workspace root can be found or if manifest parsing fails.
-pub fn discover_workspace(start_dir: &Path) -> Result<Workspace, WorkspaceError> {
+/// Returns `ProjectError` if no project root can be found or if manifest parsing fails.
+pub fn discover_project(start_dir: &Path) -> Result<CargoProject, ProjectError> {
     let start_dir = start_dir
         .canonicalize()
-        .map_err(|source| WorkspaceError::ManifestRead {
+        .map_err(|source| ProjectError::ManifestRead {
             path: start_dir.to_path_buf(),
             source,
         })?;
 
-    let (root, manifest) = find_workspace_root(&start_dir)?;
-    let kind = determine_workspace_kind(&manifest);
+    let (root, manifest) = find_project_root(&start_dir)?;
+    let kind = determine_project_kind(&manifest);
     let packages = collect_packages(&root, &manifest, &kind)?;
 
-    Ok(Workspace {
+    Ok(CargoProject {
         root,
         kind,
         packages,
@@ -45,26 +46,29 @@ pub fn discover_workspace(start_dir: &Path) -> Result<Workspace, WorkspaceError>
 
 /// # Errors
 ///
-/// Returns `WorkspaceError` if no workspace root can be found or if manifest parsing fails.
-pub fn discover_workspace_from_cwd() -> Result<Workspace, WorkspaceError> {
+/// Returns `ProjectError` if no project root can be found or if manifest parsing fails.
+pub fn discover_project_from_cwd() -> Result<CargoProject, ProjectError> {
     let cwd = std::env::current_dir()?;
-    discover_workspace(&cwd)
+    discover_project(&cwd)
 }
 
 /// # Errors
 ///
-/// Returns `WorkspaceError::Io` if directory creation fails.
-pub fn ensure_changeset_dir(workspace: &Workspace) -> Result<PathBuf, WorkspaceError> {
-    let changeset_dir = workspace.root.join(".changeset");
+/// Returns `ProjectError::Io` if directory creation fails.
+pub fn ensure_changeset_dir(
+    project: &CargoProject,
+    config: &RootChangesetConfig,
+) -> Result<PathBuf, ProjectError> {
+    let changeset_dir = project.root.join(config.changeset_dir());
     if !changeset_dir.exists() {
         std::fs::create_dir_all(&changeset_dir)?;
     }
     Ok(changeset_dir)
 }
 
-fn find_workspace_root(start_dir: &Path) -> Result<(PathBuf, CargoManifest), WorkspaceError> {
+fn find_project_root(start_dir: &Path) -> Result<(PathBuf, CargoManifest), ProjectError> {
     let mut current = start_dir.to_path_buf();
-    let mut fallback_single_crate: Option<(PathBuf, CargoManifest)> = None;
+    let mut fallback_single_package: Option<(PathBuf, CargoManifest)> = None;
 
     loop {
         let manifest_path = current.join("Cargo.toml");
@@ -76,15 +80,15 @@ fn find_workspace_root(start_dir: &Path) -> Result<(PathBuf, CargoManifest), Wor
                 return Ok((current, manifest));
             }
 
-            if manifest.package.is_some() && fallback_single_crate.is_none() {
-                fallback_single_crate = Some((current.clone(), manifest));
+            if manifest.package.is_some() && fallback_single_package.is_none() {
+                fallback_single_package = Some((current.clone(), manifest));
             }
         }
 
         match current.parent() {
             Some(parent) => current = parent.to_path_buf(),
             None => {
-                return fallback_single_crate.ok_or_else(|| WorkspaceError::NotFound {
+                return fallback_single_package.ok_or_else(|| ProjectError::NotFound {
                     start_dir: start_dir.to_path_buf(),
                 });
             }
@@ -92,31 +96,19 @@ fn find_workspace_root(start_dir: &Path) -> Result<(PathBuf, CargoManifest), Wor
     }
 }
 
-fn read_manifest(path: &Path) -> Result<CargoManifest, WorkspaceError> {
-    let content = std::fs::read_to_string(path).map_err(|source| WorkspaceError::ManifestRead {
-        path: path.to_path_buf(),
-        source,
-    })?;
-
-    toml::from_str(&content).map_err(|source| WorkspaceError::ManifestParse {
-        path: path.to_path_buf(),
-        source,
-    })
-}
-
-fn determine_workspace_kind(manifest: &CargoManifest) -> WorkspaceKind {
+fn determine_project_kind(manifest: &CargoManifest) -> ProjectKind {
     match (&manifest.workspace, &manifest.package) {
-        (Some(_), Some(_)) => WorkspaceKind::RootPackage,
-        (None, Some(_)) => WorkspaceKind::SingleCrate,
-        (Some(_) | None, None) => WorkspaceKind::Virtual,
+        (Some(_), Some(_)) => ProjectKind::WorkspaceWithRoot,
+        (None, Some(_)) => ProjectKind::SinglePackage,
+        (Some(_) | None, None) => ProjectKind::VirtualWorkspace,
     }
 }
 
 fn collect_packages(
     root: &Path,
     manifest: &CargoManifest,
-    kind: &WorkspaceKind,
-) -> Result<Vec<PackageInfo>, WorkspaceError> {
+    kind: &ProjectKind,
+) -> Result<Vec<PackageInfo>, ProjectError> {
     let workspace_version = manifest
         .workspace
         .as_ref()
@@ -125,7 +117,7 @@ fn collect_packages(
 
     let mut packages = Vec::new();
 
-    if *kind == WorkspaceKind::RootPackage {
+    if *kind == ProjectKind::WorkspaceWithRoot {
         if let Some(pkg) = &manifest.package {
             let version = resolve_version(
                 pkg.version.as_ref(),
@@ -140,7 +132,7 @@ fn collect_packages(
         }
     }
 
-    if *kind == WorkspaceKind::SingleCrate {
+    if *kind == ProjectKind::SinglePackage {
         if let Some(pkg) = &manifest.package {
             let version = resolve_version(
                 pkg.version.as_ref(),
@@ -192,17 +184,17 @@ fn resolve_version(
     version_field: Option<&VersionField>,
     workspace_version: Option<&String>,
     manifest_path: &Path,
-) -> Result<Version, WorkspaceError> {
+) -> Result<Version, ProjectError> {
     let version_str = match version_field {
         Some(VersionField::Literal(v)) => v.clone(),
         Some(VersionField::Inherited(inherited)) if inherited.workspace => workspace_version
-            .ok_or_else(|| WorkspaceError::MissingField {
+            .ok_or_else(|| ProjectError::MissingField {
                 path: manifest_path.to_path_buf(),
                 field: "workspace.package.version",
             })?
             .clone(),
         Some(VersionField::Inherited(_)) | None => {
-            return Err(WorkspaceError::MissingField {
+            return Err(ProjectError::MissingField {
                 path: manifest_path.to_path_buf(),
                 field: "package.version",
             });
@@ -211,7 +203,7 @@ fn resolve_version(
 
     version_str
         .parse()
-        .map_err(|source| WorkspaceError::InvalidVersion {
+        .map_err(|source| ProjectError::InvalidVersion {
             path: manifest_path.to_path_buf(),
             version: version_str,
             source,
@@ -222,11 +214,11 @@ fn expand_glob_pattern(
     root: &Path,
     pattern: &str,
     excludes: &[String],
-) -> Result<Vec<PathBuf>, WorkspaceError> {
+) -> Result<Vec<PathBuf>, ProjectError> {
     let glob = GlobBuilder::new(pattern)
         .literal_separator(true)
         .build()
-        .map_err(|source| WorkspaceError::GlobPattern {
+        .map_err(|source| ProjectError::GlobPattern {
             pattern: pattern.to_string(),
             source,
         })?
@@ -255,7 +247,7 @@ fn collect_matching_dirs(
     glob: &globset::GlobMatcher,
     excludes: &[globset::GlobMatcher],
     results: &mut Vec<PathBuf>,
-) -> Result<(), WorkspaceError> {
+) -> Result<(), ProjectError> {
     let entries = std::fs::read_dir(current)?;
 
     for entry in entries {
@@ -266,6 +258,7 @@ fn collect_matching_dirs(
             continue;
         }
 
+        // Fallback to full path if strip_prefix fails (shouldn't happen in practice)
         let relative = path.strip_prefix(base).unwrap_or(&path);
 
         if excludes.iter().any(|ex| ex.is_match(relative)) {
@@ -287,49 +280,56 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_determine_workspace_kind_virtual() {
+    fn test_determine_project_kind_virtual() {
         let manifest = CargoManifest {
             package: None,
             workspace: Some(crate::manifest::WorkspaceSection {
                 members: Some(vec!["crates/*".to_string()]),
                 exclude: None,
                 package: None,
+                metadata: None,
             }),
         };
-        assert_eq!(determine_workspace_kind(&manifest), WorkspaceKind::Virtual);
+        assert_eq!(
+            determine_project_kind(&manifest),
+            ProjectKind::VirtualWorkspace
+        );
     }
 
     #[test]
-    fn test_determine_workspace_kind_root_package() {
+    fn test_determine_project_kind_workspace_with_root() {
         let manifest = CargoManifest {
             package: Some(crate::manifest::Package {
                 name: "test".to_string(),
                 version: Some(VersionField::Literal("1.0.0".to_string())),
+                metadata: None,
             }),
             workspace: Some(crate::manifest::WorkspaceSection {
                 members: Some(vec!["crates/*".to_string()]),
                 exclude: None,
                 package: None,
+                metadata: None,
             }),
         };
         assert_eq!(
-            determine_workspace_kind(&manifest),
-            WorkspaceKind::RootPackage
+            determine_project_kind(&manifest),
+            ProjectKind::WorkspaceWithRoot
         );
     }
 
     #[test]
-    fn test_determine_workspace_kind_single_crate() {
+    fn test_determine_project_kind_single_package() {
         let manifest = CargoManifest {
             package: Some(crate::manifest::Package {
                 name: "test".to_string(),
                 version: Some(VersionField::Literal("1.0.0".to_string())),
+                metadata: None,
             }),
             workspace: None,
         };
         assert_eq!(
-            determine_workspace_kind(&manifest),
-            WorkspaceKind::SingleCrate
+            determine_project_kind(&manifest),
+            ProjectKind::SinglePackage
         );
     }
 }
