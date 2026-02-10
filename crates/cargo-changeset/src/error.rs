@@ -21,6 +21,9 @@ pub enum CliError {
 
     #[error("internal error: single-crate workspace has no packages")]
     WorkspaceInvariantViolation,
+
+    #[error("unknown crate '{name}' (available: {available})")]
+    UnknownCrate { name: String, available: String },
 }
 
 pub type Result<T> = std::result::Result<T, CliError>;
@@ -94,5 +97,18 @@ mod tests {
 
         assert!(msg.contains("internal error"));
         assert!(msg.contains("single-crate"));
+    }
+
+    #[test]
+    fn unknown_crate_error_includes_name_and_available() {
+        let err = CliError::UnknownCrate {
+            name: "missing".to_string(),
+            available: "foo, bar".to_string(),
+        };
+
+        let msg = err.to_string();
+
+        assert!(msg.contains("missing"));
+        assert!(msg.contains("foo, bar"));
     }
 }

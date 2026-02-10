@@ -20,6 +20,7 @@ changeset-version = { workspace = true }
 changeset-workspace = { workspace = true }
 clap = { workspace = true }
 dialoguer = { workspace = true }
+indexmap = { workspace = true }
 thiserror = { workspace = true }
 
 [dev-dependencies]

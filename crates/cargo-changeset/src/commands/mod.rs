@@ -1,13 +1,13 @@
 mod add;
 
-use clap::Subcommand;
+use clap::{Args, Subcommand};
 
 use crate::error::Result;
 
 #[derive(Subcommand)]
 pub(crate) enum Commands {
     /// Add a new changeset
-    Add,
+    Add(AddArgs),
     /// Show status of changesets
     Status,
     /// Bump versions based on changesets
@@ -16,10 +16,17 @@ pub(crate) enum Commands {
     Init,
 }
 
+#[derive(Args)]
+pub(crate) struct AddArgs {
+    /// Crate(s) to include in the changeset (skips interactive selection)
+    #[arg(long = "crate", value_name = "NAME")]
+    pub crates: Vec<String>,
+}
+
 impl Commands {
     pub(crate) fn execute(self) -> Result<()> {
         match self {
-            Self::Add => add::run(),
+            Self::Add(args) => add::run(args),
             Self::Status => {
                 println!("Status command not yet implemented");
                 Ok(())
