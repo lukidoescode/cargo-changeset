@@ -14,14 +14,11 @@ path = "src/main.rs"
 
 [dependencies]
 changeset-core = { workspace = true }
-changeset-parse = { workspace = true }
 changeset-git = { workspace = true }
-changeset-version = { workspace = true }
+changeset-operations = { workspace = true }
 changeset-project = { workspace = true }
 clap = { workspace = true }
 dialoguer = { workspace = true }
-indexmap = { workspace = true }
-petname = { workspace = true }
 tempfile = "3.25"
 thiserror = { workspace = true }
 

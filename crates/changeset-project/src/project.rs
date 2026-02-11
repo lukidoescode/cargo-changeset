@@ -46,14 +46,6 @@ pub fn discover_project(start_dir: &Path) -> Result<CargoProject, ProjectError> 
 
 /// # Errors
 ///
-/// Returns `ProjectError` if no project root can be found or if manifest parsing fails.
-pub fn discover_project_from_cwd() -> Result<CargoProject, ProjectError> {
-    let cwd = std::env::current_dir()?;
-    discover_project(&cwd)
-}
-
-/// # Errors
-///
 /// Returns `ProjectError::Io` if directory creation fails.
 pub fn ensure_changeset_dir(
     project: &CargoProject,

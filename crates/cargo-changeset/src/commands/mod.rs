@@ -1,5 +1,9 @@
 mod add;
+mod init;
+mod status;
 mod verify;
+
+use std::path::Path;
 
 use changeset_core::{BumpType, ChangeCategory};
 use clap::{Args, Subcommand};
@@ -12,11 +16,11 @@ pub(crate) enum Commands {
     Add(AddArgs),
     /// Verify changeset coverage for changed packages
     Verify(VerifyArgs),
-    /// Show status of changesets
+    /// Show pending changesets and projected version bumps
     Status,
     /// Bump versions based on changesets
     Version,
-    /// Initialize changeset configuration
+    /// Initialize changeset directory in the project
     Init,
 }
 
@@ -71,25 +75,19 @@ pub(crate) struct ExecuteResult {
 }
 
 impl Commands {
-    pub(crate) fn execute(self) -> (Result<()>, ExecuteResult) {
+    pub(crate) fn execute(self, start_path: &Path) -> (Result<()>, ExecuteResult) {
         match self {
-            Self::Add(args) => (add::run(args), ExecuteResult { quiet: false }),
+            Self::Add(args) => (add::run(args, start_path), ExecuteResult { quiet: false }),
             Self::Verify(args) => {
                 let quiet = args.quiet;
-                (verify::run(args), ExecuteResult { quiet })
+                (verify::run(args, start_path), ExecuteResult { quiet })
             }
-            Self::Status => {
-                println!("Status command not yet implemented");
-                (Ok(()), ExecuteResult { quiet: false })
-            }
+            Self::Status => (status::run(start_path), ExecuteResult { quiet: false }),
             Self::Version => {
                 println!("Version command not yet implemented");
                 (Ok(()), ExecuteResult { quiet: false })
             }
-            Self::Init => {
-                println!("Init command not yet implemented");
-                (Ok(()), ExecuteResult { quiet: false })
-            }
+            Self::Init => (init::run(start_path), ExecuteResult { quiet: false }),
         }
     }
 }

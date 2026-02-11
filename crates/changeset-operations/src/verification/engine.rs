@@ -2,13 +2,14 @@ use std::collections::HashSet;
 
 use super::rules::VerificationRule;
 use super::{VerificationContext, VerificationResult};
-use crate::error::Result;
+use crate::Result;
 
-pub(crate) struct VerificationEngine<'a> {
+pub struct VerificationEngine<'a> {
     rules: Vec<&'a dyn VerificationRule>,
 }
 
 impl<'a> VerificationEngine<'a> {
+    #[must_use]
     pub fn new() -> Self {
         Self { rules: Vec::new() }
     }
@@ -17,6 +18,9 @@ impl<'a> VerificationEngine<'a> {
         self.rules.push(rule);
     }
 
+    /// # Errors
+    ///
+    /// Returns an error if any verification rule fails.
     pub fn verify(&self, context: &VerificationContext) -> Result<VerificationResult> {
         let mut result = VerificationResult {
             affected_packages: context.affected_packages.clone(),
@@ -32,5 +36,11 @@ impl<'a> VerificationEngine<'a> {
         }
 
         Ok(result)
+    }
+}
+
+impl Default for VerificationEngine<'_> {
+    fn default() -> Self {
+        Self::new()
     }
 }

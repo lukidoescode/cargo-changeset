@@ -1,8 +1,8 @@
 use super::{VerificationContext, VerificationResult, VerificationRule};
-use crate::error::Result;
-use crate::verification::ChangesetReader;
+use crate::Result;
+use crate::traits::ChangesetReader;
 
-pub(crate) struct CoverageRule<'a, R: ChangesetReader> {
+pub struct CoverageRule<'a, R: ChangesetReader> {
     reader: &'a R,
 }
 
