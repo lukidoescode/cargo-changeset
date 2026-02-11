@@ -58,12 +58,10 @@ pub enum CliError {
     #[error("{uncovered_count} package(s) have changes without changeset coverage")]
     VerificationFailed { uncovered_count: usize },
 
-    #[error("failed to read changeset directory '{path}'")]
-    ChangesetDirRead {
-        path: PathBuf,
-        #[source]
-        source: std::io::Error,
-    },
+    #[error(
+        "changeset files were deleted in this branch (use --allow-deleted-changesets to bypass)"
+    )]
+    ChangesetDeleted { paths: Vec<PathBuf> },
 
     #[error("failed to read changeset file '{path}'")]
     ChangesetFileRead {

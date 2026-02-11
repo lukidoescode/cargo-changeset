@@ -1,7 +1,7 @@
 use std::collections::HashSet;
 use std::path::PathBuf;
 
-use changeset_git::Repository;
+use changeset_git::{FileStatus, Repository};
 use changeset_parse::parse_changeset;
 use changeset_project::{discover_project_from_cwd, load_changeset_configs, map_files_to_packages};
 
@@ -18,14 +18,49 @@ pub(crate) fn run(args: VerifyArgs) -> Result<()> {
     let head_ref = args.head.as_deref().unwrap_or("HEAD");
     let changed_files = repo.changed_files(Some(&args.base), head_ref)?;
 
-    let changed_paths: Vec<PathBuf> = changed_files
+    let (changeset_changes, code_changes): (Vec<_>, Vec<_>) = changed_files
         .into_iter()
-        .filter(|change| !change.path.starts_with(changeset_dir))
+        .partition(|change| change.path.starts_with(changeset_dir));
+
+    let deleted_changesets: Vec<PathBuf> = changeset_changes
+        .iter()
+        .filter_map(|change| {
+            let is_md = |p: &std::path::Path| p.extension().is_some_and(|ext| ext == "md");
+
+            match change.status {
+                FileStatus::Deleted if is_md(&change.path) => Some(change.path.clone()),
+                FileStatus::Renamed => change
+                    .old_path
+                    .as_ref()
+                    .filter(|old| old.starts_with(changeset_dir) && is_md(old))
+                    .cloned(),
+                _ => None,
+            }
+        })
+        .collect();
+
+    if !deleted_changesets.is_empty() && !args.allow_deleted_changesets {
+        return Err(CliError::ChangesetDeleted {
+            paths: deleted_changesets,
+        });
+    }
+
+    let changeset_files_in_diff: Vec<PathBuf> = changeset_changes
+        .into_iter()
+        .filter(|change| {
+            change.path.extension().is_some_and(|ext| ext == "md")
+                && matches!(
+                    change.status,
+                    FileStatus::Added | FileStatus::Modified | FileStatus::Renamed
+                )
+        })
         .map(|change| change.path)
         .collect();
 
+    let changed_paths: Vec<PathBuf> = code_changes.into_iter().map(|change| change.path).collect();
+
     if changed_paths.is_empty() {
-        if args.verbose {
+        if !args.quiet {
             println!("No files changed (excluding {})", changeset_dir.display());
         }
         return Ok(());
@@ -36,7 +71,7 @@ pub(crate) fn run(args: VerifyArgs) -> Result<()> {
     let affected_packages = mapping.affected_packages();
 
     if affected_packages.is_empty() {
-        if args.verbose {
+        if !args.quiet {
             println!("No packages affected by changes");
             if !mapping.project_files.is_empty() {
                 println!(
@@ -54,15 +89,14 @@ pub(crate) fn run(args: VerifyArgs) -> Result<()> {
         return Ok(());
     }
 
-    let changeset_dir_path = project.root.join(changeset_dir);
-    let covered_packages = get_covered_packages(&changeset_dir_path)?;
+    let covered_packages = get_covered_packages(&project.root, &changeset_files_in_diff)?;
 
     let uncovered: Vec<_> = affected_packages
         .iter()
         .filter(|pkg| !covered_packages.contains(&pkg.name))
         .collect();
 
-    if args.verbose {
+    if !args.quiet {
         println!("Changed packages:");
         for pkg in &affected_packages {
             let status = if covered_packages.contains(&pkg.name) {
@@ -96,12 +130,12 @@ pub(crate) fn run(args: VerifyArgs) -> Result<()> {
     }
 
     if uncovered.is_empty() {
-        if args.verbose {
+        if !args.quiet {
             println!("\nAll changed packages have changeset coverage");
         }
         Ok(())
     } else {
-        if !args.verbose {
+        if !args.quiet {
             eprintln!("Packages without changeset coverage:");
             for pkg in &uncovered {
                 eprintln!("  {}", pkg.name);
@@ -113,42 +147,28 @@ pub(crate) fn run(args: VerifyArgs) -> Result<()> {
     }
 }
 
-fn get_covered_packages(changeset_dir: &std::path::Path) -> Result<HashSet<String>> {
-    if !changeset_dir.exists() {
-        return Ok(HashSet::new());
-    }
-
+fn get_covered_packages(
+    project_root: &std::path::Path,
+    changeset_files: &[PathBuf],
+) -> Result<HashSet<String>> {
     let mut covered = HashSet::new();
 
-    let entries =
-        std::fs::read_dir(changeset_dir).map_err(|source| CliError::ChangesetDirRead {
-            path: changeset_dir.to_path_buf(),
+    for relative_path in changeset_files {
+        let path = project_root.join(relative_path);
+
+        let content =
+            std::fs::read_to_string(&path).map_err(|source| CliError::ChangesetFileRead {
+                path: path.clone(),
+                source,
+            })?;
+
+        let changeset = parse_changeset(&content).map_err(|source| CliError::ChangesetParse {
+            path: path.clone(),
             source,
         })?;
 
-    for entry in entries {
-        let entry = entry.map_err(|source| CliError::ChangesetDirRead {
-            path: changeset_dir.to_path_buf(),
-            source,
-        })?;
-        let path = entry.path();
-
-        if path.extension().is_some_and(|ext| ext == "md") {
-            let content =
-                std::fs::read_to_string(&path).map_err(|source| CliError::ChangesetFileRead {
-                    path: path.clone(),
-                    source,
-                })?;
-
-            let changeset =
-                parse_changeset(&content).map_err(|source| CliError::ChangesetParse {
-                    path: path.clone(),
-                    source,
-                })?;
-
-            for release in changeset.releases {
-                covered.insert(release.name);
-            }
+        for release in changeset.releases {
+            covered.insert(release.name);
         }
     }
 

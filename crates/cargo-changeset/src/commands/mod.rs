@@ -57,27 +57,38 @@ pub(crate) struct VerifyArgs {
     #[arg(long)]
     pub head: Option<String>,
 
-    /// Show detailed output
-    #[arg(long, short)]
-    pub verbose: bool,
+    /// Suppress all output (exit code only, for CI)
+    #[arg(long, short = 'q')]
+    pub quiet: bool,
+
+    /// Allow deleted changeset files (not recommended)
+    #[arg(long, short = 'd')]
+    pub allow_deleted_changesets: bool,
+}
+
+pub(crate) struct ExecuteResult {
+    pub quiet: bool,
 }
 
 impl Commands {
-    pub(crate) fn execute(self) -> Result<()> {
+    pub(crate) fn execute(self) -> (Result<()>, ExecuteResult) {
         match self {
-            Self::Add(args) => add::run(args),
-            Self::Verify(args) => verify::run(args),
+            Self::Add(args) => (add::run(args), ExecuteResult { quiet: false }),
+            Self::Verify(args) => {
+                let quiet = args.quiet;
+                (verify::run(args), ExecuteResult { quiet })
+            }
             Self::Status => {
                 println!("Status command not yet implemented");
-                Ok(())
+                (Ok(()), ExecuteResult { quiet: false })
             }
             Self::Version => {
                 println!("Version command not yet implemented");
-                Ok(())
+                (Ok(()), ExecuteResult { quiet: false })
             }
             Self::Init => {
                 println!("Init command not yet implemented");
-                Ok(())
+                (Ok(()), ExecuteResult { quiet: false })
             }
         }
     }
