@@ -1,5 +1,6 @@
 mod add;
 mod init;
+mod release;
 mod status;
 mod verify;
 
@@ -18,8 +19,8 @@ pub(crate) enum Commands {
     Verify(VerifyArgs),
     /// Show pending changesets and projected version bumps
     Status,
-    /// Bump versions based on changesets
-    Version,
+    /// Calculate version bumps and prepare releases based on pending changesets
+    Release(ReleaseArgs),
     /// Initialize changeset directory in the project
     Init,
 }
@@ -70,6 +71,13 @@ pub(crate) struct VerifyArgs {
     pub allow_deleted_changesets: bool,
 }
 
+#[derive(Args)]
+pub(crate) struct ReleaseArgs {
+    /// Preview changes without modifying any files
+    #[arg(long)]
+    pub dry_run: bool,
+}
+
 pub(crate) struct ExecuteResult {
     pub quiet: bool,
 }
@@ -83,10 +91,10 @@ impl Commands {
                 (verify::run(args, start_path), ExecuteResult { quiet })
             }
             Self::Status => (status::run(start_path), ExecuteResult { quiet: false }),
-            Self::Version => {
-                println!("Version command not yet implemented");
-                (Ok(()), ExecuteResult { quiet: false })
-            }
+            Self::Release(args) => (
+                release::run(args, start_path),
+                ExecuteResult { quiet: false },
+            ),
             Self::Init => (init::run(start_path), ExecuteResult { quiet: false }),
         }
     }

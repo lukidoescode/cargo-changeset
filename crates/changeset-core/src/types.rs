@@ -4,12 +4,41 @@ use clap::ValueEnum;
 use semver::Version;
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ValueEnum)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, ValueEnum)]
 #[serde(rename_all = "lowercase")]
 pub enum BumpType {
-    Major,
-    Minor,
     Patch,
+    Minor,
+    Major,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn bump_type_ordering_patch_is_smallest() {
+        assert!(BumpType::Patch < BumpType::Minor);
+        assert!(BumpType::Patch < BumpType::Major);
+    }
+
+    #[test]
+    fn bump_type_ordering_minor_is_middle() {
+        assert!(BumpType::Minor > BumpType::Patch);
+        assert!(BumpType::Minor < BumpType::Major);
+    }
+
+    #[test]
+    fn bump_type_ordering_major_is_largest() {
+        assert!(BumpType::Major > BumpType::Patch);
+        assert!(BumpType::Major > BumpType::Minor);
+    }
+
+    #[test]
+    fn bump_type_max_returns_largest() {
+        let bumps = [BumpType::Patch, BumpType::Minor, BumpType::Major];
+        assert_eq!(bumps.iter().max(), Some(&BumpType::Major));
+    }
 }
 
 #[derive(
