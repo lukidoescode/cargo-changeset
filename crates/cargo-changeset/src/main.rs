@@ -1,5 +1,7 @@
 mod commands;
 mod error;
+mod output;
+mod verification;
 
 use std::process::ExitCode;
 
