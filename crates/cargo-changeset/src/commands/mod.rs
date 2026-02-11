@@ -76,6 +76,10 @@ pub(crate) struct ReleaseArgs {
     /// Preview changes without modifying any files
     #[arg(long)]
     pub dry_run: bool,
+
+    /// Convert inherited versions (version.workspace = true) to explicit versions
+    #[arg(long)]
+    pub convert: bool,
 }
 
 pub(crate) struct ExecuteResult {

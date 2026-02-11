@@ -3,7 +3,9 @@ use std::path::Path;
 use changeset_operations::operations::{
     ReleaseInput, ReleaseOperation, ReleaseOutcome, ReleaseOutput,
 };
-use changeset_operations::providers::{FileSystemChangesetIO, FileSystemProjectProvider};
+use changeset_operations::providers::{
+    FileSystemChangesetIO, FileSystemManifestWriter, FileSystemProjectProvider,
+};
 use changeset_operations::traits::ProjectProvider;
 
 use super::ReleaseArgs;
@@ -13,10 +15,12 @@ pub(crate) fn run(args: ReleaseArgs, start_path: &Path) -> Result<()> {
     let project_provider = FileSystemProjectProvider::new();
     let project = project_provider.discover_project(start_path)?;
     let changeset_reader = FileSystemChangesetIO::new(&project.root);
+    let manifest_writer = FileSystemManifestWriter::new();
 
-    let operation = ReleaseOperation::new(project_provider, changeset_reader);
+    let operation = ReleaseOperation::new(project_provider, changeset_reader, manifest_writer);
     let input = ReleaseInput {
         dry_run: args.dry_run,
+        convert_inherited: args.convert,
     };
     let outcome = operation.execute(start_path, &input)?;
 

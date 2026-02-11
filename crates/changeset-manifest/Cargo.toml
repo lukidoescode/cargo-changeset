@@ -1,0 +1,20 @@
+[package]
+name = "changeset-manifest"
+version = "0.0.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+description = "Format-preserving Cargo.toml read/write operations"
+
+[dependencies]
+semver = { workspace = true }
+thiserror = { workspace = true }
+toml_edit = { workspace = true }
+
+[dev-dependencies]
+tempfile = "3.25"
+
+[lints]
+workspace = true
