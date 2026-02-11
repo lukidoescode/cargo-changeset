@@ -1,11 +1,12 @@
 use super::{VerificationContext, VerificationResult, VerificationRule};
-use crate::error::Result;
+use crate::Result;
 
-pub(crate) struct DeletedChangesetsRule {
+pub struct DeletedChangesetsRule {
     allow_deleted: bool,
 }
 
 impl DeletedChangesetsRule {
+    #[must_use]
     pub fn new(allow_deleted: bool) -> Self {
         Self { allow_deleted }
     }

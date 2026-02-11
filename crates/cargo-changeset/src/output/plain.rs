@@ -1,7 +1,8 @@
 use std::path::PathBuf;
 
+use changeset_operations::verification::VerificationResult;
+
 use super::OutputFormatter;
-use crate::verification::VerificationResult;
 
 pub(crate) struct PlainTextFormatter;
 

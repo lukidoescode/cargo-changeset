@@ -1,4 +1,4 @@
-use crate::verification::VerificationResult;
+use changeset_operations::verification::VerificationResult;
 
 pub(crate) trait OutputFormatter {
     fn format_success(&self, result: &VerificationResult) -> String;

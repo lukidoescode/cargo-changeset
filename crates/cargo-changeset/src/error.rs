@@ -19,8 +19,8 @@ pub enum CliError {
     #[error("IO error")]
     Io(#[from] std::io::Error),
 
-    #[error("format error")]
-    Format(#[from] changeset_parse::FormatError),
+    #[error("operation error")]
+    Operation(#[from] changeset_operations::OperationError),
 
     #[error("operation cancelled by user")]
     Cancelled,
@@ -65,20 +65,6 @@ pub enum CliError {
         "changeset files were deleted in this branch (use --allow-deleted-changesets to bypass)"
     )]
     ChangesetDeleted { paths: Vec<PathBuf> },
-
-    #[error("failed to read changeset file '{path}'")]
-    ChangesetFileRead {
-        path: PathBuf,
-        #[source]
-        source: std::io::Error,
-    },
-
-    #[error("failed to parse changeset file '{path}'")]
-    ChangesetParse {
-        path: PathBuf,
-        #[source]
-        source: changeset_parse::FormatError,
-    },
 }
 
 pub type Result<T> = std::result::Result<T, CliError>;
@@ -231,12 +217,11 @@ mod tests {
     }
 
     #[test]
-    fn format_error_converts_via_from() {
-        let format_err =
-            changeset_parse::FormatError::from(changeset_parse::ValidationError::NoReleases);
+    fn operation_error_converts_via_from() {
+        let op_err = changeset_operations::OperationError::Cancelled;
 
-        let cli_err: CliError = format_err.into();
+        let cli_err: CliError = op_err.into();
 
-        assert!(matches!(cli_err, CliError::Format(_)));
+        assert!(matches!(cli_err, CliError::Operation(_)));
     }
 }

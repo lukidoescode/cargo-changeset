@@ -1,7 +1,7 @@
 mod commands;
 mod error;
+mod interaction;
 mod output;
-mod verification;
 
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -54,11 +54,60 @@ fn resolve_start_path(path: Option<PathBuf>) -> Result<PathBuf, CliError> {
 }
 
 fn print_error(error: &CliError) {
-    eprintln!("error: {error}");
+    if let CliError::Operation(op_err) = error {
+        print_operation_error(op_err);
+    } else {
+        eprintln!("error: {error}");
 
-    let mut source = std::error::Error::source(error);
-    while let Some(cause) = source {
-        eprintln!("caused by: {cause}");
-        source = std::error::Error::source(cause);
+        let mut source = std::error::Error::source(error);
+        while let Some(cause) = source {
+            eprintln!("caused by: {cause}");
+            source = std::error::Error::source(cause);
+        }
+    }
+}
+
+fn print_operation_error(error: &changeset_operations::OperationError) {
+    use changeset_operations::OperationError;
+
+    match error {
+        OperationError::InteractionRequired => {
+            eprintln!("error: interactive mode requires a terminal");
+        }
+        OperationError::MissingBumpType { package_name } => {
+            eprintln!(
+                "error: missing bump type for package '{package_name}' (use --bump or --package-bump)"
+            );
+        }
+        OperationError::MissingDescription => {
+            eprintln!("error: missing description (use -m or provide interactively)");
+        }
+        OperationError::EmptyDescription => {
+            eprintln!("error: description cannot be empty");
+        }
+        OperationError::EmptyProject(path) => {
+            eprintln!(
+                "error: no packages found in project at '{}'",
+                path.display()
+            );
+        }
+        OperationError::UnknownPackage { name, available } => {
+            eprintln!("error: unknown package '{name}' (available: {available})");
+        }
+        OperationError::Project(e) => {
+            eprintln!("error: project error");
+            eprintln!("caused by: {e}");
+        }
+        OperationError::Cancelled => {
+            eprintln!("error: operation cancelled by user");
+        }
+        _ => {
+            eprintln!("error: {error}");
+            let mut source = std::error::Error::source(error);
+            while let Some(cause) = source {
+                eprintln!("caused by: {cause}");
+                source = std::error::Error::source(cause);
+            }
+        }
     }
 }

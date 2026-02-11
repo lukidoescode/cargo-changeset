@@ -23,6 +23,7 @@ changeset-git = { path = "crates/changeset-git" }
 changeset-version = { path = "crates/changeset-version" }
 changeset-project = { path = "crates/changeset-project" }
 changeset-changelog = { path = "crates/changeset-changelog" }
+changeset-operations = { path = "crates/changeset-operations" }
 
 # External dependencies
 indexmap = { version = "2.7.1", features = ["serde"] }
