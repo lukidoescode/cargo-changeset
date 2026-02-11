@@ -7,7 +7,7 @@ use std::process::Command;
 use changeset_core::{BumpType, ChangeCategory, Changeset, PackageInfo, PackageRelease};
 use changeset_parse::serialize_changeset;
 use changeset_project::{
-    CargoProject, ProjectKind, discover_project_from_cwd, ensure_changeset_dir, parse_root_config,
+    CargoProject, ProjectKind, discover_project, ensure_changeset_dir, parse_root_config,
 };
 use dialoguer::{MultiSelect, Select};
 use indexmap::IndexSet;
@@ -24,10 +24,10 @@ fn validate_package_bump_args(package_bumps: &[String]) -> Result<()> {
     Ok(())
 }
 
-pub(super) fn run(args: AddArgs) -> Result<()> {
+pub(super) fn run(args: AddArgs, start_path: &Path) -> Result<()> {
     validate_package_bump_args(&args.package_bumps)?;
 
-    let project = discover_project_from_cwd()?;
+    let project = discover_project(start_path)?;
 
     if project.packages.is_empty() {
         return Err(CliError::EmptyProject(project.root));

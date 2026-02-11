@@ -2,7 +2,7 @@ use std::path::{Path, PathBuf};
 
 use changeset_git::{FileChange, FileStatus, Repository};
 use changeset_project::{
-    FileMapping, discover_project_from_cwd, load_changeset_configs, map_files_to_packages,
+    FileMapping, discover_project, load_changeset_configs, map_files_to_packages,
 };
 
 use super::VerifyArgs;
@@ -69,8 +69,8 @@ fn build_context(
     }
 }
 
-pub(crate) fn run(args: VerifyArgs) -> Result<()> {
-    let project = discover_project_from_cwd()?;
+pub(crate) fn run(args: VerifyArgs, start_path: &Path) -> Result<()> {
+    let project = discover_project(start_path)?;
     let repo = Repository::open(&project.root)?;
     let (root_config, package_configs) = load_changeset_configs(&project)?;
     let changeset_dir = root_config.changeset_dir();

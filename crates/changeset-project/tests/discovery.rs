@@ -1,8 +1,6 @@
 use std::path::PathBuf;
 
-use changeset_project::{
-    ProjectError, ProjectKind, discover_project, discover_project_from_cwd, parse_root_config,
-};
+use changeset_project::{ProjectError, ProjectKind, discover_project, parse_root_config};
 
 fn fixtures_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures")
@@ -236,7 +234,8 @@ fn ensure_changeset_dir_is_idempotent() {
 }
 
 #[test]
-fn discover_project_from_cwd_works() {
-    let result = discover_project_from_cwd();
+fn discover_project_from_current_directory_works() {
+    let cwd = std::env::current_dir().expect("current_dir should succeed");
+    let result = discover_project(&cwd);
     assert!(result.is_ok());
 }

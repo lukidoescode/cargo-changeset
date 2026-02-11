@@ -33,16 +33,6 @@ impl Repository {
         Ok(Self { inner, root })
     }
 
-    /// # Errors
-    ///
-    /// Returns [`GitError::NotARepository`] if the current directory is not inside a git repository.
-    pub fn open_from_cwd() -> Result<Self> {
-        let cwd = std::env::current_dir().map_err(|_| GitError::NotARepository {
-            path: PathBuf::from("."),
-        })?;
-        Self::open(&cwd)
-    }
-
     #[must_use]
     pub fn root(&self) -> &Path {
         &self.root
@@ -59,8 +49,6 @@ impl Repository {
 
 #[cfg(test)]
 pub(crate) mod tests {
-    use serial_test::serial;
-
     use super::*;
     use tempfile::TempDir;
 
@@ -95,33 +83,5 @@ pub(crate) mod tests {
         let dir = TempDir::new().expect("failed to create temp dir");
         let result = Repository::open(dir.path());
         assert!(matches!(result, Err(GitError::NotARepository { .. })));
-    }
-
-    #[test]
-    #[serial]
-    fn open_from_cwd_in_repo() -> anyhow::Result<()> {
-        let (dir, _repo) = setup_test_repo()?;
-        let original_cwd = std::env::current_dir()?;
-
-        std::env::set_current_dir(dir.path())?;
-        let result = Repository::open_from_cwd();
-        std::env::set_current_dir(original_cwd)?;
-
-        assert!(result.is_ok());
-        Ok(())
-    }
-
-    #[test]
-    #[serial]
-    fn open_from_cwd_not_in_repo() -> anyhow::Result<()> {
-        let temp_dir = TempDir::new()?;
-        let original_cwd = std::env::current_dir()?;
-
-        std::env::set_current_dir(temp_dir.path())?;
-        let result = Repository::open_from_cwd();
-        std::env::set_current_dir(original_cwd)?;
-
-        assert!(matches!(result, Err(GitError::NotARepository { .. })));
-        Ok(())
     }
 }

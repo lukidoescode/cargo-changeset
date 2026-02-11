@@ -1,6 +1,8 @@
 mod add;
 mod verify;
 
+use std::path::Path;
+
 use changeset_core::{BumpType, ChangeCategory};
 use clap::{Args, Subcommand};
 
@@ -71,12 +73,12 @@ pub(crate) struct ExecuteResult {
 }
 
 impl Commands {
-    pub(crate) fn execute(self) -> (Result<()>, ExecuteResult) {
+    pub(crate) fn execute(self, start_path: &Path) -> (Result<()>, ExecuteResult) {
         match self {
-            Self::Add(args) => (add::run(args), ExecuteResult { quiet: false }),
+            Self::Add(args) => (add::run(args, start_path), ExecuteResult { quiet: false }),
             Self::Verify(args) => {
                 let quiet = args.quiet;
-                (verify::run(args), ExecuteResult { quiet })
+                (verify::run(args, start_path), ExecuteResult { quiet })
             }
             Self::Status => {
                 println!("Status command not yet implemented");

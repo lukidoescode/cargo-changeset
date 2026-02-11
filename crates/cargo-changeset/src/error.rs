@@ -13,6 +13,9 @@ pub enum CliError {
     #[error("project error")]
     Project(#[from] changeset_project::ProjectError),
 
+    #[error("failed to determine current directory")]
+    CurrentDir(#[source] std::io::Error),
+
     #[error("IO error")]
     Io(#[from] std::io::Error),
 
