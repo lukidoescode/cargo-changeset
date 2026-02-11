@@ -118,9 +118,21 @@ fn is_interactive() -> bool {
 }
 
 fn cli_to_operation_error(e: CliError) -> changeset_operations::OperationError {
+    use changeset_operations::OperationError;
+
     match e {
-        CliError::Io(io) => changeset_operations::OperationError::Io(io),
-        _ => changeset_operations::OperationError::Cancelled,
+        CliError::Io(io) => OperationError::Io(io),
+        CliError::NotATty => OperationError::InteractionRequired,
+        CliError::EditorFailed { source } => OperationError::Io(source),
+        CliError::Core(e) => OperationError::Core(e),
+        CliError::Git(e) => OperationError::Git(e),
+        CliError::Project(e) => OperationError::Project(e),
+        CliError::Operation(e) => e,
+        CliError::CurrentDir(io) => OperationError::Io(io),
+        CliError::InvalidPackageBumpFormat { .. }
+        | CliError::InvalidBumpType { .. }
+        | CliError::VerificationFailed { .. }
+        | CliError::ChangesetDeleted { .. } => OperationError::Cancelled,
     }
 }
 

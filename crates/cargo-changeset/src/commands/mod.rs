@@ -1,4 +1,6 @@
 mod add;
+mod init;
+mod status;
 mod verify;
 
 use std::path::Path;
@@ -14,11 +16,11 @@ pub(crate) enum Commands {
     Add(AddArgs),
     /// Verify changeset coverage for changed packages
     Verify(VerifyArgs),
-    /// Show status of changesets
+    /// Show pending changesets and projected version bumps
     Status,
     /// Bump versions based on changesets
     Version,
-    /// Initialize changeset configuration
+    /// Initialize changeset directory in the project
     Init,
 }
 
@@ -80,18 +82,12 @@ impl Commands {
                 let quiet = args.quiet;
                 (verify::run(args, start_path), ExecuteResult { quiet })
             }
-            Self::Status => {
-                println!("Status command not yet implemented");
-                (Ok(()), ExecuteResult { quiet: false })
-            }
+            Self::Status => (status::run(start_path), ExecuteResult { quiet: false }),
             Self::Version => {
                 println!("Version command not yet implemented");
                 (Ok(()), ExecuteResult { quiet: false })
             }
-            Self::Init => {
-                println!("Init command not yet implemented");
-                (Ok(()), ExecuteResult { quiet: false })
-            }
+            Self::Init => (init::run(start_path), ExecuteResult { quiet: false }),
         }
     }
 }
