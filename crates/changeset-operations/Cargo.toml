@@ -13,6 +13,7 @@ changeset-core = { workspace = true }
 changeset-parse = { workspace = true }
 changeset-project = { workspace = true }
 changeset-git = { workspace = true }
+changeset-manifest = { workspace = true }
 changeset-version = { workspace = true }
 indexmap = { workspace = true }
 semver = { workspace = true }

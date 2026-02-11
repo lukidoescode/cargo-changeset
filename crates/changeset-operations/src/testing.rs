@@ -1,15 +1,16 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 use changeset_core::{BumpType, ChangeCategory, Changeset, PackageInfo};
 use changeset_git::{CommitInfo, FileChange, TagInfo};
 use changeset_project::{CargoProject, PackageChangesetConfig, ProjectKind, RootChangesetConfig};
+use semver::Version;
 
 use crate::Result;
 use crate::traits::{
     BumpSelection, CategorySelection, ChangesetReader, ChangesetWriter, DescriptionInput,
-    GitProvider, InteractionProvider, PackageSelection, ProjectProvider,
+    GitProvider, InteractionProvider, ManifestWriter, PackageSelection, ProjectProvider,
 };
 
 pub struct MockProjectProvider {
@@ -365,5 +366,97 @@ pub fn make_changeset(package_name: &str, bump: BumpType, summary: &str) -> Chan
             bump_type: bump,
         }],
         category: ChangeCategory::Changed,
+    }
+}
+
+pub struct MockManifestWriter {
+    written_versions: Mutex<Vec<(PathBuf, Version)>>,
+    inherited_paths: HashSet<PathBuf>,
+    removed_workspace_version: Mutex<bool>,
+}
+
+impl MockManifestWriter {
+    #[must_use]
+    pub fn new() -> Self {
+        Self {
+            written_versions: Mutex::new(Vec::new()),
+            inherited_paths: HashSet::new(),
+            removed_workspace_version: Mutex::new(false),
+        }
+    }
+
+    #[must_use]
+    pub fn with_inherited(mut self, paths: Vec<PathBuf>) -> Self {
+        self.inherited_paths = paths.into_iter().collect();
+        self
+    }
+
+    /// # Panics
+    ///
+    /// Panics if the internal mutex is poisoned.
+    #[must_use]
+    pub fn written_versions(&self) -> Vec<(PathBuf, Version)> {
+        self.written_versions.lock().expect("lock poisoned").clone()
+    }
+
+    /// # Panics
+    ///
+    /// Panics if the internal mutex is poisoned.
+    #[must_use]
+    pub fn workspace_version_removed(&self) -> bool {
+        *self
+            .removed_workspace_version
+            .lock()
+            .expect("lock poisoned")
+    }
+}
+
+impl Default for MockManifestWriter {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl ManifestWriter for MockManifestWriter {
+    fn write_version(&self, manifest_path: &Path, new_version: &Version) -> Result<()> {
+        self.written_versions
+            .lock()
+            .expect("lock poisoned")
+            .push((manifest_path.to_path_buf(), new_version.clone()));
+        Ok(())
+    }
+
+    fn remove_workspace_version(&self, _manifest_path: &Path) -> Result<()> {
+        *self
+            .removed_workspace_version
+            .lock()
+            .expect("lock poisoned") = true;
+        Ok(())
+    }
+
+    fn verify_version(&self, _manifest_path: &Path, _expected: &Version) -> Result<()> {
+        Ok(())
+    }
+
+    fn has_inherited_version(&self, manifest_path: &Path) -> Result<bool> {
+        Ok(self.inherited_paths.contains(manifest_path))
+    }
+}
+
+impl ManifestWriter for Arc<MockManifestWriter> {
+    fn write_version(&self, manifest_path: &Path, new_version: &Version) -> Result<()> {
+        (**self).write_version(manifest_path, new_version)
+    }
+
+    fn remove_workspace_version(&self, manifest_path: &Path) -> Result<()> {
+        (**self).remove_workspace_version(manifest_path)
+    }
+
+    fn verify_version(&self, manifest_path: &Path, expected: &Version) -> Result<()> {
+        (**self).verify_version(manifest_path, expected)
+    }
+
+    fn has_inherited_version(&self, manifest_path: &Path) -> Result<bool> {
+        (**self).has_inherited_version(manifest_path)
     }
 }

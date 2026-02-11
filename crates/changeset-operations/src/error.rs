@@ -16,6 +16,9 @@ pub enum OperationError {
     #[error(transparent)]
     Parse(#[from] changeset_parse::FormatError),
 
+    #[error(transparent)]
+    Manifest(#[from] changeset_manifest::ManifestError),
+
     #[error("failed to read changeset file '{path}'")]
     ChangesetFileRead {
         path: PathBuf,
@@ -66,6 +69,9 @@ pub enum OperationError {
 
     #[error("IO error")]
     Io(#[from] std::io::Error),
+
+    #[error("packages with inherited versions require --convert flag: {}", packages.join(", "))]
+    InheritedVersionsRequireConvert { packages: Vec<String> },
 }
 
 pub type Result<T> = std::result::Result<T, OperationError>;
