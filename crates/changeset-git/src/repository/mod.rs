@@ -24,12 +24,12 @@ impl Repository {
             path: path.to_path_buf(),
         })?;
 
-        let root = inner
-            .workdir()
-            .ok_or_else(|| GitError::NotARepository {
-                path: path.to_path_buf(),
-            })?
-            .to_path_buf();
+        let root = inner.workdir().ok_or_else(|| GitError::NotARepository {
+            path: path.to_path_buf(),
+        })?;
+
+        // Use dunce to get a path without the \\?\ prefix on Windows
+        let root = dunce::simplified(root).to_path_buf();
 
         Ok(Self { inner, root })
     }
@@ -39,11 +39,15 @@ impl Repository {
         &self.root
     }
 
-    pub(crate) fn to_relative_path<'a>(&self, path: &'a Path) -> &'a Path {
+    pub(crate) fn to_relative_path(&self, path: &Path) -> PathBuf {
         if path.is_absolute() {
-            path.strip_prefix(&self.root).unwrap_or(path)
+            // Use dunce to normalize the path (removes \\?\ prefix on Windows)
+            let normalized = dunce::simplified(path);
+            normalized
+                .strip_prefix(&self.root)
+                .map_or_else(|_| path.to_path_buf(), Path::to_path_buf)
         } else {
-            path
+            path.to_path_buf()
         }
     }
 }

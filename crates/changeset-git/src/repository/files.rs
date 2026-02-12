@@ -23,7 +23,7 @@ impl Repository {
         let relative_path = self.to_relative_path(path);
 
         let mut index = self.inner.index()?;
-        index.remove_path(relative_path)?;
+        index.remove_path(&relative_path)?;
         index.write()?;
 
         Ok(())
