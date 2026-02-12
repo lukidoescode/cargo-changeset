@@ -45,7 +45,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::testing::MockProjectProvider;
+    use crate::mocks::MockProjectProvider;
 
     #[test]
     fn returns_changeset_dir_path() {

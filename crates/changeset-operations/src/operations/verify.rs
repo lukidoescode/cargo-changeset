@@ -180,7 +180,7 @@ fn build_context(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::testing::{MockChangesetReader, MockGitProvider, MockProjectProvider};
+    use crate::mocks::{MockChangesetReader, MockGitProvider, MockProjectProvider};
     use changeset_core::BumpType;
     use changeset_git::FileStatus;
 
@@ -222,7 +222,7 @@ mod tests {
             },
         ]);
 
-        let changeset = crate::testing::make_changeset("my-crate", BumpType::Patch, "Fix bug");
+        let changeset = crate::mocks::make_changeset("my-crate", BumpType::Patch, "Fix bug");
         let changeset_reader = MockChangesetReader::new()
             .with_changeset(PathBuf::from(".changeset/test.md"), changeset);
 
