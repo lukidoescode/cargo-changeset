@@ -40,4 +40,17 @@ pub trait GitProvider: Send + Sync {
     ///
     /// Returns an error if the repository cannot be opened.
     fn remote_url(&self, project_root: &Path) -> Result<Option<String>>;
+
+    /// Deletes files from the filesystem and stages the deletions in git.
+    ///
+    /// This is a fail-fast operation: if any file does not exist or cannot be deleted,
+    /// an error is returned immediately and no further files are processed.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if:
+    /// - Any file in `paths` does not exist
+    /// - Any file cannot be deleted (permissions, in use, etc.)
+    /// - The git index cannot be updated to stage the deletion
+    fn delete_files(&self, project_root: &Path, paths: &[&Path]) -> Result<()>;
 }

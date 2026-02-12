@@ -5,14 +5,85 @@ use changeset_changelog::{ChangelogConfig, ChangelogLocation, ComparisonLinksSet
 use globset::{Glob, GlobSet, GlobSetBuilder};
 
 use crate::error::ProjectError;
-use crate::manifest::read_manifest;
+use crate::manifest::{ChangesetMetadata, TagFormatValue, read_manifest};
 use crate::project::{CargoProject, ProjectKind};
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum TagFormat {
+    #[default]
+    VersionOnly,
+    CratePrefixed,
+}
+
+#[derive(Debug, Clone)]
+#[allow(clippy::struct_excessive_bools)]
+pub struct GitConfig {
+    commit: bool,
+    tags: bool,
+    keep_changesets: bool,
+    tag_format: TagFormat,
+    commit_title_template: String,
+    changes_in_body: bool,
+}
+
+impl Default for GitConfig {
+    fn default() -> Self {
+        Self {
+            commit: true,
+            tags: true,
+            keep_changesets: false,
+            tag_format: TagFormat::default(),
+            commit_title_template: String::from("{new-version}"),
+            changes_in_body: true,
+        }
+    }
+}
+
+impl GitConfig {
+    #[must_use]
+    pub fn commit(&self) -> bool {
+        self.commit
+    }
+
+    #[must_use]
+    pub fn tags(&self) -> bool {
+        self.tags
+    }
+
+    #[must_use]
+    pub fn keep_changesets(&self) -> bool {
+        self.keep_changesets
+    }
+
+    #[must_use]
+    pub fn tag_format(&self) -> TagFormat {
+        self.tag_format
+    }
+
+    #[must_use]
+    pub fn commit_title_template(&self) -> &str {
+        &self.commit_title_template
+    }
+
+    #[must_use]
+    pub fn changes_in_body(&self) -> bool {
+        self.changes_in_body
+    }
+
+    #[cfg(any(test, feature = "testing"))]
+    #[must_use]
+    pub fn with_changes_in_body(mut self, changes_in_body: bool) -> Self {
+        self.changes_in_body = changes_in_body;
+        self
+    }
+}
+
+#[derive(Debug, Clone)]
 pub struct RootChangesetConfig {
     ignored_files: GlobSet,
     changeset_dir: PathBuf,
     changelog_config: ChangelogConfig,
+    git_config: GitConfig,
 }
 
 impl Default for RootChangesetConfig {
@@ -21,6 +92,7 @@ impl Default for RootChangesetConfig {
             ignored_files: GlobSet::empty(),
             changeset_dir: PathBuf::from(crate::DEFAULT_CHANGESET_DIR),
             changelog_config: ChangelogConfig::default(),
+            git_config: GitConfig::default(),
         }
     }
 }
@@ -44,6 +116,18 @@ impl RootChangesetConfig {
     #[must_use]
     pub fn changelog_config(&self) -> &ChangelogConfig {
         &self.changelog_config
+    }
+
+    #[must_use]
+    pub fn git_config(&self) -> &GitConfig {
+        &self.git_config
+    }
+
+    #[cfg(any(test, feature = "testing"))]
+    #[must_use]
+    pub fn with_git_config(mut self, git_config: GitConfig) -> Self {
+        self.git_config = git_config;
+        self
     }
 }
 
@@ -91,6 +175,27 @@ fn build_changelog_config(
     }
 }
 
+fn build_git_config(metadata: Option<&ChangesetMetadata>) -> GitConfig {
+    let defaults = GitConfig::default();
+    match metadata {
+        None => defaults,
+        Some(cs) => GitConfig {
+            commit: cs.commit.unwrap_or(defaults.commit),
+            tags: cs.tags.unwrap_or(defaults.tags),
+            keep_changesets: cs.keep_changesets.unwrap_or(defaults.keep_changesets),
+            tag_format: cs.tag_format.map_or(defaults.tag_format, |tf| match tf {
+                TagFormatValue::VersionOnly => TagFormat::VersionOnly,
+                TagFormatValue::CratePrefixed => TagFormat::CratePrefixed,
+            }),
+            commit_title_template: cs
+                .commit_title_template
+                .clone()
+                .unwrap_or(defaults.commit_title_template),
+            changes_in_body: cs.changes_in_body.unwrap_or(defaults.changes_in_body),
+        },
+    }
+}
+
 /// Parses root configuration from workspace metadata.
 ///
 /// # Errors
@@ -127,10 +232,13 @@ fn parse_workspace_root_config(project_root: &Path) -> Result<RootChangesetConfi
             .and_then(|cs| cs.comparison_links_template.clone()),
     );
 
+    let git_config = build_git_config(changeset_metadata.as_ref());
+
     Ok(RootChangesetConfig {
         ignored_files,
         changeset_dir: PathBuf::from(changeset_dir),
         changelog_config,
+        git_config,
     })
 }
 
@@ -170,10 +278,13 @@ fn parse_package_root_config(project_root: &Path) -> Result<RootChangesetConfig,
             .and_then(|cs| cs.comparison_links_template.clone()),
     );
 
+    let git_config = build_git_config(changeset_metadata.as_ref());
+
     Ok(RootChangesetConfig {
         ignored_files,
         changeset_dir: PathBuf::from(changeset_dir),
         changelog_config,
+        git_config,
     })
 }
 
@@ -478,6 +589,102 @@ comparison-links = "disabled"
             changelog_config.comparison_links,
             ComparisonLinksSetting::Disabled
         );
+
+        Ok(())
+    }
+
+    #[test]
+    fn parse_git_config_defaults() -> anyhow::Result<()> {
+        let toml = r#"
+[workspace]
+members = ["crates/*"]
+"#;
+        let dir = setup_with_config(toml)?;
+
+        let config = parse_workspace_root_config(dir.path())?;
+        let git_config = config.git_config();
+
+        assert!(git_config.commit());
+        assert!(git_config.tags());
+        assert!(!git_config.keep_changesets());
+        assert_eq!(git_config.tag_format(), TagFormat::VersionOnly);
+        assert_eq!(git_config.commit_title_template(), "{new-version}");
+        assert!(git_config.changes_in_body());
+
+        Ok(())
+    }
+
+    #[test]
+    fn parse_git_config_all_options() -> anyhow::Result<()> {
+        let toml = r#"
+[workspace]
+members = ["crates/*"]
+
+[workspace.metadata.changeset]
+commit = false
+tags = false
+keep-changesets = true
+tag-format = "crate-prefixed"
+commit-title-template = "chore(release): {new-version}"
+changes-in-body = false
+"#;
+        let dir = setup_with_config(toml)?;
+
+        let config = parse_workspace_root_config(dir.path())?;
+        let git_config = config.git_config();
+
+        assert!(!git_config.commit());
+        assert!(!git_config.tags());
+        assert!(git_config.keep_changesets());
+        assert_eq!(git_config.tag_format(), TagFormat::CratePrefixed);
+        assert_eq!(
+            git_config.commit_title_template(),
+            "chore(release): {new-version}"
+        );
+        assert!(!git_config.changes_in_body());
+
+        Ok(())
+    }
+
+    #[test]
+    fn parse_git_config_version_only_format() -> anyhow::Result<()> {
+        let toml = r#"
+[workspace]
+members = ["crates/*"]
+
+[workspace.metadata.changeset]
+tag-format = "version-only"
+"#;
+        let dir = setup_with_config(toml)?;
+
+        let config = parse_workspace_root_config(dir.path())?;
+        let git_config = config.git_config();
+
+        assert_eq!(git_config.tag_format(), TagFormat::VersionOnly);
+
+        Ok(())
+    }
+
+    #[test]
+    fn parse_single_package_git_config() -> anyhow::Result<()> {
+        let toml = r#"
+[package]
+name = "my-crate"
+version = "0.1.0"
+
+[package.metadata.changeset]
+commit = false
+tags = true
+keep-changesets = true
+"#;
+        let dir = setup_with_config(toml)?;
+
+        let config = parse_package_root_config(dir.path())?;
+        let git_config = config.git_config();
+
+        assert!(!git_config.commit());
+        assert!(git_config.tags());
+        assert!(git_config.keep_changesets());
 
         Ok(())
     }

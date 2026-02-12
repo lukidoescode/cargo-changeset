@@ -9,6 +9,7 @@ authors.workspace = true
 description = "Git operations for cargo-changeset"
 
 [dependencies]
+dunce = "1.0.5"
 git2 = { workspace = true }
 thiserror = { workspace = true }
 
