@@ -18,6 +18,7 @@ use crate::traits::{
 pub struct MockProjectProvider {
     project: CargoProject,
     changeset_dir: PathBuf,
+    root_config: RootChangesetConfig,
 }
 
 impl MockProjectProvider {
@@ -27,12 +28,19 @@ impl MockProjectProvider {
         Self {
             project,
             changeset_dir,
+            root_config: RootChangesetConfig::default(),
         }
     }
 
     #[must_use]
     pub fn with_changeset_dir(mut self, dir: PathBuf) -> Self {
         self.changeset_dir = dir;
+        self
+    }
+
+    #[must_use]
+    pub fn with_root_config(mut self, config: RootChangesetConfig) -> Self {
+        self.root_config = config;
         self
     }
 
@@ -87,7 +95,7 @@ impl ProjectProvider for MockProjectProvider {
         &self,
         _project: &CargoProject,
     ) -> Result<(RootChangesetConfig, HashMap<String, PackageChangesetConfig>)> {
-        Ok((RootChangesetConfig::default(), HashMap::new()))
+        Ok((self.root_config.clone(), HashMap::new()))
     }
 
     fn ensure_changeset_dir(
@@ -206,6 +214,10 @@ pub struct MockGitProvider {
     clean: bool,
     branch: String,
     remote_url: Option<String>,
+    staged_files: Mutex<Vec<PathBuf>>,
+    commits: Mutex<Vec<String>>,
+    tags_created: Mutex<Vec<(String, String)>>,
+    deleted_files: Mutex<Vec<PathBuf>>,
 }
 
 impl MockGitProvider {
@@ -216,6 +228,10 @@ impl MockGitProvider {
             clean: true,
             branch: "main".to_string(),
             remote_url: None,
+            staged_files: Mutex::new(Vec::new()),
+            commits: Mutex::new(Vec::new()),
+            tags_created: Mutex::new(Vec::new()),
+            deleted_files: Mutex::new(Vec::new()),
         }
     }
 
@@ -241,6 +257,38 @@ impl MockGitProvider {
     pub fn with_remote_url(mut self, url: &str) -> Self {
         self.remote_url = Some(url.to_string());
         self
+    }
+
+    /// # Panics
+    ///
+    /// Panics if the internal mutex is poisoned.
+    #[must_use]
+    pub fn staged_files(&self) -> Vec<PathBuf> {
+        self.staged_files.lock().expect("lock poisoned").clone()
+    }
+
+    /// # Panics
+    ///
+    /// Panics if the internal mutex is poisoned.
+    #[must_use]
+    pub fn commits(&self) -> Vec<String> {
+        self.commits.lock().expect("lock poisoned").clone()
+    }
+
+    /// # Panics
+    ///
+    /// Panics if the internal mutex is poisoned.
+    #[must_use]
+    pub fn tags_created(&self) -> Vec<(String, String)> {
+        self.tags_created.lock().expect("lock poisoned").clone()
+    }
+
+    /// # Panics
+    ///
+    /// Panics if the internal mutex is poisoned.
+    #[must_use]
+    pub fn deleted_files(&self) -> Vec<PathBuf> {
+        self.deleted_files.lock().expect("lock poisoned").clone()
     }
 }
 
@@ -268,18 +316,30 @@ impl GitProvider for MockGitProvider {
         Ok(self.branch.clone())
     }
 
-    fn stage_files(&self, _project_root: &Path, _paths: &[&Path]) -> Result<()> {
+    fn stage_files(&self, _project_root: &Path, paths: &[&Path]) -> Result<()> {
+        self.staged_files
+            .lock()
+            .expect("lock poisoned")
+            .extend(paths.iter().map(|p| p.to_path_buf()));
         Ok(())
     }
 
     fn commit(&self, _project_root: &Path, message: &str) -> Result<CommitInfo> {
+        self.commits
+            .lock()
+            .expect("lock poisoned")
+            .push(message.to_string());
         Ok(CommitInfo {
             sha: "abc123def456".to_string(),
             message: message.to_string(),
         })
     }
 
-    fn create_tag(&self, _project_root: &Path, tag_name: &str, _message: &str) -> Result<TagInfo> {
+    fn create_tag(&self, _project_root: &Path, tag_name: &str, message: &str) -> Result<TagInfo> {
+        self.tags_created
+            .lock()
+            .expect("lock poisoned")
+            .push((tag_name.to_string(), message.to_string()));
         Ok(TagInfo {
             name: tag_name.to_string(),
             target_sha: "abc123def456".to_string(),
@@ -288,6 +348,53 @@ impl GitProvider for MockGitProvider {
 
     fn remote_url(&self, _project_root: &Path) -> Result<Option<String>> {
         Ok(self.remote_url.clone())
+    }
+
+    fn delete_files(&self, _project_root: &Path, paths: &[&Path]) -> Result<()> {
+        self.deleted_files
+            .lock()
+            .expect("lock poisoned")
+            .extend(paths.iter().map(|p| p.to_path_buf()));
+        Ok(())
+    }
+}
+
+impl GitProvider for Arc<MockGitProvider> {
+    fn changed_files(
+        &self,
+        project_root: &Path,
+        base: &str,
+        head: &str,
+    ) -> Result<Vec<FileChange>> {
+        (**self).changed_files(project_root, base, head)
+    }
+
+    fn is_working_tree_clean(&self, project_root: &Path) -> Result<bool> {
+        (**self).is_working_tree_clean(project_root)
+    }
+
+    fn current_branch(&self, project_root: &Path) -> Result<String> {
+        (**self).current_branch(project_root)
+    }
+
+    fn stage_files(&self, project_root: &Path, paths: &[&Path]) -> Result<()> {
+        (**self).stage_files(project_root, paths)
+    }
+
+    fn commit(&self, project_root: &Path, message: &str) -> Result<CommitInfo> {
+        (**self).commit(project_root, message)
+    }
+
+    fn create_tag(&self, project_root: &Path, tag_name: &str, message: &str) -> Result<TagInfo> {
+        (**self).create_tag(project_root, tag_name, message)
+    }
+
+    fn remote_url(&self, project_root: &Path) -> Result<Option<String>> {
+        (**self).remote_url(project_root)
+    }
+
+    fn delete_files(&self, project_root: &Path, paths: &[&Path]) -> Result<()> {
+        (**self).delete_files(project_root, paths)
     }
 }
 

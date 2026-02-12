@@ -1,5 +1,6 @@
 use std::fs;
 use std::path::Path;
+use std::process::Command;
 
 use changeset_operations::OperationError;
 use changeset_operations::operations::{
@@ -168,6 +169,9 @@ fn run_release(
     let input = ReleaseInput {
         dry_run,
         convert_inherited,
+        no_commit: true,
+        no_tags: true,
+        keep_changesets: true,
     };
 
     operation.execute(dir.path(), &input)
@@ -475,4 +479,311 @@ fn status_and_release_calculate_identical_versions() {
             status_release.name
         );
     }
+}
+
+fn init_git_repo(dir: &TempDir) {
+    Command::new("git")
+        .args(["init"])
+        .current_dir(dir.path())
+        .output()
+        .expect("git init");
+
+    Command::new("git")
+        .args(["config", "user.email", "test@example.com"])
+        .current_dir(dir.path())
+        .output()
+        .expect("git config email");
+
+    Command::new("git")
+        .args(["config", "user.name", "Test User"])
+        .current_dir(dir.path())
+        .output()
+        .expect("git config name");
+}
+
+fn git_add_all(dir: &TempDir) {
+    Command::new("git")
+        .args(["add", "-A"])
+        .current_dir(dir.path())
+        .output()
+        .expect("git add");
+}
+
+fn git_commit(dir: &TempDir, message: &str) {
+    Command::new("git")
+        .args(["commit", "-m", message])
+        .current_dir(dir.path())
+        .output()
+        .expect("git commit");
+}
+
+fn git_tags(dir: &TempDir) -> Vec<String> {
+    let output = Command::new("git")
+        .args(["tag", "--list"])
+        .current_dir(dir.path())
+        .output()
+        .expect("git tag --list");
+
+    String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .map(String::from)
+        .filter(|s| !s.is_empty())
+        .collect()
+}
+
+fn git_log_oneline(dir: &TempDir, count: usize) -> Vec<String> {
+    let output = Command::new("git")
+        .args(["log", "--oneline", "-n", &count.to_string()])
+        .current_dir(dir.path())
+        .output()
+        .expect("git log");
+
+    String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .map(String::from)
+        .filter(|s| !s.is_empty())
+        .collect()
+}
+
+fn run_release_with_git(
+    dir: &TempDir,
+    no_commit: bool,
+    no_tags: bool,
+    keep_changesets: bool,
+) -> Result<ReleaseOutcome, OperationError> {
+    let project_provider = FileSystemProjectProvider::new();
+    let changeset_reader = FileSystemChangesetIO::new(dir.path());
+    let manifest_writer = FileSystemManifestWriter::new();
+    let changelog_writer = FileSystemChangelogWriter::new();
+    let git_provider = Git2Provider::new();
+
+    let operation = ReleaseOperation::new(
+        project_provider,
+        changeset_reader,
+        manifest_writer,
+        changelog_writer,
+        git_provider,
+    );
+    let input = ReleaseInput {
+        dry_run: false,
+        convert_inherited: false,
+        no_commit,
+        no_tags,
+        keep_changesets,
+    };
+
+    operation.execute(dir.path(), &input)
+}
+
+#[test]
+fn release_creates_commit_and_tags() {
+    let dir = create_single_package_project();
+    init_git_repo(&dir);
+    git_add_all(&dir);
+    git_commit(&dir, "Initial commit");
+
+    write_changeset(&dir, "fix.md", "my-crate", "patch", "Fix a bug");
+    git_add_all(&dir);
+    git_commit(&dir, "Add changeset");
+
+    let result = run_release_with_git(&dir, false, false, false).expect("release should succeed");
+
+    let ReleaseOutcome::Executed(output) = result else {
+        panic!("expected Executed outcome");
+    };
+
+    assert!(
+        output.git_result.is_some(),
+        "git operations should have been performed"
+    );
+    let git_result = output.git_result.as_ref().expect("git_result");
+
+    assert!(
+        git_result.commit.is_some(),
+        "a commit should have been created"
+    );
+
+    assert_eq!(
+        git_result.tags_created.len(),
+        1,
+        "one tag should have been created"
+    );
+    assert_eq!(git_result.tags_created[0].name, "v1.0.1");
+
+    let tags = git_tags(&dir);
+    assert!(
+        tags.contains(&"v1.0.1".to_string()),
+        "tag should exist in git"
+    );
+
+    let changeset_path = dir.path().join(".changeset/fix.md");
+    assert!(
+        !changeset_path.exists(),
+        "changeset file should have been deleted"
+    );
+
+    assert_eq!(
+        git_result.changesets_deleted.len(),
+        1,
+        "one changeset should have been deleted"
+    );
+}
+
+#[test]
+fn release_workspace_creates_prefixed_tags() {
+    let dir = create_workspace_project();
+    init_git_repo(&dir);
+    git_add_all(&dir);
+    git_commit(&dir, "Initial commit");
+
+    write_changeset(&dir, "feature.md", "crate-a", "minor", "Add feature");
+    write_changeset(&dir, "fix.md", "crate-b", "patch", "Fix bug");
+    git_add_all(&dir);
+    git_commit(&dir, "Add changesets");
+
+    let result = run_release_with_git(&dir, false, false, false).expect("release should succeed");
+
+    let ReleaseOutcome::Executed(output) = result else {
+        panic!("expected Executed outcome");
+    };
+
+    let git_result = output.git_result.as_ref().expect("git result");
+    assert_eq!(git_result.tags_created.len(), 2);
+
+    let tag_names: Vec<_> = git_result.tags_created.iter().map(|t| &t.name).collect();
+    assert!(
+        tag_names.contains(&&"crate-a-v1.1.0".to_string()),
+        "should have crate-a tag"
+    );
+    assert!(
+        tag_names.contains(&&"crate-b-v2.0.1".to_string()),
+        "should have crate-b tag"
+    );
+
+    let tags = git_tags(&dir);
+    assert!(tags.contains(&"crate-a-v1.1.0".to_string()));
+    assert!(tags.contains(&"crate-b-v2.0.1".to_string()));
+}
+
+#[test]
+fn release_no_commit_skips_git_operations() {
+    let dir = create_single_package_project();
+    init_git_repo(&dir);
+    git_add_all(&dir);
+    git_commit(&dir, "Initial commit");
+
+    write_changeset(&dir, "fix.md", "my-crate", "patch", "Fix a bug");
+
+    let result = run_release_with_git(&dir, true, false, true).expect("release should succeed");
+
+    let ReleaseOutcome::Executed(output) = result else {
+        panic!("expected Executed outcome");
+    };
+
+    let git_result = output
+        .git_result
+        .as_ref()
+        .expect("git_result is always present");
+    assert!(
+        git_result.commit.is_none(),
+        "no commit should be created when --no-commit"
+    );
+    assert!(
+        git_result.tags_created.is_empty(),
+        "no tags should be created when --no-commit"
+    );
+    assert!(
+        git_result.changesets_deleted.is_empty(),
+        "no changesets should be deleted when --keep-changesets"
+    );
+
+    let version = read_version(&dir.path().join("Cargo.toml"));
+    assert_eq!(version, "1.0.1", "version should still be updated");
+
+    let tags = git_tags(&dir);
+    assert!(tags.is_empty(), "no tags should have been created");
+
+    let changeset_path = dir.path().join(".changeset/fix.md");
+    assert!(
+        changeset_path.exists(),
+        "changeset should be kept with --keep-changesets"
+    );
+}
+
+#[test]
+fn release_no_tags_creates_commit_without_tags() {
+    let dir = create_single_package_project();
+    init_git_repo(&dir);
+    git_add_all(&dir);
+    git_commit(&dir, "Initial commit");
+
+    write_changeset(&dir, "fix.md", "my-crate", "patch", "Fix a bug");
+    git_add_all(&dir);
+    git_commit(&dir, "Add changeset");
+
+    let result = run_release_with_git(&dir, false, true, false).expect("release should succeed");
+
+    let ReleaseOutcome::Executed(output) = result else {
+        panic!("expected Executed outcome");
+    };
+
+    let git_result = output.git_result.as_ref().expect("git result");
+    assert!(git_result.commit.is_some(), "commit should be created");
+    assert!(git_result.tags_created.is_empty(), "no tags when --no-tags");
+
+    let tags = git_tags(&dir);
+    assert!(tags.is_empty(), "no tags should exist in git");
+
+    let logs = git_log_oneline(&dir, 1);
+    assert!(
+        logs[0].contains("v1.0.1"),
+        "commit message should contain version"
+    );
+}
+
+#[test]
+fn release_keep_changesets_preserves_files() {
+    let dir = create_single_package_project();
+    init_git_repo(&dir);
+    git_add_all(&dir);
+    git_commit(&dir, "Initial commit");
+
+    write_changeset(&dir, "fix.md", "my-crate", "patch", "Fix a bug");
+    git_add_all(&dir);
+    git_commit(&dir, "Add changeset");
+
+    let result = run_release_with_git(&dir, false, false, true).expect("release should succeed");
+
+    let ReleaseOutcome::Executed(output) = result else {
+        panic!("expected Executed outcome");
+    };
+
+    let git_result = output.git_result.as_ref().expect("git result");
+    assert!(
+        git_result.changesets_deleted.is_empty(),
+        "no changesets should be deleted"
+    );
+
+    let changeset_path = dir.path().join(".changeset/fix.md");
+    assert!(
+        changeset_path.exists(),
+        "changeset should still exist with --keep-changesets"
+    );
+}
+
+#[test]
+fn release_errors_on_dirty_working_tree() {
+    let dir = create_single_package_project();
+    init_git_repo(&dir);
+    git_add_all(&dir);
+    git_commit(&dir, "Initial commit");
+
+    write_changeset(&dir, "fix.md", "my-crate", "patch", "Fix a bug");
+
+    let result = run_release_with_git(&dir, false, false, false);
+
+    assert!(
+        matches!(result, Err(OperationError::DirtyWorkingTree)),
+        "should error on dirty working tree: {result:?}"
+    );
 }

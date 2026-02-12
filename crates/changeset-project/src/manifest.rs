@@ -66,15 +66,35 @@ pub(crate) struct WorkspaceMetadata {
 }
 
 #[derive(Debug, Deserialize, Default)]
+#[serde(rename_all = "kebab-case")]
 pub(crate) struct ChangesetMetadata {
-    #[serde(default, rename = "ignored-files")]
+    #[serde(default)]
     pub(crate) ignored_files: Vec<String>,
-    #[serde(default, rename = "changeset-dir")]
+    #[serde(default)]
     pub(crate) changeset_dir: Option<String>,
     #[serde(default)]
     pub(crate) changelog: Option<ChangelogLocation>,
-    #[serde(default, rename = "comparison-links")]
+    #[serde(default)]
     pub(crate) comparison_links: Option<ComparisonLinksSetting>,
-    #[serde(default, rename = "comparison-links-template")]
+    #[serde(default)]
     pub(crate) comparison_links_template: Option<String>,
+    #[serde(default)]
+    pub(crate) commit: Option<bool>,
+    #[serde(default)]
+    pub(crate) tags: Option<bool>,
+    #[serde(default)]
+    pub(crate) keep_changesets: Option<bool>,
+    #[serde(default)]
+    pub(crate) tag_format: Option<TagFormatValue>,
+    #[serde(default)]
+    pub(crate) commit_title_template: Option<String>,
+    #[serde(default)]
+    pub(crate) changes_in_body: Option<bool>,
+}
+
+#[derive(Debug, Deserialize, Clone, Copy)]
+#[serde(rename_all = "kebab-case")]
+pub(crate) enum TagFormatValue {
+    VersionOnly,
+    CratePrefixed,
 }

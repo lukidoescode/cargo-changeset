@@ -80,6 +80,18 @@ pub(crate) struct ReleaseArgs {
     /// Convert inherited versions (version.workspace = true) to explicit versions
     #[arg(long)]
     pub convert: bool,
+
+    /// Skip all git operations (commit and tags); allows dirty working tree
+    #[arg(long)]
+    pub no_commit: bool,
+
+    /// Skip creating git tags
+    #[arg(long)]
+    pub no_tags: bool,
+
+    /// Keep changeset files after release (do not delete them)
+    #[arg(long)]
+    pub keep_changesets: bool,
 }
 
 pub(crate) struct ExecuteResult {

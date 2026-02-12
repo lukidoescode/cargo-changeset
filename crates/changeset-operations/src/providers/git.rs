@@ -60,4 +60,9 @@ impl GitProvider for Git2Provider {
         let repo = Repository::open(project_root)?;
         Ok(repo.remote_url()?)
     }
+
+    fn delete_files(&self, project_root: &Path, paths: &[&Path]) -> Result<()> {
+        let repo = Repository::open(project_root)?;
+        Ok(repo.delete_files(paths)?)
+    }
 }

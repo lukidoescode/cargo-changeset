@@ -7,8 +7,8 @@ mod project;
 pub const DEFAULT_CHANGESET_DIR: &str = ".changeset";
 
 pub use config::{
-    PackageChangesetConfig, RootChangesetConfig, load_changeset_configs, parse_package_config,
-    parse_root_config,
+    GitConfig, PackageChangesetConfig, RootChangesetConfig, TagFormat, load_changeset_configs,
+    parse_package_config, parse_root_config,
 };
 pub use error::ProjectError;
 pub use mapping::{FileMapping, PackageFiles, map_files_to_packages};

@@ -78,6 +78,9 @@ pub enum OperationError {
 
     #[error("comparison links enabled but no repository URL available")]
     ComparisonLinksRequired,
+
+    #[error("working tree has uncommitted changes; commit or stash them, or use --no-commit")]
+    DirtyWorkingTree,
 }
 
 pub type Result<T> = std::result::Result<T, OperationError>;

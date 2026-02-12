@@ -24,6 +24,7 @@ petname = { workspace = true }
 
 [dev-dependencies]
 anyhow = "1.0.101"
+changeset-project = { workspace = true, features = ["testing"] }
 tempfile = "3.25"
 
 [lints]

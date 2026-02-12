@@ -1,7 +1,7 @@
 use std::path::Path;
 
 use changeset_operations::operations::{
-    ReleaseInput, ReleaseOperation, ReleaseOutcome, ReleaseOutput,
+    GitOperationResult, ReleaseInput, ReleaseOperation, ReleaseOutcome, ReleaseOutput,
 };
 use changeset_operations::providers::{
     FileSystemChangelogWriter, FileSystemChangesetIO, FileSystemManifestWriter,
@@ -30,6 +30,9 @@ pub(crate) fn run(args: ReleaseArgs, start_path: &Path) -> Result<()> {
     let input = ReleaseInput {
         dry_run: args.dry_run,
         convert_inherited: args.convert,
+        no_commit: args.no_commit,
+        no_tags: args.no_tags,
+        keep_changesets: args.keep_changesets,
     };
     let outcome = operation.execute(start_path, &input)?;
 
@@ -60,31 +63,60 @@ fn print_release_output(output: &ReleaseOutput) {
         return;
     }
 
-    println!("Planned releases:");
+    println!("Releases:");
     for release in &output.planned_releases {
         println!(
-            "  {} {} -> {} ({:?})",
-            release.name, release.current_version, release.new_version, release.bump_type
+            "  - {} {} -> {}",
+            release.name, release.current_version, release.new_version
         );
     }
 
     if !output.unchanged_packages.is_empty() {
         println!("\nUnchanged packages:");
         for name in &output.unchanged_packages {
-            println!("  {name}");
+            println!("  - {name}");
         }
     }
 
-    println!(
-        "\nChangesets to consume: {}",
-        output.changesets_consumed.len()
-    );
-
     if !output.changelog_updates.is_empty() {
-        println!("\nChangelog updates:");
+        println!("\nChangelogs updated:");
         for update in &output.changelog_updates {
             let status = if update.created { "created" } else { "updated" };
-            println!("  {} ({})", update.path.display(), status);
+            println!("  - {} ({})", update.path.display(), status);
         }
+    }
+
+    if let Some(git_result) = &output.git_result {
+        print_git_result(git_result);
+    }
+
+    if !output.changesets_consumed.is_empty() {
+        println!(
+            "\nConsumed {} changeset file(s)",
+            output.changesets_consumed.len()
+        );
+    }
+}
+
+fn print_git_result(git_result: &GitOperationResult) {
+    if let Some(commit) = &git_result.commit {
+        println!(
+            "\nCommit created: {}",
+            &commit.sha[..7.min(commit.sha.len())]
+        );
+    }
+
+    if !git_result.tags_created.is_empty() {
+        println!("\nTags created:");
+        for tag in &git_result.tags_created {
+            println!("  - {}", tag.name);
+        }
+    }
+
+    if !git_result.changesets_deleted.is_empty() {
+        println!(
+            "\nDeleted {} changeset file(s)",
+            git_result.changesets_deleted.len()
+        );
     }
 }
