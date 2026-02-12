@@ -2,12 +2,12 @@ use std::path::{Path, PathBuf};
 
 use changeset_changelog::{ChangelogLocation, ComparisonLinksSetting, RepositoryInfo};
 use changeset_core::{BumpType, PackageInfo};
-use changeset_version::{bump_version, max_bump_type};
 use chrono::Local;
 use indexmap::IndexMap;
 use semver::Version;
 
 use super::changelog_aggregation::ChangesetAggregator;
+use super::version_planner::VersionPlanner;
 use crate::Result;
 use crate::error::OperationError;
 use crate::traits::{
@@ -92,14 +92,8 @@ where
         &self,
         packages: &[PackageInfo],
     ) -> Result<Vec<String>> {
-        let mut inherited = Vec::new();
-        for pkg in packages {
-            let manifest_path = pkg.path.join("Cargo.toml");
-            if self.manifest_writer.has_inherited_version(&manifest_path)? {
-                inherited.push(pkg.name.clone());
-            }
-        }
-        Ok(inherited)
+        self.manifest_writer
+            .find_packages_with_inherited_versions(packages)
     }
 
     fn detect_repository_info(&self, project_root: &Path) -> Option<RepositoryInfo> {
@@ -228,41 +222,23 @@ where
             });
         }
 
-        let mut bumps_by_package: IndexMap<String, Vec<BumpType>> = IndexMap::new();
+        let mut changesets = Vec::new();
         let mut aggregator = ChangesetAggregator::new();
 
         for path in &changeset_files {
             let changeset = self.changeset_reader.read_changeset(path)?;
             aggregator.add_changeset(&changeset);
-            for release in &changeset.releases {
-                bumps_by_package
-                    .entry(release.name.clone())
-                    .or_default()
-                    .push(release.bump_type);
-            }
+            changesets.push(changeset);
         }
+
+        let plan = VersionPlanner::plan_releases(&changesets, &project.packages);
+        let planned_releases = plan.releases;
 
         let package_lookup: IndexMap<_, _> = project
             .packages
             .iter()
             .map(|p| (p.name.clone(), p.clone()))
             .collect();
-
-        let mut planned_releases = Vec::new();
-
-        for (name, bumps) in &bumps_by_package {
-            if let Some(bump_type) = max_bump_type(bumps) {
-                if let Some(pkg) = package_lookup.get(name) {
-                    let new_version = bump_version(&pkg.version, bump_type);
-                    planned_releases.push(PackageVersion {
-                        name: name.clone(),
-                        current_version: pkg.version.clone(),
-                        new_version,
-                        bump_type,
-                    });
-                }
-            }
-        }
 
         let packages_with_releases: std::collections::HashSet<_> =
             planned_releases.iter().map(|r| r.name.clone()).collect();
@@ -320,7 +296,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::testing::{
+    use crate::mocks::{
         MockChangelogWriter, MockChangesetReader, MockGitProvider, MockManifestWriter,
         MockProjectProvider, make_changeset,
     };

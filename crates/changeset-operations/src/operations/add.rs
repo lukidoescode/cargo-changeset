@@ -298,7 +298,7 @@ mod tests {
 #[cfg(test)]
 mod operation_tests {
     use super::*;
-    use crate::testing::{
+    use crate::mocks::{
         MockChangesetWriter, MockInteractionProvider, MockProjectProvider, make_package,
     };
 

@@ -2,7 +2,9 @@ use std::fs;
 use std::path::Path;
 
 use changeset_operations::OperationError;
-use changeset_operations::operations::{ReleaseInput, ReleaseOperation, ReleaseOutcome};
+use changeset_operations::operations::{
+    ReleaseInput, ReleaseOperation, ReleaseOutcome, StatusOperation,
+};
 use changeset_operations::providers::{
     FileSystemChangelogWriter, FileSystemChangesetIO, FileSystemManifestWriter,
     FileSystemProjectProvider, Git2Provider,
@@ -414,4 +416,63 @@ fn changelog_aggregates_multiple_changesets() {
         "Should contain second change"
     );
     assert!(content.contains("## [1.1.0]"), "Version should be 1.1.0");
+}
+
+#[test]
+fn status_and_release_calculate_identical_versions() {
+    let dir = create_workspace_project();
+    write_changeset(&dir, "fix-a.md", "crate-a", "patch", "Fix bug in A");
+    write_changeset(&dir, "feature-a.md", "crate-a", "minor", "Add feature to A");
+    write_changeset(
+        &dir,
+        "breaking-b.md",
+        "crate-b",
+        "major",
+        "Breaking change in B",
+    );
+
+    let project_provider = FileSystemProjectProvider::new();
+    let changeset_reader = FileSystemChangesetIO::new(dir.path());
+    let inherited_checker = FileSystemManifestWriter::new();
+
+    let status_operation =
+        StatusOperation::new(project_provider, changeset_reader, inherited_checker);
+    let status_output = status_operation
+        .execute(dir.path())
+        .expect("status should succeed");
+
+    let release_result = run_release(&dir, true, false).expect("release should succeed");
+    let ReleaseOutcome::DryRun(release_output) = release_result else {
+        panic!("expected DryRun outcome");
+    };
+
+    assert_eq!(
+        status_output.projected_releases.len(),
+        release_output.planned_releases.len(),
+        "status and release should have same number of releases"
+    );
+
+    for status_release in &status_output.projected_releases {
+        let matching_release = release_output
+            .planned_releases
+            .iter()
+            .find(|r| r.name == status_release.name)
+            .expect("release should have matching package");
+
+        assert_eq!(
+            status_release.current_version, matching_release.current_version,
+            "current versions should match for {}",
+            status_release.name
+        );
+        assert_eq!(
+            status_release.new_version, matching_release.new_version,
+            "new versions should match for {}",
+            status_release.name
+        );
+        assert_eq!(
+            status_release.bump_type, matching_release.bump_type,
+            "bump types should match for {}",
+            status_release.name
+        );
+    }
 }

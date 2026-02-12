@@ -3,7 +3,7 @@ use std::path::Path;
 use semver::Version;
 
 use crate::Result;
-use crate::traits::ManifestWriter;
+use crate::traits::{InheritedVersionChecker, ManifestWriter};
 
 pub struct FileSystemManifestWriter;
 
@@ -17,6 +17,12 @@ impl FileSystemManifestWriter {
 impl Default for FileSystemManifestWriter {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+impl InheritedVersionChecker for FileSystemManifestWriter {
+    fn has_inherited_version(&self, manifest_path: &Path) -> Result<bool> {
+        Ok(changeset_manifest::has_inherited_version(manifest_path)?)
     }
 }
 
@@ -34,9 +40,5 @@ impl ManifestWriter for FileSystemManifestWriter {
 
     fn verify_version(&self, manifest_path: &Path, expected: &Version) -> Result<()> {
         Ok(changeset_manifest::verify_version(manifest_path, expected)?)
-    }
-
-    fn has_inherited_version(&self, manifest_path: &Path) -> Result<bool> {
-        Ok(changeset_manifest::has_inherited_version(manifest_path)?)
     }
 }

@@ -11,8 +11,8 @@ use semver::Version;
 use crate::Result;
 use crate::traits::{
     BumpSelection, CategorySelection, ChangelogWriteResult, ChangelogWriter, ChangesetReader,
-    ChangesetWriter, DescriptionInput, GitProvider, InteractionProvider, ManifestWriter,
-    PackageSelection, ProjectProvider,
+    ChangesetWriter, DescriptionInput, GitProvider, InheritedVersionChecker, InteractionProvider,
+    ManifestWriter, PackageSelection, ProjectProvider,
 };
 
 pub struct MockProjectProvider {
@@ -431,6 +431,12 @@ impl Default for MockManifestWriter {
     }
 }
 
+impl InheritedVersionChecker for MockManifestWriter {
+    fn has_inherited_version(&self, manifest_path: &Path) -> Result<bool> {
+        Ok(self.inherited_paths.contains(manifest_path))
+    }
+}
+
 impl ManifestWriter for MockManifestWriter {
     fn write_version(&self, manifest_path: &Path, new_version: &Version) -> Result<()> {
         self.written_versions
@@ -451,9 +457,11 @@ impl ManifestWriter for MockManifestWriter {
     fn verify_version(&self, _manifest_path: &Path, _expected: &Version) -> Result<()> {
         Ok(())
     }
+}
 
+impl InheritedVersionChecker for Arc<MockManifestWriter> {
     fn has_inherited_version(&self, manifest_path: &Path) -> Result<bool> {
-        Ok(self.inherited_paths.contains(manifest_path))
+        (**self).has_inherited_version(manifest_path)
     }
 }
 
@@ -468,10 +476,6 @@ impl ManifestWriter for Arc<MockManifestWriter> {
 
     fn verify_version(&self, manifest_path: &Path, expected: &Version) -> Result<()> {
         (**self).verify_version(manifest_path, expected)
-    }
-
-    fn has_inherited_version(&self, manifest_path: &Path) -> Result<bool> {
-        (**self).has_inherited_version(manifest_path)
     }
 }
 
@@ -533,5 +537,47 @@ impl ChangelogWriter for MockChangelogWriter {
 
     fn changelog_exists(&self, path: &Path) -> bool {
         self.existing_changelogs.contains(path)
+    }
+}
+
+pub struct MockInheritedVersionChecker {
+    inherited_paths: HashSet<PathBuf>,
+}
+
+impl MockInheritedVersionChecker {
+    #[must_use]
+    pub fn new() -> Self {
+        Self {
+            inherited_paths: HashSet::new(),
+        }
+    }
+
+    #[must_use]
+    pub fn with_inherited(mut self, paths: Vec<PathBuf>) -> Self {
+        self.inherited_paths = paths.into_iter().collect();
+        self
+    }
+}
+
+impl Default for MockInheritedVersionChecker {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl InheritedVersionChecker for MockInheritedVersionChecker {
+    fn has_inherited_version(&self, manifest_path: &Path) -> Result<bool> {
+        Ok(self.inherited_paths.contains(manifest_path))
+    }
+}
+
+pub struct FailingInheritedVersionChecker;
+
+impl InheritedVersionChecker for FailingInheritedVersionChecker {
+    fn has_inherited_version(&self, manifest_path: &Path) -> Result<bool> {
+        Err(crate::OperationError::Io(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            format!("mock read error for {}", manifest_path.display()),
+        )))
     }
 }

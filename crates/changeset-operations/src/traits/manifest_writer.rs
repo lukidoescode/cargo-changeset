@@ -2,9 +2,10 @@ use std::path::Path;
 
 use semver::Version;
 
+use super::inherited_version_checker::InheritedVersionChecker;
 use crate::Result;
 
-pub trait ManifestWriter: Send + Sync {
+pub trait ManifestWriter: InheritedVersionChecker + Send + Sync {
     /// # Errors
     ///
     /// Returns an error if the manifest cannot be read or written.
@@ -19,9 +20,4 @@ pub trait ManifestWriter: Send + Sync {
     ///
     /// Returns an error if the version does not match the expected value.
     fn verify_version(&self, manifest_path: &Path, expected: &Version) -> Result<()>;
-
-    /// # Errors
-    ///
-    /// Returns an error if the manifest cannot be read.
-    fn has_inherited_version(&self, manifest_path: &Path) -> Result<bool>;
 }

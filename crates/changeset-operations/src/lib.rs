@@ -5,6 +5,6 @@ pub mod traits;
 pub mod verification;
 
 #[cfg(test)]
-pub mod testing;
+pub mod mocks;
 
 pub use error::{OperationError, Result};
