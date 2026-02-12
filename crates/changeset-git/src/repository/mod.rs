@@ -1,6 +1,7 @@
 mod commit;
 mod diff;
 mod files;
+mod remote;
 mod staging;
 mod status;
 mod tag;

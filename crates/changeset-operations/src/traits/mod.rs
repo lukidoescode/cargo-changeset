@@ -1,9 +1,11 @@
+mod changelog_writer;
 mod changeset_io;
 mod git_provider;
 mod interaction;
 mod manifest_writer;
 mod project_provider;
 
+pub use changelog_writer::{ChangelogWriteResult, ChangelogWriter};
 pub use changeset_io::{ChangesetReader, ChangesetWriter};
 pub use git_provider::GitProvider;
 pub use interaction::{

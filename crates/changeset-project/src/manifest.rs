@@ -1,5 +1,6 @@
 use std::path::Path;
 
+use changeset_changelog::{ChangelogLocation, ComparisonLinksSetting};
 use serde::Deserialize;
 
 use crate::error::ProjectError;
@@ -70,4 +71,10 @@ pub(crate) struct ChangesetMetadata {
     pub(crate) ignored_files: Vec<String>,
     #[serde(default, rename = "changeset-dir")]
     pub(crate) changeset_dir: Option<String>,
+    #[serde(default)]
+    pub(crate) changelog: Option<ChangelogLocation>,
+    #[serde(default, rename = "comparison-links")]
+    pub(crate) comparison_links: Option<ComparisonLinksSetting>,
+    #[serde(default, rename = "comparison-links-template")]
+    pub(crate) comparison_links_template: Option<String>,
 }

@@ -35,4 +35,9 @@ pub trait GitProvider: Send + Sync {
     ///
     /// Returns an error if the tag cannot be created or already exists.
     fn create_tag(&self, project_root: &Path, tag_name: &str, message: &str) -> Result<TagInfo>;
+
+    /// # Errors
+    ///
+    /// Returns an error if the repository cannot be opened.
+    fn remote_url(&self, project_root: &Path) -> Result<Option<String>>;
 }

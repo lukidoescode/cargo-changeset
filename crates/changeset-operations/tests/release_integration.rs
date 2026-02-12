@@ -4,7 +4,8 @@ use std::path::Path;
 use changeset_operations::OperationError;
 use changeset_operations::operations::{ReleaseInput, ReleaseOperation, ReleaseOutcome};
 use changeset_operations::providers::{
-    FileSystemChangesetIO, FileSystemManifestWriter, FileSystemProjectProvider,
+    FileSystemChangelogWriter, FileSystemChangesetIO, FileSystemManifestWriter,
+    FileSystemProjectProvider, Git2Provider,
 };
 use tempfile::TempDir;
 
@@ -152,8 +153,16 @@ fn run_release(
     let project_provider = FileSystemProjectProvider::new();
     let changeset_reader = FileSystemChangesetIO::new(dir.path());
     let manifest_writer = FileSystemManifestWriter::new();
+    let changelog_writer = FileSystemChangelogWriter::new();
+    let git_provider = Git2Provider::new();
 
-    let operation = ReleaseOperation::new(project_provider, changeset_reader, manifest_writer);
+    let operation = ReleaseOperation::new(
+        project_provider,
+        changeset_reader,
+        manifest_writer,
+        changelog_writer,
+        git_provider,
+    );
     let input = ReleaseInput {
         dry_run,
         convert_inherited,
@@ -336,4 +345,73 @@ fn multiple_changesets_aggregate_correctly() {
         "1.1.0",
         "minor should win over patches"
     );
+}
+
+#[test]
+fn creates_changelog_on_release() {
+    let dir = create_single_package_project();
+    write_changeset(&dir, "fix.md", "my-crate", "patch", "Fix a bug");
+
+    let result = run_release(&dir, false, false).expect("release should succeed");
+
+    let ReleaseOutcome::Executed(output) = result else {
+        panic!("expected Executed outcome");
+    };
+
+    assert_eq!(output.changelog_updates.len(), 1);
+    assert!(output.changelog_updates[0].created);
+
+    let changelog_path = dir.path().join("CHANGELOG.md");
+    assert!(changelog_path.exists(), "CHANGELOG.md should be created");
+
+    let content = fs::read_to_string(&changelog_path).expect("read CHANGELOG.md");
+    assert!(content.contains("# Changelog"));
+    assert!(content.contains("## [1.0.1]"));
+    assert!(content.contains("Fix a bug"));
+}
+
+#[test]
+fn dry_run_skips_changelog_creation() {
+    let dir = create_single_package_project();
+    write_changeset(&dir, "fix.md", "my-crate", "patch", "Fix a bug");
+
+    let result = run_release(&dir, true, false).expect("release should succeed");
+
+    let ReleaseOutcome::DryRun(output) = result else {
+        panic!("expected DryRun outcome");
+    };
+
+    assert!(
+        output.changelog_updates.is_empty(),
+        "dry run should not create changelog updates"
+    );
+
+    let changelog_path = dir.path().join("CHANGELOG.md");
+    assert!(
+        !changelog_path.exists(),
+        "CHANGELOG.md should not be created in dry run"
+    );
+}
+
+#[test]
+fn changelog_aggregates_multiple_changesets() {
+    let dir = create_single_package_project();
+    write_changeset(&dir, "fix.md", "my-crate", "patch", "Fix a bug");
+    write_changeset(&dir, "feature.md", "my-crate", "minor", "Add new feature");
+
+    let result = run_release(&dir, false, false).expect("release should succeed");
+
+    let ReleaseOutcome::Executed(_) = result else {
+        panic!("expected Executed outcome");
+    };
+
+    let changelog_path = dir.path().join("CHANGELOG.md");
+    let content = fs::read_to_string(&changelog_path).expect("read CHANGELOG.md");
+
+    assert!(content.contains("Fix a bug"), "Should contain first change");
+    assert!(
+        content.contains("Add new feature"),
+        "Should contain second change"
+    );
+    assert!(content.contains("## [1.1.0]"), "Version should be 1.1.0");
 }
