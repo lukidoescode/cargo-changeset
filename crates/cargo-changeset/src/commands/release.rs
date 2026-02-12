@@ -4,7 +4,8 @@ use changeset_operations::operations::{
     ReleaseInput, ReleaseOperation, ReleaseOutcome, ReleaseOutput,
 };
 use changeset_operations::providers::{
-    FileSystemChangesetIO, FileSystemManifestWriter, FileSystemProjectProvider,
+    FileSystemChangelogWriter, FileSystemChangesetIO, FileSystemManifestWriter,
+    FileSystemProjectProvider, Git2Provider,
 };
 use changeset_operations::traits::ProjectProvider;
 
@@ -16,8 +17,16 @@ pub(crate) fn run(args: ReleaseArgs, start_path: &Path) -> Result<()> {
     let project = project_provider.discover_project(start_path)?;
     let changeset_reader = FileSystemChangesetIO::new(&project.root);
     let manifest_writer = FileSystemManifestWriter::new();
+    let changelog_writer = FileSystemChangelogWriter::new();
+    let git_provider = Git2Provider::new();
 
-    let operation = ReleaseOperation::new(project_provider, changeset_reader, manifest_writer);
+    let operation = ReleaseOperation::new(
+        project_provider,
+        changeset_reader,
+        manifest_writer,
+        changelog_writer,
+        git_provider,
+    );
     let input = ReleaseInput {
         dry_run: args.dry_run,
         convert_inherited: args.convert,
@@ -70,4 +79,12 @@ fn print_release_output(output: &ReleaseOutput) {
         "\nChangesets to consume: {}",
         output.changesets_consumed.len()
     );
+
+    if !output.changelog_updates.is_empty() {
+        println!("\nChangelog updates:");
+        for update in &output.changelog_updates {
+            let status = if update.created { "created" } else { "updated" };
+            println!("  {} ({})", update.path.display(), status);
+        }
+    }
 }

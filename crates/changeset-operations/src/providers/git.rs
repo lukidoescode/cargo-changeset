@@ -55,4 +55,9 @@ impl GitProvider for Git2Provider {
         let repo = Repository::open(project_root)?;
         Ok(repo.create_tag(tag_name, message)?)
     }
+
+    fn remote_url(&self, project_root: &Path) -> Result<Option<String>> {
+        let repo = Repository::open(project_root)?;
+        Ok(repo.remote_url()?)
+    }
 }

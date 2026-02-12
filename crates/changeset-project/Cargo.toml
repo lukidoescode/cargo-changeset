@@ -9,6 +9,7 @@ authors.workspace = true
 description = "Cargo project discovery and management for changesets"
 
 [dependencies]
+changeset-changelog = { workspace = true }
 changeset-core = { workspace = true }
 globset = "0.4"
 semver = { workspace = true }

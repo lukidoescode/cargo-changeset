@@ -2,6 +2,7 @@ use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
+use changeset_changelog::{RepositoryInfo, VersionRelease};
 use changeset_core::{BumpType, ChangeCategory, Changeset, PackageInfo};
 use changeset_git::{CommitInfo, FileChange, TagInfo};
 use changeset_project::{CargoProject, PackageChangesetConfig, ProjectKind, RootChangesetConfig};
@@ -9,8 +10,9 @@ use semver::Version;
 
 use crate::Result;
 use crate::traits::{
-    BumpSelection, CategorySelection, ChangesetReader, ChangesetWriter, DescriptionInput,
-    GitProvider, InteractionProvider, ManifestWriter, PackageSelection, ProjectProvider,
+    BumpSelection, CategorySelection, ChangelogWriteResult, ChangelogWriter, ChangesetReader,
+    ChangesetWriter, DescriptionInput, GitProvider, InteractionProvider, ManifestWriter,
+    PackageSelection, ProjectProvider,
 };
 
 pub struct MockProjectProvider {
@@ -203,6 +205,7 @@ pub struct MockGitProvider {
     changed_files: Vec<FileChange>,
     clean: bool,
     branch: String,
+    remote_url: Option<String>,
 }
 
 impl MockGitProvider {
@@ -212,6 +215,7 @@ impl MockGitProvider {
             changed_files: Vec::new(),
             clean: true,
             branch: "main".to_string(),
+            remote_url: None,
         }
     }
 
@@ -230,6 +234,12 @@ impl MockGitProvider {
     #[must_use]
     pub fn is_clean(mut self, clean: bool) -> Self {
         self.clean = clean;
+        self
+    }
+
+    #[must_use]
+    pub fn with_remote_url(mut self, url: &str) -> Self {
+        self.remote_url = Some(url.to_string());
         self
     }
 }
@@ -274,6 +284,10 @@ impl GitProvider for MockGitProvider {
             name: tag_name.to_string(),
             target_sha: "abc123def456".to_string(),
         })
+    }
+
+    fn remote_url(&self, _project_root: &Path) -> Result<Option<String>> {
+        Ok(self.remote_url.clone())
     }
 }
 
@@ -458,5 +472,66 @@ impl ManifestWriter for Arc<MockManifestWriter> {
 
     fn has_inherited_version(&self, manifest_path: &Path) -> Result<bool> {
         (**self).has_inherited_version(manifest_path)
+    }
+}
+
+pub struct MockChangelogWriter {
+    written: Mutex<Vec<(PathBuf, VersionRelease)>>,
+    existing_changelogs: HashSet<PathBuf>,
+}
+
+impl MockChangelogWriter {
+    #[must_use]
+    pub fn new() -> Self {
+        Self {
+            written: Mutex::new(Vec::new()),
+            existing_changelogs: HashSet::new(),
+        }
+    }
+
+    #[must_use]
+    pub fn with_existing_changelog(mut self, path: PathBuf) -> Self {
+        self.existing_changelogs.insert(path);
+        self
+    }
+
+    /// # Panics
+    ///
+    /// Panics if the internal mutex is poisoned.
+    #[must_use]
+    pub fn written_releases(&self) -> Vec<(PathBuf, VersionRelease)> {
+        self.written.lock().expect("lock poisoned").clone()
+    }
+}
+
+impl Default for MockChangelogWriter {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl ChangelogWriter for MockChangelogWriter {
+    fn write_release(
+        &self,
+        changelog_path: &Path,
+        release: &VersionRelease,
+        _repo_info: Option<&RepositoryInfo>,
+        _previous_version: Option<&str>,
+    ) -> Result<ChangelogWriteResult> {
+        let created = !self.existing_changelogs.contains(changelog_path);
+
+        self.written
+            .lock()
+            .expect("lock poisoned")
+            .push((changelog_path.to_path_buf(), release.clone()));
+
+        Ok(ChangelogWriteResult {
+            path: changelog_path.to_path_buf(),
+            created,
+        })
+    }
+
+    fn changelog_exists(&self, path: &Path) -> bool {
+        self.existing_changelogs.contains(path)
     }
 }

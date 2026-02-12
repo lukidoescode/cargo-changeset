@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
+use changeset_changelog::{ChangelogConfig, ChangelogLocation, ComparisonLinksSetting};
 use globset::{Glob, GlobSet, GlobSetBuilder};
 
 use crate::error::ProjectError;
@@ -11,6 +12,7 @@ use crate::project::{CargoProject, ProjectKind};
 pub struct RootChangesetConfig {
     ignored_files: GlobSet,
     changeset_dir: PathBuf,
+    changelog_config: ChangelogConfig,
 }
 
 impl Default for RootChangesetConfig {
@@ -18,6 +20,7 @@ impl Default for RootChangesetConfig {
         Self {
             ignored_files: GlobSet::empty(),
             changeset_dir: PathBuf::from(crate::DEFAULT_CHANGESET_DIR),
+            changelog_config: ChangelogConfig::default(),
         }
     }
 }
@@ -36,6 +39,11 @@ impl RootChangesetConfig {
     #[must_use]
     pub fn changeset_dir(&self) -> &Path {
         &self.changeset_dir
+    }
+
+    #[must_use]
+    pub fn changelog_config(&self) -> &ChangelogConfig {
+        &self.changelog_config
     }
 }
 
@@ -71,6 +79,18 @@ fn build_glob_set(patterns: &[String]) -> Result<GlobSet, ProjectError> {
     })
 }
 
+fn build_changelog_config(
+    changelog: Option<ChangelogLocation>,
+    comparison_links: Option<ComparisonLinksSetting>,
+    comparison_links_template: Option<String>,
+) -> ChangelogConfig {
+    ChangelogConfig {
+        changelog: changelog.unwrap_or_default(),
+        comparison_links: comparison_links.unwrap_or_default(),
+        comparison_links_template,
+    }
+}
+
 /// Parses root configuration from workspace metadata.
 ///
 /// # Errors
@@ -97,9 +117,20 @@ fn parse_workspace_root_config(project_root: &Path) -> Result<RootChangesetConfi
 
     let ignored_files = build_glob_set(&patterns)?;
 
+    let changelog_config = build_changelog_config(
+        changeset_metadata.as_ref().and_then(|cs| cs.changelog),
+        changeset_metadata
+            .as_ref()
+            .and_then(|cs| cs.comparison_links),
+        changeset_metadata
+            .as_ref()
+            .and_then(|cs| cs.comparison_links_template.clone()),
+    );
+
     Ok(RootChangesetConfig {
         ignored_files,
         changeset_dir: PathBuf::from(changeset_dir),
+        changelog_config,
     })
 }
 
@@ -129,9 +160,20 @@ fn parse_package_root_config(project_root: &Path) -> Result<RootChangesetConfig,
 
     let ignored_files = build_glob_set(&patterns)?;
 
+    let changelog_config = build_changelog_config(
+        changeset_metadata.as_ref().and_then(|cs| cs.changelog),
+        changeset_metadata
+            .as_ref()
+            .and_then(|cs| cs.comparison_links),
+        changeset_metadata
+            .as_ref()
+            .and_then(|cs| cs.comparison_links_template.clone()),
+    );
+
     Ok(RootChangesetConfig {
         ignored_files,
         changeset_dir: PathBuf::from(changeset_dir),
+        changelog_config,
     })
 }
 
@@ -361,6 +403,81 @@ ignored-files = []
         let config = parse_workspace_root_config(dir.path())?;
 
         assert!(!config.is_ignored(Path::new("anything.txt")));
+
+        Ok(())
+    }
+
+    #[test]
+    fn parse_workspace_changelog_config() -> anyhow::Result<()> {
+        let toml = r#"
+[workspace]
+members = ["crates/*"]
+
+[workspace.metadata.changeset]
+changelog = "per-package"
+comparison-links = "enabled"
+comparison-links-template = "https://example.com/{repository}/compare/{base}...{target}"
+"#;
+        let dir = setup_with_config(toml)?;
+
+        let config = parse_workspace_root_config(dir.path())?;
+        let changelog_config = config.changelog_config();
+
+        assert_eq!(changelog_config.changelog, ChangelogLocation::PerPackage);
+        assert_eq!(
+            changelog_config.comparison_links,
+            ComparisonLinksSetting::Enabled
+        );
+        assert_eq!(
+            changelog_config.comparison_links_template.as_deref(),
+            Some("https://example.com/{repository}/compare/{base}...{target}")
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn parse_changelog_config_defaults() -> anyhow::Result<()> {
+        let toml = r#"
+[workspace]
+members = ["crates/*"]
+"#;
+        let dir = setup_with_config(toml)?;
+
+        let config = parse_workspace_root_config(dir.path())?;
+        let changelog_config = config.changelog_config();
+
+        assert_eq!(changelog_config.changelog, ChangelogLocation::Root);
+        assert_eq!(
+            changelog_config.comparison_links,
+            ComparisonLinksSetting::Auto
+        );
+        assert!(changelog_config.comparison_links_template.is_none());
+
+        Ok(())
+    }
+
+    #[test]
+    fn parse_single_package_changelog_config() -> anyhow::Result<()> {
+        let toml = r#"
+[package]
+name = "my-crate"
+version = "0.1.0"
+
+[package.metadata.changeset]
+changelog = "root"
+comparison-links = "disabled"
+"#;
+        let dir = setup_with_config(toml)?;
+
+        let config = parse_package_root_config(dir.path())?;
+        let changelog_config = config.changelog_config();
+
+        assert_eq!(changelog_config.changelog, ChangelogLocation::Root);
+        assert_eq!(
+            changelog_config.comparison_links,
+            ComparisonLinksSetting::Disabled
+        );
 
         Ok(())
     }

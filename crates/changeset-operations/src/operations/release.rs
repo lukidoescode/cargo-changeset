@@ -1,13 +1,18 @@
 use std::path::{Path, PathBuf};
 
+use changeset_changelog::{ChangelogLocation, ComparisonLinksSetting, RepositoryInfo};
 use changeset_core::{BumpType, PackageInfo};
 use changeset_version::{bump_version, max_bump_type};
+use chrono::Local;
 use indexmap::IndexMap;
 use semver::Version;
 
+use super::changelog_aggregation::ChangesetAggregator;
 use crate::Result;
 use crate::error::OperationError;
-use crate::traits::{ChangesetReader, ManifestWriter, ProjectProvider};
+use crate::traits::{
+    ChangelogWriter, ChangesetReader, GitProvider, ManifestWriter, ProjectProvider,
+};
 
 pub struct ReleaseInput {
     pub dry_run: bool,
@@ -23,10 +28,19 @@ pub struct PackageVersion {
 }
 
 #[derive(Debug, Clone)]
+pub struct ChangelogUpdate {
+    pub path: PathBuf,
+    pub package: Option<String>,
+    pub version: Version,
+    pub created: bool,
+}
+
+#[derive(Debug, Clone)]
 pub struct ReleaseOutput {
     pub planned_releases: Vec<PackageVersion>,
     pub unchanged_packages: Vec<String>,
     pub changesets_consumed: Vec<PathBuf>,
+    pub changelog_updates: Vec<ChangelogUpdate>,
 }
 
 #[derive(Debug)]
@@ -36,23 +50,41 @@ pub enum ReleaseOutcome {
     NoChangesets,
 }
 
-pub struct ReleaseOperation<P, R, M> {
+fn find_previous_tag(planned_releases: &[PackageVersion]) -> Option<String> {
+    let first_release = planned_releases.first()?;
+    let previous_version = &first_release.current_version;
+    Some(previous_version.to_string())
+}
+
+pub struct ReleaseOperation<P, R, M, C, G> {
     project_provider: P,
     changeset_reader: R,
     manifest_writer: M,
+    changelog_writer: C,
+    git_provider: G,
 }
 
-impl<P, R, M> ReleaseOperation<P, R, M>
+impl<P, R, M, C, G> ReleaseOperation<P, R, M, C, G>
 where
     P: ProjectProvider,
     R: ChangesetReader,
     M: ManifestWriter,
+    C: ChangelogWriter,
+    G: GitProvider,
 {
-    pub fn new(project_provider: P, changeset_reader: R, manifest_writer: M) -> Self {
+    pub fn new(
+        project_provider: P,
+        changeset_reader: R,
+        manifest_writer: M,
+        changelog_writer: C,
+        git_provider: G,
+    ) -> Self {
         Self {
             project_provider,
             changeset_reader,
             manifest_writer,
+            changelog_writer,
+            git_provider,
         }
     }
 
@@ -68,6 +100,110 @@ where
             }
         }
         Ok(inherited)
+    }
+
+    fn detect_repository_info(&self, project_root: &Path) -> Option<RepositoryInfo> {
+        let url = self.git_provider.remote_url(project_root).ok()??;
+        RepositoryInfo::from_url(&url).ok()
+    }
+
+    fn generate_changelog_updates(
+        &self,
+        project_root: &Path,
+        changelog_config: &changeset_changelog::ChangelogConfig,
+        aggregator: &ChangesetAggregator,
+        planned_releases: &[PackageVersion],
+        package_lookup: &IndexMap<String, PackageInfo>,
+    ) -> Result<Vec<ChangelogUpdate>> {
+        let today = Local::now().date_naive();
+        let repo_info = self.resolve_repo_info(project_root, changelog_config)?;
+        let mut changelog_updates = Vec::new();
+
+        match changelog_config.changelog {
+            ChangelogLocation::Root => {
+                let changelog_path = project_root.join("CHANGELOG.md");
+                let max_version = planned_releases
+                    .iter()
+                    .map(|r| &r.new_version)
+                    .max()
+                    .cloned();
+
+                if let Some(version) = max_version {
+                    let packages: Vec<_> = planned_releases
+                        .iter()
+                        .map(|r| (r.name.clone(), r.new_version.clone()))
+                        .collect();
+
+                    if let Some(release) = aggregator.build_root_release(&version, today, &packages)
+                    {
+                        let previous_tag = find_previous_tag(planned_releases);
+
+                        let result = self.changelog_writer.write_release(
+                            &changelog_path,
+                            &release,
+                            repo_info.as_ref(),
+                            previous_tag.as_deref(),
+                        )?;
+
+                        changelog_updates.push(ChangelogUpdate {
+                            path: result.path,
+                            package: None,
+                            version,
+                            created: result.created,
+                        });
+                    }
+                }
+            }
+            ChangelogLocation::PerPackage => {
+                for release in planned_releases {
+                    if let Some(pkg) = package_lookup.get(&release.name) {
+                        let changelog_path = pkg.path.join("CHANGELOG.md");
+
+                        if let Some(version_release) = aggregator.build_package_release(
+                            &release.name,
+                            &release.new_version,
+                            today,
+                        ) {
+                            let previous_version = release.current_version.to_string();
+
+                            let result = self.changelog_writer.write_release(
+                                &changelog_path,
+                                &version_release,
+                                repo_info.as_ref(),
+                                Some(&previous_version),
+                            )?;
+
+                            changelog_updates.push(ChangelogUpdate {
+                                path: result.path,
+                                package: Some(release.name.clone()),
+                                version: release.new_version.clone(),
+                                created: result.created,
+                            });
+                        }
+                    }
+                }
+            }
+        }
+
+        Ok(changelog_updates)
+    }
+
+    fn resolve_repo_info(
+        &self,
+        project_root: &Path,
+        changelog_config: &changeset_changelog::ChangelogConfig,
+    ) -> Result<Option<RepositoryInfo>> {
+        match changelog_config.comparison_links {
+            ComparisonLinksSetting::Disabled => Ok(None),
+            ComparisonLinksSetting::Auto => Ok(self.detect_repository_info(project_root)),
+            ComparisonLinksSetting::Enabled => {
+                let repo_info = self.detect_repository_info(project_root);
+                if repo_info.is_none() {
+                    return Err(OperationError::ComparisonLinksRequired);
+                }
+                Ok(repo_info)
+            }
+        }
     }
 
     /// # Errors
@@ -93,9 +229,11 @@ where
         }
 
         let mut bumps_by_package: IndexMap<String, Vec<BumpType>> = IndexMap::new();
+        let mut aggregator = ChangesetAggregator::new();
 
         for path in &changeset_files {
             let changeset = self.changeset_reader.read_changeset(path)?;
+            aggregator.add_changeset(&changeset);
             for release in &changeset.releases {
                 bumps_by_package
                     .entry(release.name.clone())
@@ -136,10 +274,23 @@ where
             .map(|p| p.name.clone())
             .collect();
 
+        let changelog_updates = if input.dry_run {
+            Vec::new()
+        } else {
+            self.generate_changelog_updates(
+                &project.root,
+                root_config.changelog_config(),
+                &aggregator,
+                &planned_releases,
+                &package_lookup,
+            )?
+        };
+
         let output = ReleaseOutput {
             planned_releases: planned_releases.clone(),
             unchanged_packages,
             changesets_consumed: changeset_files,
+            changelog_updates,
         };
 
         if input.dry_run {
@@ -170,7 +321,8 @@ where
 mod tests {
     use super::*;
     use crate::testing::{
-        MockChangesetReader, MockManifestWriter, MockProjectProvider, make_changeset,
+        MockChangelogWriter, MockChangesetReader, MockGitProvider, MockManifestWriter,
+        MockProjectProvider, make_changeset,
     };
 
     fn default_input() -> ReleaseInput {
@@ -180,13 +332,32 @@ mod tests {
         }
     }
 
+    fn make_operation<P, R, M>(
+        project_provider: P,
+        changeset_reader: R,
+        manifest_writer: M,
+    ) -> ReleaseOperation<P, R, M, MockChangelogWriter, MockGitProvider>
+    where
+        P: ProjectProvider,
+        R: ChangesetReader,
+        M: ManifestWriter,
+    {
+        ReleaseOperation::new(
+            project_provider,
+            changeset_reader,
+            manifest_writer,
+            MockChangelogWriter::new(),
+            MockGitProvider::new(),
+        )
+    }
+
     #[test]
     fn returns_no_changesets_when_empty() {
         let project_provider = MockProjectProvider::single_package("my-crate", "1.0.0");
         let changeset_reader = MockChangesetReader::new();
         let manifest_writer = MockManifestWriter::new();
 
-        let operation = ReleaseOperation::new(project_provider, changeset_reader, manifest_writer);
+        let operation = make_operation(project_provider, changeset_reader, manifest_writer);
 
         let result = operation
             .execute(Path::new("/any"), &default_input())
@@ -203,7 +374,7 @@ mod tests {
             .with_changeset(PathBuf::from(".changeset/fix.md"), changeset);
         let manifest_writer = MockManifestWriter::new();
 
-        let operation = ReleaseOperation::new(project_provider, changeset_reader, manifest_writer);
+        let operation = make_operation(project_provider, changeset_reader, manifest_writer);
 
         let result = operation
             .execute(Path::new("/any"), &default_input())
@@ -233,7 +404,7 @@ mod tests {
         ]);
         let manifest_writer = MockManifestWriter::new();
 
-        let operation = ReleaseOperation::new(project_provider, changeset_reader, manifest_writer);
+        let operation = make_operation(project_provider, changeset_reader, manifest_writer);
 
         let result = operation
             .execute(Path::new("/any"), &default_input())
@@ -263,7 +434,7 @@ mod tests {
         ]);
         let manifest_writer = MockManifestWriter::new();
 
-        let operation = ReleaseOperation::new(project_provider, changeset_reader, manifest_writer);
+        let operation = make_operation(project_provider, changeset_reader, manifest_writer);
 
         let result = operation
             .execute(Path::new("/any"), &default_input())
@@ -304,7 +475,7 @@ mod tests {
             .with_changeset(PathBuf::from(".changeset/fix.md"), changeset);
         let manifest_writer = MockManifestWriter::new();
 
-        let operation = ReleaseOperation::new(project_provider, changeset_reader, manifest_writer);
+        let operation = make_operation(project_provider, changeset_reader, manifest_writer);
 
         let result = operation
             .execute(Path::new("/any"), &default_input())
@@ -332,7 +503,7 @@ mod tests {
         ]);
         let manifest_writer = MockManifestWriter::new();
 
-        let operation = ReleaseOperation::new(project_provider, changeset_reader, manifest_writer);
+        let operation = make_operation(project_provider, changeset_reader, manifest_writer);
 
         let result = operation
             .execute(Path::new("/any"), &default_input())
@@ -353,7 +524,7 @@ mod tests {
             .with_changeset(PathBuf::from(".changeset/fix.md"), changeset);
         let manifest_writer = MockManifestWriter::new();
 
-        let operation = ReleaseOperation::new(project_provider, changeset_reader, manifest_writer);
+        let operation = make_operation(project_provider, changeset_reader, manifest_writer);
         let input = ReleaseInput {
             dry_run: false,
             convert_inherited: false,
@@ -380,6 +551,8 @@ mod tests {
             project_provider,
             changeset_reader,
             Arc::clone(&manifest_writer),
+            MockChangelogWriter::new(),
+            MockGitProvider::new(),
         );
         let input = ReleaseInput {
             dry_run: false,
@@ -411,7 +584,7 @@ mod tests {
         let manifest_writer = MockManifestWriter::new()
             .with_inherited(vec![PathBuf::from("/mock/project/Cargo.toml")]);
 
-        let operation = ReleaseOperation::new(project_provider, changeset_reader, manifest_writer);
+        let operation = make_operation(project_provider, changeset_reader, manifest_writer);
         let input = ReleaseInput {
             dry_run: false,
             convert_inherited: false,
@@ -434,7 +607,7 @@ mod tests {
         let manifest_writer = MockManifestWriter::new()
             .with_inherited(vec![PathBuf::from("/mock/project/Cargo.toml")]);
 
-        let operation = ReleaseOperation::new(project_provider, changeset_reader, manifest_writer);
+        let operation = make_operation(project_provider, changeset_reader, manifest_writer);
         let input = ReleaseInput {
             dry_run: false,
             convert_inherited: true,
@@ -462,6 +635,8 @@ mod tests {
             project_provider,
             changeset_reader,
             Arc::clone(&manifest_writer),
+            MockChangelogWriter::new(),
+            MockGitProvider::new(),
         );
         let input = ReleaseInput {
             dry_run: false,
