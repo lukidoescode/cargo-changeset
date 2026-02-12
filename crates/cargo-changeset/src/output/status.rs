@@ -50,7 +50,9 @@ impl PlainTextStatusFormatter {
             return String::new();
         }
 
-        let bump_strs: Vec<_> = bumps.iter().map(|b| format!("{b:?}")).collect();
+        let mut sorted_bumps: Vec<_> = bumps.iter().collect();
+        sorted_bumps.sort();
+        let bump_strs: Vec<_> = sorted_bumps.iter().map(|b| format!("{b:?}")).collect();
         format!(" (from: {})", bump_strs.join(", "))
     }
 
