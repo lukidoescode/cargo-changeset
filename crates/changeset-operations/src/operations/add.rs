@@ -99,6 +99,7 @@ where
             summary: description.to_string(),
             releases,
             category,
+            consumed_for_prerelease: None,
         };
 
         let (root_config, _) = self.project_provider.load_configs(&project)?;

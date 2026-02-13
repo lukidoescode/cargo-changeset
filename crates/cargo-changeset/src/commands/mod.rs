@@ -20,6 +20,17 @@ pub(crate) enum Commands {
     /// Show pending changesets and projected version bumps
     Status,
     /// Calculate version bumps and prepare releases based on pending changesets
+    #[command(
+        verbatim_doc_comment,
+        after_long_help = "\
+Pre-release workflow:
+  1. cargo changeset release --prerelease alpha  → 1.0.0 becomes 1.0.1-alpha.1
+  2. cargo changeset release --prerelease        → increments to 1.0.1-alpha.2
+  3. cargo changeset release                     → graduates to stable 1.0.1
+
+When graduating from a pre-release, all accumulated changes are combined
+into the final changelog entry."
+    )]
     Release(ReleaseArgs),
     /// Initialize changeset directory in the project
     Init,
@@ -92,6 +103,16 @@ pub(crate) struct ReleaseArgs {
     /// Keep changeset files after release (do not delete them)
     #[arg(long)]
     pub keep_changesets: bool,
+
+    /// Create a pre-release version (alpha, beta, rc, or custom tag).
+    /// If tag is omitted on a pre-release version, reuses the current tag.
+    /// To graduate a pre-release to stable, run without this flag.
+    #[arg(long, value_name = "TAG", num_args = 0..=1, default_missing_value = "")]
+    pub prerelease: Option<String>,
+
+    /// Force release without changesets (only valid for pre-release increment)
+    #[arg(long, short = 'f')]
+    pub force: bool,
 }
 
 pub(crate) struct ExecuteResult {

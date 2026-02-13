@@ -44,6 +44,9 @@ pub enum CliError {
         "changeset files were deleted in this branch (use --allow-deleted-changesets to bypass)"
     )]
     ChangesetDeleted { paths: Vec<PathBuf> },
+
+    #[error("invalid prerelease tag '{tag}'")]
+    InvalidPrereleaseTag { tag: String },
 }
 
 pub type Result<T> = std::result::Result<T, CliError>;

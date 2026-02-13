@@ -1,7 +1,7 @@
 use std::collections::HashSet;
 
-use changeset_core::{BumpType, Changeset, PackageInfo};
-use changeset_version::{bump_version, max_bump_type};
+use changeset_core::{BumpType, Changeset, PackageInfo, PrereleaseSpec};
+use changeset_version::{VersionError, calculate_new_version, max_bump_type};
 use indexmap::IndexMap;
 
 use super::release::PackageVersion;
@@ -19,8 +19,28 @@ pub struct ReleasePlan {
 pub struct VersionPlanner;
 
 impl VersionPlanner {
-    #[must_use]
-    pub fn plan_releases(changesets: &[Changeset], packages: &[PackageInfo]) -> ReleasePlan {
+    /// Plans version releases based on changesets.
+    ///
+    /// # Errors
+    ///
+    /// Returns `VersionError` if version calculation fails.
+    pub fn plan_releases(
+        changesets: &[Changeset],
+        packages: &[PackageInfo],
+    ) -> Result<ReleasePlan, VersionError> {
+        Self::plan_releases_with_prerelease(changesets, packages, None)
+    }
+
+    /// Plans version releases with optional prerelease specification.
+    ///
+    /// # Errors
+    ///
+    /// Returns `VersionError` if version calculation fails.
+    pub fn plan_releases_with_prerelease(
+        changesets: &[Changeset],
+        packages: &[PackageInfo],
+        prerelease: Option<&PrereleaseSpec>,
+    ) -> Result<ReleasePlan, VersionError> {
         let package_lookup: IndexMap<_, _> = packages.iter().map(|p| (p.name.clone(), p)).collect();
         let bumps_by_package = Self::aggregate_bumps(changesets);
 
@@ -28,27 +48,56 @@ impl VersionPlanner {
         let mut unknown_packages = Vec::new();
 
         for (name, bumps) in &bumps_by_package {
-            let Some(bump_type) = max_bump_type(bumps) else {
+            let bump_type = max_bump_type(bumps);
+
+            if bump_type.is_none() && prerelease.is_none() {
                 continue;
-            };
+            }
 
             if let Some(pkg) = package_lookup.get(name) {
-                let new_version = bump_version(&pkg.version, bump_type);
+                let new_version = calculate_new_version(&pkg.version, bump_type, prerelease)?;
+                let effective_bump = bump_type.unwrap_or(BumpType::Patch);
                 releases.push(PackageVersion {
                     name: name.clone(),
                     current_version: pkg.version.clone(),
                     new_version,
-                    bump_type,
+                    bump_type: effective_bump,
                 });
             } else {
                 unknown_packages.push(name.clone());
             }
         }
 
-        ReleasePlan {
+        Ok(ReleasePlan {
             releases,
             unknown_packages,
+        })
+    }
+
+    /// Plans graduation of prerelease versions to stable.
+    ///
+    /// # Errors
+    ///
+    /// Returns `VersionError` if version calculation fails.
+    pub fn plan_graduation(packages: &[PackageInfo]) -> Result<ReleasePlan, VersionError> {
+        let mut releases = Vec::new();
+
+        for pkg in packages {
+            if changeset_version::is_prerelease(&pkg.version) {
+                let new_version = calculate_new_version(&pkg.version, None, None)?;
+                releases.push(PackageVersion {
+                    name: pkg.name.clone(),
+                    current_version: pkg.version.clone(),
+                    new_version,
+                    bump_type: BumpType::Patch,
+                });
+            }
         }
+
+        Ok(ReleasePlan {
+            releases,
+            unknown_packages: Vec::new(),
+        })
     }
 
     #[must_use]
@@ -111,6 +160,7 @@ mod tests {
                 bump_type: bump,
             }],
             category: ChangeCategory::Changed,
+            consumed_for_prerelease: None,
         }
     }
 
@@ -125,6 +175,7 @@ mod tests {
                 })
                 .collect(),
             category: ChangeCategory::Changed,
+            consumed_for_prerelease: None,
         }
     }
 
@@ -132,7 +183,7 @@ mod tests {
     fn plan_releases_empty_changesets_returns_empty_plan() {
         let packages = vec![make_package("my-crate", "1.0.0")];
 
-        let plan = VersionPlanner::plan_releases(&[], &packages);
+        let plan = VersionPlanner::plan_releases(&[], &packages).expect("plan_releases");
 
         assert!(plan.releases.is_empty());
         assert!(plan.unknown_packages.is_empty());
@@ -143,7 +194,7 @@ mod tests {
         let packages = vec![make_package("my-crate", "1.0.0")];
         let changesets = vec![make_changeset("my-crate", BumpType::Patch, "Fix bug")];
 
-        let plan = VersionPlanner::plan_releases(&changesets, &packages);
+        let plan = VersionPlanner::plan_releases(&changesets, &packages).expect("plan_releases");
 
         assert_eq!(plan.releases.len(), 1);
         assert!(plan.unknown_packages.is_empty());
@@ -164,7 +215,7 @@ mod tests {
             make_changeset("my-crate", BumpType::Patch, "Another fix"),
         ];
 
-        let plan = VersionPlanner::plan_releases(&changesets, &packages);
+        let plan = VersionPlanner::plan_releases(&changesets, &packages).expect("plan_releases");
 
         assert_eq!(plan.releases.len(), 1);
         let release = &plan.releases[0];
@@ -183,7 +234,7 @@ mod tests {
             make_changeset("crate-b", BumpType::Major, "Breaking change in B"),
         ];
 
-        let plan = VersionPlanner::plan_releases(&changesets, &packages);
+        let plan = VersionPlanner::plan_releases(&changesets, &packages).expect("plan_releases");
 
         assert_eq!(plan.releases.len(), 2);
         assert!(plan.unknown_packages.is_empty());
@@ -208,7 +259,7 @@ mod tests {
         let packages = vec![make_package("known-crate", "1.0.0")];
         let changesets = vec![make_changeset("unknown-crate", BumpType::Patch, "Fix")];
 
-        let plan = VersionPlanner::plan_releases(&changesets, &packages);
+        let plan = VersionPlanner::plan_releases(&changesets, &packages).expect("plan_releases");
 
         assert!(plan.releases.is_empty());
         assert_eq!(plan.unknown_packages, vec!["unknown-crate"]);
@@ -225,7 +276,7 @@ mod tests {
             "Mixed changes",
         )];
 
-        let plan = VersionPlanner::plan_releases(&changesets, &packages);
+        let plan = VersionPlanner::plan_releases(&changesets, &packages).expect("plan_releases");
 
         assert_eq!(plan.releases.len(), 1);
         assert_eq!(plan.releases[0].name, "known-crate");
@@ -267,18 +318,14 @@ mod tests {
         let packages = vec![make_package("my-crate", "1.0.0-alpha.1")];
         let changesets = vec![make_changeset("my-crate", BumpType::Patch, "Fix")];
 
-        let plan = VersionPlanner::plan_releases(&changesets, &packages);
+        let plan = VersionPlanner::plan_releases(&changesets, &packages).expect("plan_releases");
 
         assert_eq!(plan.releases.len(), 1);
         let release = &plan.releases[0];
-        // Pre-release versions should be bumped according to semver rules
-        // changeset_version::bump_version handles this
         assert_eq!(
             release.current_version,
             "1.0.0-alpha.1".parse::<Version>().expect("valid")
         );
-        // The actual new version depends on changeset_version implementation
-        // but should be a valid version greater than the original
         assert!(release.new_version > release.current_version);
     }
 
@@ -287,7 +334,7 @@ mod tests {
         let packages = vec![make_package("my-crate", "1.0.0+build.123")];
         let changesets = vec![make_changeset("my-crate", BumpType::Minor, "Feature")];
 
-        let plan = VersionPlanner::plan_releases(&changesets, &packages);
+        let plan = VersionPlanner::plan_releases(&changesets, &packages).expect("plan_releases");
 
         assert_eq!(plan.releases.len(), 1);
         let release = &plan.releases[0];
@@ -302,11 +349,78 @@ mod tests {
         let packages = vec![make_package("my-crate", "0.1.0")];
         let changesets = vec![make_changeset("my-crate", BumpType::Major, "Breaking")];
 
-        let plan = VersionPlanner::plan_releases(&changesets, &packages);
+        let plan = VersionPlanner::plan_releases(&changesets, &packages).expect("plan_releases");
 
         assert_eq!(plan.releases.len(), 1);
         let release = &plan.releases[0];
         assert_eq!(release.current_version, Version::new(0, 1, 0));
         assert_eq!(release.new_version, Version::new(1, 0, 0));
+    }
+
+    #[test]
+    fn plan_releases_with_prerelease_creates_alpha_version() {
+        let packages = vec![make_package("my-crate", "1.0.0")];
+        let changesets = vec![make_changeset("my-crate", BumpType::Patch, "Fix")];
+
+        let plan = VersionPlanner::plan_releases_with_prerelease(
+            &changesets,
+            &packages,
+            Some(&PrereleaseSpec::Alpha),
+        )
+        .expect("plan_releases_with_prerelease");
+
+        assert_eq!(plan.releases.len(), 1);
+        let release = &plan.releases[0];
+        assert_eq!(
+            release.new_version,
+            "1.0.1-alpha.1".parse::<Version>().expect("valid")
+        );
+    }
+
+    #[test]
+    fn plan_releases_with_prerelease_increments_existing() {
+        let packages = vec![make_package("my-crate", "1.0.1-alpha.2")];
+        let changesets = vec![make_changeset("my-crate", BumpType::Patch, "Fix")];
+
+        let plan = VersionPlanner::plan_releases_with_prerelease(
+            &changesets,
+            &packages,
+            Some(&PrereleaseSpec::Alpha),
+        )
+        .expect("plan_releases_with_prerelease");
+
+        assert_eq!(plan.releases.len(), 1);
+        let release = &plan.releases[0];
+        assert_eq!(
+            release.new_version,
+            "1.0.1-alpha.3".parse::<Version>().expect("valid")
+        );
+    }
+
+    #[test]
+    fn plan_graduation_creates_stable_from_prerelease() {
+        let packages = vec![
+            make_package("crate-a", "1.0.1-rc.1"),
+            make_package("crate-b", "2.0.0"),
+        ];
+
+        let plan = VersionPlanner::plan_graduation(&packages).expect("plan_graduation");
+
+        assert_eq!(plan.releases.len(), 1);
+        let release = &plan.releases[0];
+        assert_eq!(release.name, "crate-a");
+        assert_eq!(release.new_version, Version::new(1, 0, 1));
+    }
+
+    #[test]
+    fn plan_graduation_empty_for_all_stable() {
+        let packages = vec![
+            make_package("crate-a", "1.0.0"),
+            make_package("crate-b", "2.0.0"),
+        ];
+
+        let plan = VersionPlanner::plan_graduation(&packages).expect("plan_graduation");
+
+        assert!(plan.releases.is_empty());
     }
 }

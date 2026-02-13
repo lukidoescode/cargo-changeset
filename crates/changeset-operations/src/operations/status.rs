@@ -23,6 +23,8 @@ pub struct StatusOutput {
     pub packages_with_inherited_versions: Vec<String>,
     /// Packages referenced in changesets but not in workspace.
     pub unknown_packages: Vec<String>,
+    /// Changesets consumed for pre-release versions (path, version consumed for).
+    pub consumed_prerelease_changesets: Vec<(PathBuf, String)>,
 }
 
 pub struct StatusOperation<P, R, I> {
@@ -62,9 +64,15 @@ where
             changesets.push(changeset);
         }
 
+        let consumed_changeset_paths = self
+            .changeset_reader
+            .list_consumed_changesets(&changeset_dir)?;
+        let consumed_prerelease_changesets =
+            Self::collect_consumed_changesets(&self.changeset_reader, &consumed_changeset_paths)?;
+
         let bumps_by_package = VersionPlanner::aggregate_bumps(&changesets);
 
-        let plan = VersionPlanner::plan_releases(&changesets, &project.packages);
+        let plan = VersionPlanner::plan_releases(&changesets, &project.packages)?;
 
         let (_, unchanged_packages) =
             VersionPlanner::partition_packages(&changesets, &project.packages);
@@ -81,7 +89,22 @@ where
             unchanged_packages,
             packages_with_inherited_versions,
             unknown_packages: plan.unknown_packages,
+            consumed_prerelease_changesets,
         })
+    }
+
+    fn collect_consumed_changesets(
+        reader: &R,
+        paths: &[PathBuf],
+    ) -> Result<Vec<(PathBuf, String)>> {
+        let mut consumed = Vec::new();
+        for path in paths {
+            let changeset = reader.read_changeset(path)?;
+            if let Some(version) = changeset.consumed_for_prerelease {
+                consumed.push((path.clone(), version));
+            }
+        }
+        Ok(consumed)
     }
 }
 
@@ -296,5 +319,115 @@ mod tests {
         let result = operation.execute(Path::new("/any"));
 
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn returns_empty_consumed_changesets_when_none_exist() {
+        let project_provider = MockProjectProvider::single_package("my-crate", "1.0.0");
+        let changeset_reader = MockChangesetReader::new();
+
+        let operation = make_operation(project_provider, changeset_reader);
+
+        let result = operation
+            .execute(Path::new("/any"))
+            .expect("StatusOperation failed");
+
+        assert!(result.consumed_prerelease_changesets.is_empty());
+    }
+
+    #[test]
+    fn collects_consumed_prerelease_changesets() {
+        let project_provider = MockProjectProvider::single_package("my-crate", "1.0.0");
+
+        let mut consumed_changeset = make_changeset("my-crate", BumpType::Patch, "Fix bug");
+        consumed_changeset.consumed_for_prerelease = Some("1.0.1-alpha.1".to_string());
+
+        let changeset_reader = MockChangesetReader::new()
+            .with_changeset(PathBuf::from(".changeset/fix-bug.md"), consumed_changeset);
+
+        let operation = make_operation(project_provider, changeset_reader);
+
+        let result = operation
+            .execute(Path::new("/any"))
+            .expect("StatusOperation failed");
+
+        assert!(result.changeset_files.is_empty());
+        assert!(result.changesets.is_empty());
+        assert_eq!(result.consumed_prerelease_changesets.len(), 1);
+        assert_eq!(
+            result.consumed_prerelease_changesets[0].0,
+            PathBuf::from(".changeset/fix-bug.md")
+        );
+        assert_eq!(result.consumed_prerelease_changesets[0].1, "1.0.1-alpha.1");
+    }
+
+    #[test]
+    fn separates_pending_and_consumed_changesets() {
+        let project_provider = MockProjectProvider::single_package("my-crate", "1.0.0");
+
+        let pending_changeset = make_changeset("my-crate", BumpType::Minor, "Add feature");
+
+        let mut consumed_changeset = make_changeset("my-crate", BumpType::Patch, "Fix bug");
+        consumed_changeset.consumed_for_prerelease = Some("1.0.1-alpha.1".to_string());
+
+        let changeset_reader = MockChangesetReader::new().with_changesets(vec![
+            (PathBuf::from(".changeset/feature.md"), pending_changeset),
+            (PathBuf::from(".changeset/fix.md"), consumed_changeset),
+        ]);
+
+        let operation = make_operation(project_provider, changeset_reader);
+
+        let result = operation
+            .execute(Path::new("/any"))
+            .expect("StatusOperation failed");
+
+        assert_eq!(result.changeset_files.len(), 1);
+        assert_eq!(
+            result.changeset_files[0],
+            PathBuf::from(".changeset/feature.md")
+        );
+
+        assert_eq!(result.changesets.len(), 1);
+        assert_eq!(result.changesets[0].summary, "Add feature");
+
+        assert_eq!(result.consumed_prerelease_changesets.len(), 1);
+        assert_eq!(
+            result.consumed_prerelease_changesets[0].0,
+            PathBuf::from(".changeset/fix.md")
+        );
+        assert_eq!(result.consumed_prerelease_changesets[0].1, "1.0.1-alpha.1");
+    }
+
+    #[test]
+    fn collects_multiple_consumed_changesets_with_different_versions() {
+        let project_provider = MockProjectProvider::single_package("my-crate", "1.0.0");
+
+        let mut consumed1 = make_changeset("my-crate", BumpType::Patch, "Fix bug 1");
+        consumed1.consumed_for_prerelease = Some("1.0.1-alpha.1".to_string());
+
+        let mut consumed2 = make_changeset("my-crate", BumpType::Patch, "Fix bug 2");
+        consumed2.consumed_for_prerelease = Some("1.0.1-alpha.2".to_string());
+
+        let changeset_reader = MockChangesetReader::new().with_changesets(vec![
+            (PathBuf::from(".changeset/fix1.md"), consumed1),
+            (PathBuf::from(".changeset/fix2.md"), consumed2),
+        ]);
+
+        let operation = make_operation(project_provider, changeset_reader);
+
+        let result = operation
+            .execute(Path::new("/any"))
+            .expect("StatusOperation failed");
+
+        assert!(result.changeset_files.is_empty());
+        assert_eq!(result.consumed_prerelease_changesets.len(), 2);
+
+        let versions: Vec<&str> = result
+            .consumed_prerelease_changesets
+            .iter()
+            .map(|(_, v)| v.as_str())
+            .collect();
+        assert!(versions.contains(&"1.0.1-alpha.1"));
+        assert!(versions.contains(&"1.0.1-alpha.2"));
     }
 }

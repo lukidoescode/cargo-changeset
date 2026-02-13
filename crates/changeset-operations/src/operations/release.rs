@@ -1,7 +1,7 @@
 use std::path::{Path, PathBuf};
 
 use changeset_changelog::{ChangelogLocation, ComparisonLinksSetting, RepositoryInfo};
-use changeset_core::{BumpType, PackageInfo};
+use changeset_core::{BumpType, PackageInfo, PrereleaseSpec};
 use changeset_project::{ProjectKind, TagFormat};
 use chrono::Local;
 use indexmap::IndexMap;
@@ -12,7 +12,7 @@ use super::version_planner::VersionPlanner;
 use crate::Result;
 use crate::error::OperationError;
 use crate::traits::{
-    ChangelogWriter, ChangesetReader, GitProvider, ManifestWriter, ProjectProvider,
+    ChangelogWriter, ChangesetReader, ChangesetWriter, GitProvider, ManifestWriter, ProjectProvider,
 };
 
 #[allow(clippy::struct_excessive_bools)]
@@ -22,6 +22,8 @@ pub struct ReleaseInput {
     pub no_commit: bool,
     pub no_tags: bool,
     pub keep_changesets: bool,
+    pub prerelease: Option<PrereleaseSpec>,
+    pub force: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -81,32 +83,41 @@ fn find_previous_tag(planned_releases: &[PackageVersion]) -> Option<String> {
     Some(previous_version.to_string())
 }
 
-pub struct ReleaseOperation<P, R, M, C, G> {
+fn is_graduation_release(packages: &[PackageInfo], input: &ReleaseInput) -> bool {
+    if input.prerelease.is_some() {
+        return false;
+    }
+    packages
+        .iter()
+        .any(|p| changeset_version::is_prerelease(&p.version))
+}
+
+pub struct ReleaseOperation<P, RW, M, C, G> {
     project_provider: P,
-    changeset_reader: R,
+    changeset_io: RW,
     manifest_writer: M,
     changelog_writer: C,
     git_provider: G,
 }
 
-impl<P, R, M, C, G> ReleaseOperation<P, R, M, C, G>
+impl<P, RW, M, C, G> ReleaseOperation<P, RW, M, C, G>
 where
     P: ProjectProvider,
-    R: ChangesetReader,
+    RW: ChangesetReader + ChangesetWriter,
     M: ManifestWriter,
     C: ChangelogWriter,
     G: GitProvider,
 {
     pub fn new(
         project_provider: P,
-        changeset_reader: R,
+        changeset_io: RW,
         manifest_writer: M,
         changelog_writer: C,
         git_provider: G,
     ) -> Self {
         Self {
             project_provider,
-            changeset_reader,
+            changeset_io,
             manifest_writer,
             changelog_writer,
             git_provider,
@@ -225,6 +236,154 @@ where
         }
     }
 
+    /// Validates that the working tree is clean when committing is enabled.
+    ///
+    /// # Errors
+    ///
+    /// Returns `OperationError::DirtyWorkingTree` if the working tree has uncommitted
+    /// changes and committing is enabled.
+    fn validate_working_tree(
+        &self,
+        project_root: &Path,
+        should_commit: bool,
+        dry_run: bool,
+    ) -> Result<()> {
+        if should_commit && !dry_run {
+            let is_clean = self.git_provider.is_working_tree_clean(project_root)?;
+            if !is_clean {
+                return Err(OperationError::DirtyWorkingTree);
+            }
+        }
+        Ok(())
+    }
+
+    /// Checks for packages with inherited versions and validates the convert flag.
+    ///
+    /// # Errors
+    ///
+    /// Returns `OperationError::InheritedVersionsRequireConvert` if packages use
+    /// inherited versions and the convert flag is not set.
+    fn check_inherited_versions(
+        &self,
+        packages: &[PackageInfo],
+        convert_inherited: bool,
+    ) -> Result<Vec<String>> {
+        let inherited_packages = self.find_packages_with_inherited_versions(packages)?;
+        if !inherited_packages.is_empty() && !convert_inherited {
+            return Err(OperationError::InheritedVersionsRequireConvert {
+                packages: inherited_packages,
+            });
+        }
+        Ok(inherited_packages)
+    }
+
+    /// Loads changesets from the changeset directory and populates the aggregator.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if changeset files cannot be read or parsed.
+    fn load_changesets(
+        &self,
+        changeset_dir: &Path,
+        changeset_files: &[PathBuf],
+    ) -> Result<(Vec<changeset_core::Changeset>, ChangesetAggregator)> {
+        let mut changesets = Vec::new();
+        let mut aggregator = ChangesetAggregator::new();
+
+        for path in changeset_files {
+            let changeset = self.changeset_io.read_changeset(path)?;
+            aggregator.add_changeset(&changeset);
+            changesets.push(changeset);
+        }
+
+        let consumed_paths = self.changeset_io.list_consumed_changesets(changeset_dir)?;
+        for path in &consumed_paths {
+            let changeset = self.changeset_io.read_changeset(path)?;
+            aggregator.add_changeset(&changeset);
+        }
+
+        Ok((changesets, aggregator))
+    }
+
+    /// Handles marking changesets as consumed or clearing consumed flags.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if changeset files cannot be modified.
+    fn handle_changeset_consumption(
+        &self,
+        changeset_dir: &Path,
+        changeset_files: &[PathBuf],
+        new_version: &Version,
+        is_prerelease: bool,
+        is_graduating: bool,
+    ) -> Result<()> {
+        if is_prerelease && !changeset_files.is_empty() {
+            let paths_refs: Vec<&Path> = changeset_files.iter().map(AsRef::as_ref).collect();
+            self.changeset_io.mark_consumed_for_prerelease(
+                changeset_dir,
+                &paths_refs,
+                new_version,
+            )?;
+        }
+
+        if is_graduating {
+            let consumed_paths = self.changeset_io.list_consumed_changesets(changeset_dir)?;
+            if !consumed_paths.is_empty() {
+                let paths_refs: Vec<&Path> = consumed_paths.iter().map(AsRef::as_ref).collect();
+                self.changeset_io
+                    .clear_consumed_for_prerelease(changeset_dir, &paths_refs)?;
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Writes version updates to package manifests and optionally removes workspace version.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if manifest files cannot be written or verified.
+    fn write_manifest_versions(
+        &self,
+        project_root: &Path,
+        package_lookup: &IndexMap<String, PackageInfo>,
+        planned_releases: &[PackageVersion],
+        inherited_packages: &[String],
+    ) -> Result<()> {
+        if !inherited_packages.is_empty() {
+            let root_manifest = project_root.join("Cargo.toml");
+            self.manifest_writer
+                .remove_workspace_version(&root_manifest)?;
+        }
+
+        for release in planned_releases {
+            if let Some(pkg) = package_lookup.get(&release.name) {
+                let manifest_path = pkg.path.join("Cargo.toml");
+                self.manifest_writer
+                    .write_version(&manifest_path, &release.new_version)?;
+                self.manifest_writer
+                    .verify_version(&manifest_path, &release.new_version)?;
+            }
+        }
+
+        Ok(())
+    }
+
+    fn collect_unchanged_packages(
+        packages: &[PackageInfo],
+        planned_releases: &[PackageVersion],
+    ) -> Vec<String> {
+        let packages_with_releases: std::collections::HashSet<_> =
+            planned_releases.iter().map(|r| r.name.clone()).collect();
+
+        packages
+            .iter()
+            .filter(|p| !packages_with_releases.contains(&p.name))
+            .map(|p| p.name.clone())
+            .collect()
+    }
+
     /// # Errors
     ///
     /// Returns an error if the project cannot be discovered, changeset files
@@ -234,9 +393,13 @@ where
         let (root_config, _) = self.project_provider.load_configs(&project)?;
 
         let changeset_dir = project.root.join(root_config.changeset_dir());
-        let changeset_files = self.changeset_reader.list_changesets(&changeset_dir)?;
+        let changeset_files = self.changeset_io.list_changesets(&changeset_dir)?;
+        let is_graduating = is_graduation_release(&project.packages, input);
 
-        if changeset_files.is_empty() {
+        if changeset_files.is_empty() && !is_graduating {
+            if input.prerelease.is_some() && !input.force {
+                return Err(OperationError::NoChangesetsWithoutForce);
+            }
             return Ok(ReleaseOutcome::NoChangesets);
         }
 
@@ -244,32 +407,24 @@ where
         let should_commit = !input.no_commit && git_config.commit();
         let should_create_tags = !input.no_tags && git_config.tags();
         let should_delete_changesets = !input.keep_changesets && !git_config.keep_changesets();
+        let is_prerelease_release = input.prerelease.is_some();
 
-        if should_commit && !input.dry_run {
-            let is_clean = self.git_provider.is_working_tree_clean(&project.root)?;
-            if !is_clean {
-                return Err(OperationError::DirtyWorkingTree);
-            }
-        }
+        self.validate_working_tree(&project.root, should_commit, input.dry_run)?;
+        let inherited_packages =
+            self.check_inherited_versions(&project.packages, input.convert_inherited)?;
 
-        let inherited_packages = self.find_packages_with_inherited_versions(&project.packages)?;
-        if !inherited_packages.is_empty() && !input.convert_inherited {
-            return Err(OperationError::InheritedVersionsRequireConvert {
-                packages: inherited_packages,
-            });
-        }
+        let (changesets, aggregator) = self.load_changesets(&changeset_dir, &changeset_files)?;
 
-        let mut changesets = Vec::new();
-        let mut aggregator = ChangesetAggregator::new();
-
-        for path in &changeset_files {
-            let changeset = self.changeset_reader.read_changeset(path)?;
-            aggregator.add_changeset(&changeset);
-            changesets.push(changeset);
-        }
-
-        let plan = VersionPlanner::plan_releases(&changesets, &project.packages);
-        let planned_releases = plan.releases;
+        let planned_releases = if is_graduating {
+            VersionPlanner::plan_graduation(&project.packages)?.releases
+        } else {
+            VersionPlanner::plan_releases_with_prerelease(
+                &changesets,
+                &project.packages,
+                input.prerelease.as_ref(),
+            )?
+            .releases
+        };
 
         let package_lookup: IndexMap<_, _> = project
             .packages
@@ -277,15 +432,8 @@ where
             .map(|p| (p.name.clone(), p.clone()))
             .collect();
 
-        let packages_with_releases: std::collections::HashSet<_> =
-            planned_releases.iter().map(|r| r.name.clone()).collect();
-
-        let unchanged_packages: Vec<String> = project
-            .packages
-            .iter()
-            .filter(|p| !packages_with_releases.contains(&p.name))
-            .map(|p| p.name.clone())
-            .collect();
+        let unchanged_packages =
+            Self::collect_unchanged_packages(&project.packages, &planned_releases);
 
         let changelog_updates = if input.dry_run {
             Vec::new()
@@ -311,21 +459,25 @@ where
             return Ok(ReleaseOutcome::DryRun(output));
         }
 
-        if !inherited_packages.is_empty() {
-            let root_manifest = project.root.join("Cargo.toml");
-            self.manifest_writer
-                .remove_workspace_version(&root_manifest)?;
+        self.write_manifest_versions(
+            &project.root,
+            &package_lookup,
+            &planned_releases,
+            &inherited_packages,
+        )?;
+
+        if let Some(first_release) = planned_releases.first() {
+            self.handle_changeset_consumption(
+                &changeset_dir,
+                &changeset_files,
+                &first_release.new_version,
+                is_prerelease_release,
+                is_graduating,
+            )?;
         }
 
-        for release in &planned_releases {
-            if let Some(pkg) = package_lookup.get(&release.name) {
-                let manifest_path = pkg.path.join("Cargo.toml");
-                self.manifest_writer
-                    .write_version(&manifest_path, &release.new_version)?;
-                self.manifest_writer
-                    .verify_version(&manifest_path, &release.new_version)?;
-            }
-        }
+        let should_delete_changesets_actual =
+            should_delete_changesets && !is_prerelease_release && !is_graduating;
 
         let git_result = self.perform_git_operations(
             &project.root,
@@ -337,7 +489,7 @@ where
             git_config,
             should_commit,
             should_create_tags,
-            should_delete_changesets,
+            should_delete_changesets_actual,
             &inherited_packages,
         )?;
 
@@ -519,22 +671,24 @@ mod tests {
             no_commit: true,
             no_tags: true,
             keep_changesets: true,
+            prerelease: None,
+            force: false,
         }
     }
 
-    fn make_operation<P, R, M>(
+    fn make_operation<P, RW, M>(
         project_provider: P,
-        changeset_reader: R,
+        changeset_io: RW,
         manifest_writer: M,
-    ) -> ReleaseOperation<P, R, M, MockChangelogWriter, MockGitProvider>
+    ) -> ReleaseOperation<P, RW, M, MockChangelogWriter, MockGitProvider>
     where
         P: ProjectProvider,
-        R: ChangesetReader,
+        RW: ChangesetReader + ChangesetWriter,
         M: ManifestWriter,
     {
         ReleaseOperation::new(
             project_provider,
-            changeset_reader,
+            changeset_io,
             manifest_writer,
             MockChangelogWriter::new(),
             MockGitProvider::new(),
@@ -721,6 +875,8 @@ mod tests {
             no_commit: true,
             no_tags: true,
             keep_changesets: true,
+            prerelease: None,
+            force: false,
         };
 
         let result = operation
@@ -753,6 +909,8 @@ mod tests {
             no_commit: true,
             no_tags: true,
             keep_changesets: true,
+            prerelease: None,
+            force: false,
         };
 
         let ReleaseOutcome::Executed(output) = operation
@@ -787,6 +945,8 @@ mod tests {
             no_commit: true,
             no_tags: true,
             keep_changesets: true,
+            prerelease: None,
+            force: false,
         };
 
         let result = operation.execute(Path::new("/any"), &input);
@@ -813,6 +973,8 @@ mod tests {
             no_commit: true,
             no_tags: true,
             keep_changesets: true,
+            prerelease: None,
+            force: false,
         };
 
         let result = operation.execute(Path::new("/any"), &input);
@@ -846,6 +1008,8 @@ mod tests {
             no_commit: true,
             no_tags: true,
             keep_changesets: true,
+            prerelease: None,
+            force: false,
         };
 
         let ReleaseOutcome::Executed(_) = operation
@@ -883,6 +1047,8 @@ mod tests {
             no_commit: false,
             no_tags: true,
             keep_changesets: true,
+            prerelease: None,
+            force: false,
         };
 
         let result = operation.execute(Path::new("/any"), &input);
@@ -912,6 +1078,8 @@ mod tests {
             no_commit: true,
             no_tags: true,
             keep_changesets: true,
+            prerelease: None,
+            force: false,
         };
 
         let result = operation.execute(Path::new("/any"), &input);
@@ -941,6 +1109,8 @@ mod tests {
             no_commit: false,
             no_tags: false,
             keep_changesets: false,
+            prerelease: None,
+            force: false,
         };
 
         let result = operation.execute(Path::new("/any"), &input);
@@ -972,6 +1142,8 @@ mod tests {
             no_commit: false,
             no_tags: true,
             keep_changesets: true,
+            prerelease: None,
+            force: false,
         };
 
         let ReleaseOutcome::Executed(output) = operation
@@ -1015,6 +1187,8 @@ mod tests {
             no_commit: false,
             no_tags: false,
             keep_changesets: true,
+            prerelease: None,
+            force: false,
         };
 
         let ReleaseOutcome::Executed(output) = operation
@@ -1056,6 +1230,8 @@ mod tests {
             no_commit: false,
             no_tags: true,
             keep_changesets: true,
+            prerelease: None,
+            force: false,
         };
 
         let ReleaseOutcome::Executed(output) = operation
@@ -1094,6 +1270,8 @@ mod tests {
             no_commit: false,
             no_tags: false,
             keep_changesets: true,
+            prerelease: None,
+            force: false,
         };
 
         let ReleaseOutcome::Executed(output) = operation
@@ -1135,6 +1313,8 @@ mod tests {
             no_commit: true,
             no_tags: true,
             keep_changesets: false,
+            prerelease: None,
+            force: false,
         };
 
         let ReleaseOutcome::Executed(output) = operation
@@ -1176,6 +1356,8 @@ mod tests {
             no_commit: true,
             no_tags: true,
             keep_changesets: true,
+            prerelease: None,
+            force: false,
         };
 
         let ReleaseOutcome::Executed(output) = operation
@@ -1219,6 +1401,8 @@ mod tests {
             no_commit: false,
             no_tags: true,
             keep_changesets: false,
+            prerelease: None,
+            force: false,
         };
 
         let _ = operation
@@ -1264,6 +1448,8 @@ mod tests {
             no_commit: false,
             no_tags: true,
             keep_changesets: true,
+            prerelease: None,
+            force: false,
         };
 
         let ReleaseOutcome::Executed(output) = operation
@@ -1283,6 +1469,307 @@ mod tests {
         assert!(
             commit.message.contains("my-crate-v1.1.0"),
             "commit message should contain version info"
+        );
+    }
+
+    #[test]
+    fn test_prerelease_marks_changesets_as_consumed() {
+        use std::sync::Arc;
+
+        let project_provider = MockProjectProvider::single_package("my-crate", "1.0.0");
+        let changeset_path = PathBuf::from(".changeset/fix.md");
+        let changeset = make_changeset("my-crate", BumpType::Patch, "Fix bug");
+        let changeset_reader =
+            Arc::new(MockChangesetReader::new().with_changeset(changeset_path.clone(), changeset));
+        let manifest_writer = MockManifestWriter::new();
+
+        let operation = ReleaseOperation::new(
+            project_provider,
+            Arc::clone(&changeset_reader),
+            manifest_writer,
+            MockChangelogWriter::new(),
+            MockGitProvider::new(),
+        );
+        let input = ReleaseInput {
+            dry_run: false,
+            convert_inherited: false,
+            no_commit: true,
+            no_tags: true,
+            keep_changesets: true,
+            prerelease: Some(PrereleaseSpec::Alpha),
+            force: false,
+        };
+
+        let result = operation
+            .execute(Path::new("/any"), &input)
+            .expect("execute should succeed");
+
+        assert!(matches!(result, ReleaseOutcome::Executed(_)));
+
+        let consumed_status = changeset_reader.get_consumed_status(&changeset_path);
+        assert!(
+            consumed_status.is_some(),
+            "changeset should be marked as consumed for prerelease"
+        );
+        assert!(
+            consumed_status.expect("checked above").contains("alpha"),
+            "consumed version should contain alpha prerelease tag"
+        );
+    }
+
+    #[test]
+    fn test_prerelease_increment_requires_changesets_or_force() {
+        let project_provider = MockProjectProvider::single_package("my-crate", "1.0.0");
+        let changeset_reader = MockChangesetReader::new();
+        let manifest_writer = MockManifestWriter::new();
+
+        let operation = make_operation(project_provider, changeset_reader, manifest_writer);
+        let input = ReleaseInput {
+            dry_run: false,
+            convert_inherited: false,
+            no_commit: true,
+            no_tags: true,
+            keep_changesets: true,
+            prerelease: Some(PrereleaseSpec::Alpha),
+            force: false,
+        };
+
+        let result = operation.execute(Path::new("/any"), &input);
+
+        assert!(
+            matches!(result, Err(OperationError::NoChangesetsWithoutForce)),
+            "should error without changesets and without force flag"
+        );
+    }
+
+    #[test]
+    fn test_prerelease_with_force_returns_no_changesets() {
+        let project_provider = MockProjectProvider::single_package("my-crate", "1.0.0");
+        let changeset_reader = MockChangesetReader::new();
+        let manifest_writer = MockManifestWriter::new();
+
+        let operation = make_operation(project_provider, changeset_reader, manifest_writer);
+        let input = ReleaseInput {
+            dry_run: false,
+            convert_inherited: false,
+            no_commit: true,
+            no_tags: true,
+            keep_changesets: true,
+            prerelease: Some(PrereleaseSpec::Alpha),
+            force: true,
+        };
+
+        let result = operation
+            .execute(Path::new("/any"), &input)
+            .expect("execute should succeed with force flag");
+
+        assert!(
+            matches!(result, ReleaseOutcome::NoChangesets),
+            "should return NoChangesets when force is set but no changesets exist"
+        );
+    }
+
+    #[test]
+    fn test_graduation_clears_consumed_flag() {
+        use std::sync::Arc;
+
+        let project_provider = MockProjectProvider::single_package("my-crate", "1.0.1-alpha.1");
+        let consumed_path = PathBuf::from(".changeset/consumed.md");
+        let changeset = make_changeset("my-crate", BumpType::Patch, "Fix bug");
+        let changeset_reader = Arc::new(MockChangesetReader::new().with_consumed_changeset(
+            consumed_path.clone(),
+            changeset,
+            "1.0.1-alpha.1".to_string(),
+        ));
+        let manifest_writer = MockManifestWriter::new();
+
+        let operation = ReleaseOperation::new(
+            project_provider,
+            Arc::clone(&changeset_reader),
+            manifest_writer,
+            MockChangelogWriter::new(),
+            MockGitProvider::new(),
+        );
+        let input = ReleaseInput {
+            dry_run: false,
+            convert_inherited: false,
+            no_commit: true,
+            no_tags: true,
+            keep_changesets: true,
+            prerelease: None,
+            force: false,
+        };
+
+        let result = operation
+            .execute(Path::new("/any"), &input)
+            .expect("graduation should succeed");
+
+        assert!(matches!(result, ReleaseOutcome::Executed(_)));
+
+        let consumed_status = changeset_reader.get_consumed_status(&consumed_path);
+        assert!(
+            consumed_status.is_none(),
+            "consumed flag should be cleared after graduation"
+        );
+    }
+
+    #[test]
+    fn test_graduation_aggregates_consumed_changesets_in_changelog() {
+        use std::sync::Arc;
+
+        let project_provider = MockProjectProvider::single_package("my-crate", "1.0.1-alpha.1");
+        let consumed_path1 = PathBuf::from(".changeset/fix1.md");
+        let consumed_path2 = PathBuf::from(".changeset/fix2.md");
+        let changeset1 = make_changeset("my-crate", BumpType::Patch, "Fix bug one");
+        let changeset2 = make_changeset("my-crate", BumpType::Patch, "Fix bug two");
+
+        let changeset_reader = Arc::new(
+            MockChangesetReader::new()
+                .with_consumed_changeset(consumed_path1, changeset1, "1.0.1-alpha.1".to_string())
+                .with_consumed_changeset(consumed_path2, changeset2, "1.0.1-alpha.1".to_string()),
+        );
+        let manifest_writer = MockManifestWriter::new();
+        let changelog_writer = Arc::new(MockChangelogWriter::new());
+
+        let operation = ReleaseOperation::new(
+            project_provider,
+            Arc::clone(&changeset_reader),
+            manifest_writer,
+            Arc::clone(&changelog_writer),
+            MockGitProvider::new(),
+        );
+        let input = ReleaseInput {
+            dry_run: false,
+            convert_inherited: false,
+            no_commit: true,
+            no_tags: true,
+            keep_changesets: true,
+            prerelease: None,
+            force: false,
+        };
+
+        let result = operation
+            .execute(Path::new("/any"), &input)
+            .expect("graduation should succeed");
+
+        assert!(matches!(result, ReleaseOutcome::Executed(_)));
+
+        let written = changelog_writer.written_releases();
+        assert_eq!(written.len(), 1, "should write one changelog release");
+
+        let (_, release) = &written[0];
+        assert_eq!(
+            release.entries.len(),
+            2,
+            "changelog should contain entries from both consumed changesets"
+        );
+    }
+
+    #[test]
+    fn test_consumed_changesets_excluded_from_normal_release() {
+        use std::sync::Arc;
+
+        let project_provider = MockProjectProvider::single_package("my-crate", "1.0.0");
+        let unconsumed_path = PathBuf::from(".changeset/unconsumed.md");
+        let consumed_path = PathBuf::from(".changeset/consumed.md");
+        let unconsumed_changeset = make_changeset("my-crate", BumpType::Minor, "Add feature");
+        let consumed_changeset = make_changeset("my-crate", BumpType::Patch, "Fix from prerelease");
+
+        let changeset_reader = Arc::new(
+            MockChangesetReader::new()
+                .with_changeset(unconsumed_path.clone(), unconsumed_changeset)
+                .with_consumed_changeset(
+                    consumed_path.clone(),
+                    consumed_changeset,
+                    "1.0.1-alpha.1".to_string(),
+                ),
+        );
+        let manifest_writer = Arc::new(MockManifestWriter::new());
+
+        let operation = ReleaseOperation::new(
+            project_provider,
+            Arc::clone(&changeset_reader),
+            Arc::clone(&manifest_writer),
+            MockChangelogWriter::new(),
+            MockGitProvider::new(),
+        );
+        let input = ReleaseInput {
+            dry_run: false,
+            convert_inherited: false,
+            no_commit: true,
+            no_tags: true,
+            keep_changesets: true,
+            prerelease: None,
+            force: false,
+        };
+
+        let result = operation
+            .execute(Path::new("/any"), &input)
+            .expect("release should succeed");
+
+        let ReleaseOutcome::Executed(output) = result else {
+            panic!("expected Executed outcome");
+        };
+
+        assert_eq!(output.planned_releases.len(), 1);
+        assert_eq!(
+            output.planned_releases[0].new_version.to_string(),
+            "1.1.0",
+            "should apply minor bump from unconsumed changeset only"
+        );
+
+        assert_eq!(
+            output.changesets_consumed.len(),
+            1,
+            "only unconsumed changeset should be in consumed list"
+        );
+        assert!(
+            output.changesets_consumed.contains(&unconsumed_path),
+            "unconsumed changeset should be processed"
+        );
+    }
+
+    #[test]
+    fn test_prerelease_with_different_tag_resets_number() {
+        use std::sync::Arc;
+
+        let project_provider = MockProjectProvider::single_package("my-crate", "1.0.1-alpha.2");
+        let changeset_path = PathBuf::from(".changeset/feature.md");
+        let changeset = make_changeset("my-crate", BumpType::Patch, "Another fix");
+        let changeset_reader =
+            Arc::new(MockChangesetReader::new().with_changeset(changeset_path, changeset));
+        let manifest_writer = Arc::new(MockManifestWriter::new());
+
+        let operation = ReleaseOperation::new(
+            project_provider,
+            Arc::clone(&changeset_reader),
+            Arc::clone(&manifest_writer),
+            MockChangelogWriter::new(),
+            MockGitProvider::new(),
+        );
+        let input = ReleaseInput {
+            dry_run: false,
+            convert_inherited: false,
+            no_commit: true,
+            no_tags: true,
+            keep_changesets: true,
+            prerelease: Some(PrereleaseSpec::Beta),
+            force: false,
+        };
+
+        let result = operation
+            .execute(Path::new("/any"), &input)
+            .expect("prerelease with different tag should succeed");
+
+        let ReleaseOutcome::Executed(output) = result else {
+            panic!("expected Executed outcome");
+        };
+
+        assert_eq!(output.planned_releases.len(), 1);
+        assert_eq!(
+            output.planned_releases[0].new_version.to_string(),
+            "1.0.1-beta.1",
+            "switching prerelease tag should reset number to 1"
         );
     }
 }

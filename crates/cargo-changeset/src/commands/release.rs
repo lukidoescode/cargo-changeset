@@ -1,5 +1,7 @@
 use std::path::Path;
 
+use changeset_core::PrereleaseSpec;
+use changeset_operations::OperationError;
 use changeset_operations::operations::{
     GitOperationResult, ReleaseInput, ReleaseOperation, ReleaseOutcome, ReleaseOutput,
 };
@@ -8,6 +10,7 @@ use changeset_operations::providers::{
     FileSystemProjectProvider, Git2Provider,
 };
 use changeset_operations::traits::ProjectProvider;
+use changeset_version::is_prerelease;
 
 use super::ReleaseArgs;
 use crate::error::Result;
@@ -15,14 +18,16 @@ use crate::error::Result;
 pub(crate) fn run(args: ReleaseArgs, start_path: &Path) -> Result<()> {
     let project_provider = FileSystemProjectProvider::new();
     let project = project_provider.discover_project(start_path)?;
-    let changeset_reader = FileSystemChangesetIO::new(&project.root);
+    let changeset_io = FileSystemChangesetIO::new(&project.root);
     let manifest_writer = FileSystemManifestWriter::new();
     let changelog_writer = FileSystemChangelogWriter::new();
     let git_provider = Git2Provider::new();
 
+    let prerelease = parse_prerelease_arg(&args.prerelease, &project)?;
+
     let operation = ReleaseOperation::new(
         project_provider,
-        changeset_reader,
+        changeset_io,
         manifest_writer,
         changelog_writer,
         git_provider,
@@ -33,12 +38,46 @@ pub(crate) fn run(args: ReleaseArgs, start_path: &Path) -> Result<()> {
         no_commit: args.no_commit,
         no_tags: args.no_tags,
         keep_changesets: args.keep_changesets,
+        prerelease,
+        force: args.force,
     };
     let outcome = operation.execute(start_path, &input)?;
 
     print_outcome(&outcome);
 
     Ok(())
+}
+
+fn parse_prerelease_arg(
+    arg: &Option<String>,
+    project: &changeset_project::CargoProject,
+) -> Result<Option<PrereleaseSpec>> {
+    let Some(tag) = arg else {
+        return Ok(None);
+    };
+
+    if tag.is_empty() {
+        let has_prerelease = project.packages.iter().any(|p| is_prerelease(&p.version));
+        if has_prerelease {
+            let first_prerelease = project
+                .packages
+                .iter()
+                .find(|p| is_prerelease(&p.version))
+                .and_then(|p| changeset_version::extract_prerelease_tag(&p.version));
+
+            if let Some(existing_tag) = first_prerelease {
+                return Ok(Some(parse_prerelease_spec(&existing_tag)?));
+            }
+        }
+        return Err(OperationError::PrereleaseTagRequired.into());
+    }
+
+    Ok(Some(parse_prerelease_spec(tag)?))
+}
+
+fn parse_prerelease_spec(s: &str) -> Result<PrereleaseSpec> {
+    s.parse()
+        .map_err(|_| crate::error::CliError::InvalidPrereleaseTag { tag: s.to_string() })
 }
 
 fn print_outcome(outcome: &ReleaseOutcome) {

@@ -82,6 +82,7 @@ mod tests {
                 })
                 .collect(),
             category,
+            consumed_for_prerelease: None,
         }
     }
 

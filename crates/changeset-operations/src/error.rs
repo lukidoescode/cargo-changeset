@@ -22,6 +22,9 @@ pub enum OperationError {
     #[error(transparent)]
     Changelog(#[from] changeset_changelog::ChangelogError),
 
+    #[error("version calculation failed")]
+    VersionCalculation(#[from] changeset_version::VersionError),
+
     #[error("failed to read changeset file '{path}'")]
     ChangesetFileRead {
         path: PathBuf,
@@ -81,6 +84,12 @@ pub enum OperationError {
 
     #[error("working tree has uncommitted changes; commit or stash them, or use --no-commit")]
     DirtyWorkingTree,
+
+    #[error("current version is stable; please specify a pre-release tag: --prerelease <tag>")]
+    PrereleaseTagRequired,
+
+    #[error("no changesets found; use --force to release without changesets")]
+    NoChangesetsWithoutForce,
 }
 
 pub type Result<T> = std::result::Result<T, OperationError>;
