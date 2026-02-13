@@ -1,4 +1,4 @@
-use changeset_core::{BumpType, PrereleaseSpec};
+use changeset_core::{BumpType, PrereleaseSpec, ZeroVersionBehavior};
 use semver::{Prerelease, Version};
 use thiserror::Error;
 
@@ -6,6 +6,10 @@ use thiserror::Error;
 pub enum VersionError {
     #[error("invalid prerelease identifier: {identifier}")]
     InvalidPrerelease { identifier: String },
+    #[error("cannot graduate from prerelease version '{version}'; release stable 0.x first")]
+    CannotGraduateFromPrerelease { version: String },
+    #[error("can only graduate 0.x versions to 1.0.0; version is {version}")]
+    CanOnlyGraduateZeroVersions { version: String },
 }
 
 #[must_use]
@@ -113,26 +117,116 @@ pub fn extract_prerelease_tag(version: &Version) -> Option<String> {
     parse_prerelease(&version.pre).map(|(tag, _)| tag)
 }
 
+#[must_use]
+pub fn is_zero_version(version: &Version) -> bool {
+    version.major == 0
+}
+
+/// Calculates a new version with special handling for 0.x versions.
+///
+/// When `graduate` is true, the version will be promoted to 1.0.0 (with optional
+/// prerelease tag). Graduation has specific restrictions:
+/// - Cannot graduate from a prerelease version (must release stable 0.x first)
+/// - Cannot graduate a version that is already >= 1.0.0
+///
+/// For 0.x versions without graduation, behavior depends on `zero_behavior`:
+/// - `EffectiveMinor`: major bumps become minor, minor/patch both become patch
+/// - `AutoPromoteOnMajor`: major bumps promote to 1.0.0, minor/patch are standard
+///
+/// # Errors
+///
+/// Returns `VersionError::CannotGraduateFromPrerelease` if graduation is requested
+/// on a prerelease version.
+///
+/// Returns `VersionError::CanOnlyGraduateZeroVersions` if graduation is requested
+/// on a version >= 1.0.0.
+///
+/// Returns `VersionError::InvalidPrerelease` if the prerelease identifier
+/// produces an invalid semver prerelease string.
+pub fn calculate_new_version_with_zero_behavior(
+    current: &Version,
+    bump_type: Option<BumpType>,
+    prerelease: Option<&PrereleaseSpec>,
+    zero_behavior: ZeroVersionBehavior,
+    graduate: bool,
+) -> Result<Version, VersionError> {
+    if graduate {
+        return calculate_graduation(current, prerelease);
+    }
+
+    if current.major >= 1 {
+        return calculate_new_version(current, bump_type, prerelease);
+    }
+
+    let effective_bump = match zero_behavior {
+        ZeroVersionBehavior::EffectiveMinor => bump_type.map(|bt| match bt {
+            BumpType::Major => BumpType::Minor,
+            BumpType::Minor | BumpType::Patch => BumpType::Patch,
+        }),
+        ZeroVersionBehavior::AutoPromoteOnMajor => {
+            if bump_type == Some(BumpType::Major) {
+                return apply_prerelease_to_version(Version::new(1, 0, 0), prerelease);
+            }
+            bump_type
+        }
+    };
+
+    calculate_new_version(current, effective_bump, prerelease)
+}
+
+fn calculate_graduation(
+    current: &Version,
+    prerelease: Option<&PrereleaseSpec>,
+) -> Result<Version, VersionError> {
+    if is_prerelease(current) {
+        return Err(VersionError::CannotGraduateFromPrerelease {
+            version: current.to_string(),
+        });
+    }
+
+    if current.major >= 1 {
+        return Err(VersionError::CanOnlyGraduateZeroVersions {
+            version: current.to_string(),
+        });
+    }
+
+    apply_prerelease_to_version(Version::new(1, 0, 0), prerelease)
+}
+
+fn apply_prerelease_to_version(
+    base: Version,
+    prerelease: Option<&PrereleaseSpec>,
+) -> Result<Version, VersionError> {
+    match prerelease {
+        Some(spec) => {
+            let mut version = base;
+            version.pre = make_prerelease(spec.identifier(), 1)?;
+            Ok(version)
+        }
+        None => Ok(base),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn test_bump_patch() {
+    fn bump_patch() {
         let version = Version::parse("1.2.3").unwrap();
         let bumped = bump_version(&version, BumpType::Patch);
         assert_eq!(bumped, Version::parse("1.2.4").unwrap());
     }
 
     #[test]
-    fn test_bump_minor() {
+    fn bump_minor() {
         let version = Version::parse("1.2.3").unwrap();
         let bumped = bump_version(&version, BumpType::Minor);
         assert_eq!(bumped, Version::parse("1.3.0").unwrap());
     }
 
     #[test]
-    fn test_bump_major() {
+    fn bump_major() {
         let version = Version::parse("1.2.3").unwrap();
         let bumped = bump_version(&version, BumpType::Major);
         assert_eq!(bumped, Version::parse("2.0.0").unwrap());
@@ -401,6 +495,302 @@ mod tests {
                 extract_prerelease_tag(&version),
                 Some("nightly".to_string())
             );
+        }
+    }
+
+    mod is_zero_version_tests {
+        use super::*;
+
+        #[test]
+        fn zero_major_is_zero_version() {
+            let version = Version::parse("0.1.0").unwrap();
+            assert!(is_zero_version(&version));
+        }
+
+        #[test]
+        fn zero_minor_patch_is_zero_version() {
+            let version = Version::parse("0.0.1").unwrap();
+            assert!(is_zero_version(&version));
+        }
+
+        #[test]
+        fn one_major_is_not_zero_version() {
+            let version = Version::parse("1.0.0").unwrap();
+            assert!(!is_zero_version(&version));
+        }
+
+        #[test]
+        fn two_major_is_not_zero_version() {
+            let version = Version::parse("2.3.4").unwrap();
+            assert!(!is_zero_version(&version));
+        }
+
+        #[test]
+        fn zero_prerelease_is_zero_version() {
+            let version = Version::parse("0.1.0-alpha.1").unwrap();
+            assert!(is_zero_version(&version));
+        }
+    }
+
+    mod calculate_new_version_with_zero_behavior_tests {
+        use super::*;
+
+        mod effective_minor_behavior {
+            use super::*;
+
+            #[test]
+            fn major_becomes_minor() {
+                let version = Version::parse("0.1.2").unwrap();
+                let result = calculate_new_version_with_zero_behavior(
+                    &version,
+                    Some(BumpType::Major),
+                    None,
+                    ZeroVersionBehavior::EffectiveMinor,
+                    false,
+                )
+                .unwrap();
+                assert_eq!(result, Version::parse("0.2.0").unwrap());
+            }
+
+            #[test]
+            fn minor_becomes_patch() {
+                let version = Version::parse("0.1.2").unwrap();
+                let result = calculate_new_version_with_zero_behavior(
+                    &version,
+                    Some(BumpType::Minor),
+                    None,
+                    ZeroVersionBehavior::EffectiveMinor,
+                    false,
+                )
+                .unwrap();
+                assert_eq!(result, Version::parse("0.1.3").unwrap());
+            }
+
+            #[test]
+            fn patch_stays_patch() {
+                let version = Version::parse("0.1.2").unwrap();
+                let result = calculate_new_version_with_zero_behavior(
+                    &version,
+                    Some(BumpType::Patch),
+                    None,
+                    ZeroVersionBehavior::EffectiveMinor,
+                    false,
+                )
+                .unwrap();
+                assert_eq!(result, Version::parse("0.1.3").unwrap());
+            }
+
+            #[test]
+            fn major_with_prerelease() {
+                let version = Version::parse("0.1.2").unwrap();
+                let result = calculate_new_version_with_zero_behavior(
+                    &version,
+                    Some(BumpType::Major),
+                    Some(&PrereleaseSpec::Alpha),
+                    ZeroVersionBehavior::EffectiveMinor,
+                    false,
+                )
+                .unwrap();
+                assert_eq!(result, Version::parse("0.2.0-alpha.1").unwrap());
+            }
+
+            #[test]
+            fn double_zero_version() {
+                let version = Version::parse("0.0.5").unwrap();
+                let result = calculate_new_version_with_zero_behavior(
+                    &version,
+                    Some(BumpType::Major),
+                    None,
+                    ZeroVersionBehavior::EffectiveMinor,
+                    false,
+                )
+                .unwrap();
+                assert_eq!(result, Version::parse("0.1.0").unwrap());
+            }
+        }
+
+        mod auto_promote_behavior {
+            use super::*;
+
+            #[test]
+            fn major_becomes_1_0_0() {
+                let version = Version::parse("0.1.2").unwrap();
+                let result = calculate_new_version_with_zero_behavior(
+                    &version,
+                    Some(BumpType::Major),
+                    None,
+                    ZeroVersionBehavior::AutoPromoteOnMajor,
+                    false,
+                )
+                .unwrap();
+                assert_eq!(result, Version::parse("1.0.0").unwrap());
+            }
+
+            #[test]
+            fn minor_stays_minor() {
+                let version = Version::parse("0.1.2").unwrap();
+                let result = calculate_new_version_with_zero_behavior(
+                    &version,
+                    Some(BumpType::Minor),
+                    None,
+                    ZeroVersionBehavior::AutoPromoteOnMajor,
+                    false,
+                )
+                .unwrap();
+                assert_eq!(result, Version::parse("0.2.0").unwrap());
+            }
+
+            #[test]
+            fn patch_stays_patch() {
+                let version = Version::parse("0.1.2").unwrap();
+                let result = calculate_new_version_with_zero_behavior(
+                    &version,
+                    Some(BumpType::Patch),
+                    None,
+                    ZeroVersionBehavior::AutoPromoteOnMajor,
+                    false,
+                )
+                .unwrap();
+                assert_eq!(result, Version::parse("0.1.3").unwrap());
+            }
+
+            #[test]
+            fn major_with_prerelease() {
+                let version = Version::parse("0.1.2").unwrap();
+                let result = calculate_new_version_with_zero_behavior(
+                    &version,
+                    Some(BumpType::Major),
+                    Some(&PrereleaseSpec::Alpha),
+                    ZeroVersionBehavior::AutoPromoteOnMajor,
+                    false,
+                )
+                .unwrap();
+                assert_eq!(result, Version::parse("1.0.0-alpha.1").unwrap());
+            }
+        }
+
+        mod stable_versions_unaffected {
+            use super::*;
+
+            #[test]
+            fn effective_minor_major_bump() {
+                let version = Version::parse("1.2.3").unwrap();
+                let result = calculate_new_version_with_zero_behavior(
+                    &version,
+                    Some(BumpType::Major),
+                    None,
+                    ZeroVersionBehavior::EffectiveMinor,
+                    false,
+                )
+                .unwrap();
+                assert_eq!(result, Version::parse("2.0.0").unwrap());
+            }
+
+            #[test]
+            fn auto_promote_major_bump() {
+                let version = Version::parse("1.2.3").unwrap();
+                let result = calculate_new_version_with_zero_behavior(
+                    &version,
+                    Some(BumpType::Major),
+                    None,
+                    ZeroVersionBehavior::AutoPromoteOnMajor,
+                    false,
+                )
+                .unwrap();
+                assert_eq!(result, Version::parse("2.0.0").unwrap());
+            }
+        }
+
+        mod graduation {
+            use super::*;
+
+            #[test]
+            fn promotes_zero_to_1_0_0() {
+                let version = Version::parse("0.5.3").unwrap();
+                let result = calculate_new_version_with_zero_behavior(
+                    &version,
+                    None,
+                    None,
+                    ZeroVersionBehavior::EffectiveMinor,
+                    true,
+                )
+                .unwrap();
+                assert_eq!(result, Version::parse("1.0.0").unwrap());
+            }
+
+            #[test]
+            fn with_prerelease() {
+                let version = Version::parse("0.5.3").unwrap();
+                let result = calculate_new_version_with_zero_behavior(
+                    &version,
+                    None,
+                    Some(&PrereleaseSpec::Alpha),
+                    ZeroVersionBehavior::EffectiveMinor,
+                    true,
+                )
+                .unwrap();
+                assert_eq!(result, Version::parse("1.0.0-alpha.1").unwrap());
+            }
+
+            #[test]
+            fn errors_on_prerelease_version() {
+                let version = Version::parse("0.5.3-alpha.1").unwrap();
+                let result = calculate_new_version_with_zero_behavior(
+                    &version,
+                    None,
+                    None,
+                    ZeroVersionBehavior::EffectiveMinor,
+                    true,
+                );
+                assert!(matches!(
+                    result,
+                    Err(VersionError::CannotGraduateFromPrerelease { .. })
+                ));
+            }
+
+            #[test]
+            fn errors_on_stable_version() {
+                let version = Version::parse("1.2.3").unwrap();
+                let result = calculate_new_version_with_zero_behavior(
+                    &version,
+                    None,
+                    None,
+                    ZeroVersionBehavior::EffectiveMinor,
+                    true,
+                );
+                assert!(matches!(
+                    result,
+                    Err(VersionError::CanOnlyGraduateZeroVersions { .. })
+                ));
+            }
+
+            #[test]
+            fn bump_type_ignored_when_graduating() {
+                let version = Version::parse("0.5.3").unwrap();
+                let result = calculate_new_version_with_zero_behavior(
+                    &version,
+                    Some(BumpType::Patch),
+                    None,
+                    ZeroVersionBehavior::EffectiveMinor,
+                    true,
+                )
+                .unwrap();
+                assert_eq!(result, Version::parse("1.0.0").unwrap());
+            }
+
+            #[test]
+            fn behavior_ignored_when_graduating() {
+                let version = Version::parse("0.5.3").unwrap();
+                let result = calculate_new_version_with_zero_behavior(
+                    &version,
+                    None,
+                    None,
+                    ZeroVersionBehavior::AutoPromoteOnMajor,
+                    true,
+                )
+                .unwrap();
+                assert_eq!(result, Version::parse("1.0.0").unwrap());
+            }
         }
     }
 }

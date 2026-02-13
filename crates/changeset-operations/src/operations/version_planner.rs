@@ -1,7 +1,10 @@
 use std::collections::HashSet;
 
-use changeset_core::{BumpType, Changeset, PackageInfo, PrereleaseSpec};
-use changeset_version::{VersionError, calculate_new_version, max_bump_type};
+use changeset_core::{BumpType, Changeset, PackageInfo, PrereleaseSpec, ZeroVersionBehavior};
+use changeset_version::{
+    VersionError, calculate_new_version, calculate_new_version_with_zero_behavior, is_zero_version,
+    max_bump_type,
+};
 use indexmap::IndexMap;
 
 use super::release::PackageVersion;
@@ -100,6 +103,101 @@ impl VersionPlanner {
         })
     }
 
+    /// Plans version releases with special handling for 0.x versions.
+    ///
+    /// # Errors
+    ///
+    /// Returns `VersionError` if version calculation fails.
+    pub fn plan_releases_with_behavior(
+        changesets: &[Changeset],
+        packages: &[PackageInfo],
+        prerelease: Option<&PrereleaseSpec>,
+        zero_behavior: ZeroVersionBehavior,
+    ) -> Result<ReleasePlan, VersionError> {
+        let package_lookup: IndexMap<_, _> = packages.iter().map(|p| (p.name.clone(), p)).collect();
+        let bumps_by_package = Self::aggregate_bumps(changesets);
+        let graduates = Self::collect_graduates(changesets);
+
+        let mut releases = Vec::new();
+        let mut unknown_packages = Vec::new();
+
+        for (name, bumps) in &bumps_by_package {
+            let bump_type = max_bump_type(bumps);
+            let should_graduate = graduates.contains(name);
+
+            if bump_type.is_none() && prerelease.is_none() && !should_graduate {
+                continue;
+            }
+
+            if let Some(pkg) = package_lookup.get(name) {
+                let new_version = calculate_new_version_with_zero_behavior(
+                    &pkg.version,
+                    bump_type,
+                    prerelease,
+                    zero_behavior,
+                    should_graduate,
+                )?;
+                let effective_bump = bump_type.unwrap_or(BumpType::Patch);
+                releases.push(PackageVersion {
+                    name: name.clone(),
+                    current_version: pkg.version.clone(),
+                    new_version,
+                    bump_type: effective_bump,
+                });
+            } else {
+                unknown_packages.push(name.clone());
+            }
+        }
+
+        Ok(ReleasePlan {
+            releases,
+            unknown_packages,
+        })
+    }
+
+    /// Plans graduation of 0.x versions to 1.0.0.
+    ///
+    /// # Errors
+    ///
+    /// Returns `VersionError` if version calculation fails.
+    pub fn plan_zero_graduation(
+        packages: &[PackageInfo],
+        prerelease: Option<&PrereleaseSpec>,
+    ) -> Result<ReleasePlan, VersionError> {
+        let mut releases = Vec::new();
+
+        for pkg in packages {
+            if is_zero_version(&pkg.version) {
+                let new_version = calculate_new_version_with_zero_behavior(
+                    &pkg.version,
+                    None,
+                    prerelease,
+                    ZeroVersionBehavior::EffectiveMinor,
+                    true,
+                )?;
+                releases.push(PackageVersion {
+                    name: pkg.name.clone(),
+                    current_version: pkg.version.clone(),
+                    new_version,
+                    bump_type: BumpType::Major,
+                });
+            }
+        }
+
+        Ok(ReleasePlan {
+            releases,
+            unknown_packages: Vec::new(),
+        })
+    }
+
+    fn collect_graduates(changesets: &[Changeset]) -> HashSet<String> {
+        changesets
+            .iter()
+            .filter(|c| c.graduate)
+            .flat_map(|c| c.releases.iter().map(|r| r.name.clone()))
+            .collect()
+    }
+
     #[must_use]
     pub fn aggregate_bumps(changesets: &[Changeset]) -> IndexMap<String, Vec<BumpType>> {
         let mut bumps_by_package: IndexMap<String, Vec<BumpType>> = IndexMap::new();
@@ -161,6 +259,7 @@ mod tests {
             }],
             category: ChangeCategory::Changed,
             consumed_for_prerelease: None,
+            graduate: false,
         }
     }
 
@@ -176,6 +275,7 @@ mod tests {
                 .collect(),
             category: ChangeCategory::Changed,
             consumed_for_prerelease: None,
+            graduate: false,
         }
     }
 
@@ -422,5 +522,272 @@ mod tests {
         let plan = VersionPlanner::plan_graduation(&packages).expect("plan_graduation");
 
         assert!(plan.releases.is_empty());
+    }
+
+    mod zero_version_behavior_tests {
+        use super::*;
+
+        #[test]
+        fn effective_minor_converts_major_to_minor() {
+            let packages = vec![make_package("my-crate", "0.1.2")];
+            let changesets = vec![make_changeset("my-crate", BumpType::Major, "Breaking")];
+
+            let plan = VersionPlanner::plan_releases_with_behavior(
+                &changesets,
+                &packages,
+                None,
+                ZeroVersionBehavior::EffectiveMinor,
+            )
+            .expect("plan_releases_with_behavior");
+
+            assert_eq!(plan.releases.len(), 1);
+            let release = &plan.releases[0];
+            assert_eq!(release.new_version, Version::new(0, 2, 0));
+        }
+
+        #[test]
+        fn effective_minor_converts_minor_to_patch() {
+            let packages = vec![make_package("my-crate", "0.1.2")];
+            let changesets = vec![make_changeset("my-crate", BumpType::Minor, "Feature")];
+
+            let plan = VersionPlanner::plan_releases_with_behavior(
+                &changesets,
+                &packages,
+                None,
+                ZeroVersionBehavior::EffectiveMinor,
+            )
+            .expect("plan_releases_with_behavior");
+
+            assert_eq!(plan.releases.len(), 1);
+            let release = &plan.releases[0];
+            assert_eq!(release.new_version, Version::new(0, 1, 3));
+        }
+
+        #[test]
+        fn auto_promote_major_becomes_1_0_0() {
+            let packages = vec![make_package("my-crate", "0.1.2")];
+            let changesets = vec![make_changeset("my-crate", BumpType::Major, "Breaking")];
+
+            let plan = VersionPlanner::plan_releases_with_behavior(
+                &changesets,
+                &packages,
+                None,
+                ZeroVersionBehavior::AutoPromoteOnMajor,
+            )
+            .expect("plan_releases_with_behavior");
+
+            assert_eq!(plan.releases.len(), 1);
+            let release = &plan.releases[0];
+            assert_eq!(release.new_version, Version::new(1, 0, 0));
+        }
+
+        #[test]
+        fn auto_promote_minor_stays_minor() {
+            let packages = vec![make_package("my-crate", "0.1.2")];
+            let changesets = vec![make_changeset("my-crate", BumpType::Minor, "Feature")];
+
+            let plan = VersionPlanner::plan_releases_with_behavior(
+                &changesets,
+                &packages,
+                None,
+                ZeroVersionBehavior::AutoPromoteOnMajor,
+            )
+            .expect("plan_releases_with_behavior");
+
+            assert_eq!(plan.releases.len(), 1);
+            let release = &plan.releases[0];
+            assert_eq!(release.new_version, Version::new(0, 2, 0));
+        }
+
+        #[test]
+        fn stable_version_unaffected_by_behavior() {
+            let packages = vec![make_package("my-crate", "1.2.3")];
+            let changesets = vec![make_changeset("my-crate", BumpType::Major, "Breaking")];
+
+            let plan = VersionPlanner::plan_releases_with_behavior(
+                &changesets,
+                &packages,
+                None,
+                ZeroVersionBehavior::EffectiveMinor,
+            )
+            .expect("plan_releases_with_behavior");
+
+            assert_eq!(plan.releases.len(), 1);
+            let release = &plan.releases[0];
+            assert_eq!(release.new_version, Version::new(2, 0, 0));
+        }
+
+        #[test]
+        fn with_prerelease_tag() {
+            let packages = vec![make_package("my-crate", "0.1.2")];
+            let changesets = vec![make_changeset("my-crate", BumpType::Major, "Breaking")];
+
+            let plan = VersionPlanner::plan_releases_with_behavior(
+                &changesets,
+                &packages,
+                Some(&PrereleaseSpec::Alpha),
+                ZeroVersionBehavior::EffectiveMinor,
+            )
+            .expect("plan_releases_with_behavior");
+
+            assert_eq!(plan.releases.len(), 1);
+            let release = &plan.releases[0];
+            assert_eq!(
+                release.new_version,
+                "0.2.0-alpha.1".parse::<Version>().expect("valid")
+            );
+        }
+    }
+
+    mod zero_graduation_tests {
+        use super::*;
+
+        #[test]
+        fn graduates_zero_version_to_1_0_0() {
+            let packages = vec![
+                make_package("crate-a", "0.5.3"),
+                make_package("crate-b", "1.0.0"),
+            ];
+
+            let plan = VersionPlanner::plan_zero_graduation(&packages, None)
+                .expect("plan_zero_graduation");
+
+            assert_eq!(plan.releases.len(), 1);
+            let release = &plan.releases[0];
+            assert_eq!(release.name, "crate-a");
+            assert_eq!(release.new_version, Version::new(1, 0, 0));
+        }
+
+        #[test]
+        fn graduates_with_prerelease() {
+            let packages = vec![make_package("crate-a", "0.5.3")];
+
+            let plan =
+                VersionPlanner::plan_zero_graduation(&packages, Some(&PrereleaseSpec::Alpha))
+                    .expect("plan_zero_graduation");
+
+            assert_eq!(plan.releases.len(), 1);
+            let release = &plan.releases[0];
+            assert_eq!(
+                release.new_version,
+                "1.0.0-alpha.1".parse::<Version>().expect("valid")
+            );
+        }
+
+        #[test]
+        fn empty_for_all_stable() {
+            let packages = vec![
+                make_package("crate-a", "1.0.0"),
+                make_package("crate-b", "2.5.0"),
+            ];
+
+            let plan = VersionPlanner::plan_zero_graduation(&packages, None)
+                .expect("plan_zero_graduation");
+
+            assert!(plan.releases.is_empty());
+        }
+
+        #[test]
+        fn multiple_zero_versions() {
+            let packages = vec![
+                make_package("crate-a", "0.1.0"),
+                make_package("crate-b", "0.5.3"),
+                make_package("crate-c", "1.0.0"),
+            ];
+
+            let plan = VersionPlanner::plan_zero_graduation(&packages, None)
+                .expect("plan_zero_graduation");
+
+            assert_eq!(plan.releases.len(), 2);
+            for release in &plan.releases {
+                assert_eq!(release.new_version, Version::new(1, 0, 0));
+            }
+        }
+    }
+
+    mod changeset_graduate_field_tests {
+        use super::*;
+
+        fn make_graduating_changeset(package_name: &str, bump: BumpType) -> Changeset {
+            Changeset {
+                summary: "Graduate to 1.0".to_string(),
+                releases: vec![PackageRelease {
+                    name: package_name.to_string(),
+                    bump_type: bump,
+                }],
+                category: ChangeCategory::Changed,
+                consumed_for_prerelease: None,
+                graduate: true,
+            }
+        }
+
+        #[test]
+        fn graduate_field_triggers_graduation() {
+            let packages = vec![make_package("my-crate", "0.5.3")];
+            let changesets = vec![make_graduating_changeset("my-crate", BumpType::Major)];
+
+            let plan = VersionPlanner::plan_releases_with_behavior(
+                &changesets,
+                &packages,
+                None,
+                ZeroVersionBehavior::EffectiveMinor,
+            )
+            .expect("plan_releases_with_behavior");
+
+            assert_eq!(plan.releases.len(), 1);
+            let release = &plan.releases[0];
+            assert_eq!(release.new_version, Version::new(1, 0, 0));
+        }
+
+        #[test]
+        fn graduate_field_ignored_for_stable_returns_error() {
+            let packages = vec![make_package("my-crate", "1.2.3")];
+            let changesets = vec![make_graduating_changeset("my-crate", BumpType::Major)];
+
+            let result = VersionPlanner::plan_releases_with_behavior(
+                &changesets,
+                &packages,
+                None,
+                ZeroVersionBehavior::EffectiveMinor,
+            );
+
+            assert!(result.is_err());
+        }
+
+        #[test]
+        fn mixed_graduate_and_regular_changesets() {
+            let packages = vec![
+                make_package("graduating", "0.5.0"),
+                make_package("regular", "0.3.0"),
+            ];
+            let changesets = vec![
+                make_graduating_changeset("graduating", BumpType::Major),
+                make_changeset("regular", BumpType::Major, "Breaking"),
+            ];
+
+            let plan = VersionPlanner::plan_releases_with_behavior(
+                &changesets,
+                &packages,
+                None,
+                ZeroVersionBehavior::EffectiveMinor,
+            )
+            .expect("plan_releases_with_behavior");
+
+            assert_eq!(plan.releases.len(), 2);
+
+            let graduating = plan
+                .releases
+                .iter()
+                .find(|r| r.name == "graduating")
+                .expect("graduating should be in releases");
+            assert_eq!(graduating.new_version, Version::new(1, 0, 0));
+
+            let regular = plan
+                .releases
+                .iter()
+                .find(|r| r.name == "regular")
+                .expect("regular should be in releases");
+            assert_eq!(regular.new_version, Version::new(0, 4, 0));
+        }
     }
 }

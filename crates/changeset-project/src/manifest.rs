@@ -1,6 +1,7 @@
 use std::path::Path;
 
 use changeset_changelog::{ChangelogLocation, ComparisonLinksSetting};
+use changeset_core::ZeroVersionBehavior;
 use serde::Deserialize;
 
 use crate::error::ProjectError;
@@ -90,6 +91,8 @@ pub(crate) struct ChangesetMetadata {
     pub(crate) commit_title_template: Option<String>,
     #[serde(default)]
     pub(crate) changes_in_body: Option<bool>,
+    #[serde(default)]
+    pub(crate) zero_version_behavior: Option<ZeroVersionBehavior>,
 }
 
 #[derive(Debug, Deserialize, Clone, Copy)]

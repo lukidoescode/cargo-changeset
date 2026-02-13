@@ -15,6 +15,8 @@ struct FrontMatterOutput<'a> {
         rename = "consumedForPrerelease"
     )]
     consumed_for_prerelease: Option<&'a str>,
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    graduate: bool,
     #[serde(flatten)]
     releases: IndexMap<&'a str, BumpType>,
 }
@@ -38,6 +40,7 @@ pub fn serialize_changeset(changeset: &Changeset) -> Result<String, FormatError>
     let front_matter = FrontMatterOutput {
         category: changeset.category,
         consumed_for_prerelease: changeset.consumed_for_prerelease.as_deref(),
+        graduate: changeset.graduate,
         releases: releases_map,
     };
 
@@ -81,6 +84,7 @@ mod tests {
             ],
             category: ChangeCategory::default(),
             consumed_for_prerelease: None,
+            graduate: false,
         };
 
         let serialized = serialize_changeset(&original).expect("should serialize");
@@ -122,6 +126,7 @@ mod tests {
             ],
             category: ChangeCategory::default(),
             consumed_for_prerelease: None,
+            graduate: false,
         };
 
         let serialized = serialize_changeset(&original).expect("should serialize");
@@ -139,6 +144,7 @@ mod tests {
             releases: vec![],
             category: ChangeCategory::default(),
             consumed_for_prerelease: None,
+            graduate: false,
         };
 
         let err = serialize_changeset(&changeset).expect_err("should fail");
@@ -155,6 +161,7 @@ mod tests {
             }],
             category: ChangeCategory::Fixed,
             consumed_for_prerelease: None,
+            graduate: false,
         };
 
         let serialized = serialize_changeset(&original).expect("should serialize");
@@ -174,6 +181,7 @@ mod tests {
             }],
             category: ChangeCategory::Changed,
             consumed_for_prerelease: None,
+            graduate: false,
         };
 
         let serialized = serialize_changeset(&changeset).expect("should serialize");
@@ -193,6 +201,7 @@ mod tests {
             }],
             category: ChangeCategory::Security,
             consumed_for_prerelease: None,
+            graduate: false,
         };
 
         let serialized = serialize_changeset(&changeset).expect("should serialize");
@@ -212,6 +221,7 @@ mod tests {
             }],
             category: ChangeCategory::Fixed,
             consumed_for_prerelease: Some("1.0.1-alpha.1".to_string()),
+            graduate: false,
         };
 
         let serialized = serialize_changeset(&original).expect("should serialize");
@@ -235,6 +245,7 @@ mod tests {
             }],
             category: ChangeCategory::Changed,
             consumed_for_prerelease: Some("2.0.0-beta.3".to_string()),
+            graduate: false,
         };
 
         let serialized = serialize_changeset(&changeset).expect("should serialize");
@@ -258,6 +269,7 @@ mod tests {
             }],
             category: ChangeCategory::Changed,
             consumed_for_prerelease: None,
+            graduate: false,
         };
 
         let serialized = serialize_changeset(&changeset).expect("should serialize");
@@ -265,5 +277,66 @@ mod tests {
             !serialized.contains("consumedForPrerelease"),
             "None consumed_for_prerelease should not be serialized"
         );
+    }
+
+    #[test]
+    fn graduate_false_not_serialized() {
+        let changeset = Changeset {
+            summary: "Some change".to_string(),
+            releases: vec![PackageRelease {
+                name: "my-crate".to_string(),
+                bump_type: BumpType::Minor,
+            }],
+            category: ChangeCategory::Changed,
+            consumed_for_prerelease: None,
+            graduate: false,
+        };
+
+        let serialized = serialize_changeset(&changeset).expect("should serialize");
+        assert!(
+            !serialized.contains("graduate"),
+            "graduate: false should not be serialized, got: {serialized}"
+        );
+    }
+
+    #[test]
+    fn graduate_true_serialized() {
+        let changeset = Changeset {
+            summary: "Graduating to 1.0".to_string(),
+            releases: vec![PackageRelease {
+                name: "my-crate".to_string(),
+                bump_type: BumpType::Major,
+            }],
+            category: ChangeCategory::Added,
+            consumed_for_prerelease: None,
+            graduate: true,
+        };
+
+        let serialized = serialize_changeset(&changeset).expect("should serialize");
+        assert!(
+            serialized.contains("graduate: true"),
+            "graduate: true should be serialized, got: {serialized}"
+        );
+    }
+
+    #[test]
+    fn roundtrip_with_graduate() {
+        let original = Changeset {
+            summary: "Graduating to 1.0".to_string(),
+            releases: vec![PackageRelease {
+                name: "my-crate".to_string(),
+                bump_type: BumpType::Major,
+            }],
+            category: ChangeCategory::Added,
+            consumed_for_prerelease: None,
+            graduate: true,
+        };
+
+        let serialized = serialize_changeset(&original).expect("should serialize");
+        let parsed = parse_changeset(&serialized).expect("should parse");
+
+        assert!(parsed.graduate);
+        assert_eq!(parsed.category, ChangeCategory::Added);
+        assert_eq!(parsed.summary, original.summary);
     }
 }

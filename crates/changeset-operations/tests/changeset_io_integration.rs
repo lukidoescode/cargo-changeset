@@ -51,7 +51,7 @@ fn read_changeset_file(dir: &TempDir, filename: &str) -> String {
 }
 
 #[test]
-fn test_mark_consumed_for_prerelease_updates_frontmatter() {
+fn mark_consumed_for_prerelease_updates_frontmatter() {
     let dir = create_changeset_dir();
     write_changeset_file(&dir, "feature.md", "my-crate", "minor", "Add a feature");
 
@@ -84,7 +84,7 @@ fn test_mark_consumed_for_prerelease_updates_frontmatter() {
 }
 
 #[test]
-fn test_list_changesets_excludes_consumed() {
+fn list_changesets_excludes_consumed() {
     let dir = create_changeset_dir();
     write_changeset_file(&dir, "unconsumed.md", "crate-a", "patch", "Fix bug");
     write_consumed_changeset_file(
@@ -115,7 +115,7 @@ fn test_list_changesets_excludes_consumed() {
 }
 
 #[test]
-fn test_list_consumed_changesets_returns_only_consumed() {
+fn list_consumed_changesets_returns_only_consumed() {
     let dir = create_changeset_dir();
     write_changeset_file(&dir, "unconsumed.md", "crate-a", "patch", "Fix bug");
     write_consumed_changeset_file(
@@ -146,7 +146,7 @@ fn test_list_consumed_changesets_returns_only_consumed() {
 }
 
 #[test]
-fn test_clear_consumed_for_prerelease_removes_flag() {
+fn clear_consumed_for_prerelease_removes_flag() {
     let dir = create_changeset_dir();
     write_consumed_changeset_file(
         &dir,
@@ -191,7 +191,7 @@ fn test_clear_consumed_for_prerelease_removes_flag() {
 }
 
 #[test]
-fn test_mark_consumed_preserves_category() {
+fn mark_consumed_preserves_category() {
     let dir = create_changeset_dir();
     let content = r#"---
 category: fixed
@@ -232,7 +232,7 @@ Fix a security issue.
 }
 
 #[test]
-fn test_mark_multiple_changesets_consumed() {
+fn mark_multiple_changesets_consumed() {
     let dir = create_changeset_dir();
     write_changeset_file(&dir, "fix1.md", "crate-a", "patch", "Fix bug 1");
     write_changeset_file(&dir, "fix2.md", "crate-b", "patch", "Fix bug 2");
@@ -263,7 +263,7 @@ fn test_mark_multiple_changesets_consumed() {
 }
 
 #[test]
-fn test_list_changesets_with_mixed_consumed_status() {
+fn list_changesets_with_mixed_consumed_status() {
     let dir = create_changeset_dir();
     write_changeset_file(&dir, "pending1.md", "crate-a", "patch", "Fix 1");
     write_changeset_file(&dir, "pending2.md", "crate-b", "minor", "Feature 1");

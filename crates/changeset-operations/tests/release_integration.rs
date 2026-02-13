@@ -174,6 +174,7 @@ fn run_release(
         keep_changesets: true,
         prerelease: None,
         force: false,
+        graduate: false,
     };
 
     operation.execute(dir.path(), &input)
@@ -574,6 +575,7 @@ fn run_release_with_git(
         keep_changesets,
         prerelease: None,
         force: false,
+        graduate: false,
     };
 
     operation.execute(dir.path(), &input)
@@ -789,5 +791,452 @@ fn release_errors_on_dirty_working_tree() {
     assert!(
         matches!(result, Err(OperationError::DirtyWorkingTree)),
         "should error on dirty working tree: {result:?}"
+    );
+}
+
+fn create_mixed_prerelease_workspace() -> TempDir {
+    let dir = TempDir::new().expect("create temp dir");
+
+    fs::write(
+        dir.path().join("Cargo.toml"),
+        r#"[workspace]
+members = ["crates/*"]
+resolver = "2"
+"#,
+    )
+    .expect("write workspace Cargo.toml");
+
+    fs::create_dir_all(dir.path().join("crates/prerelease-crate/src"))
+        .expect("create prerelease-crate dir");
+    fs::write(
+        dir.path().join("crates/prerelease-crate/Cargo.toml"),
+        r#"[package]
+name = "prerelease-crate"
+version = "1.0.0-alpha.1"
+edition = "2021"
+"#,
+    )
+    .expect("write prerelease-crate Cargo.toml");
+    fs::write(dir.path().join("crates/prerelease-crate/src/lib.rs"), "").expect("write lib.rs");
+
+    fs::create_dir_all(dir.path().join("crates/stable-crate/src"))
+        .expect("create stable-crate dir");
+    fs::write(
+        dir.path().join("crates/stable-crate/Cargo.toml"),
+        r#"[package]
+name = "stable-crate"
+version = "2.0.0"
+edition = "2021"
+"#,
+    )
+    .expect("write stable-crate Cargo.toml");
+    fs::write(dir.path().join("crates/stable-crate/src/lib.rs"), "").expect("write lib.rs");
+
+    fs::create_dir_all(dir.path().join(".changeset")).expect("create .changeset dir");
+
+    dir
+}
+
+fn run_release_with_prerelease(
+    dir: &TempDir,
+    prerelease: Option<changeset_core::PrereleaseSpec>,
+) -> Result<ReleaseOutcome, OperationError> {
+    let project_provider = FileSystemProjectProvider::new();
+    let changeset_io = FileSystemChangesetIO::new(dir.path());
+    let manifest_writer = FileSystemManifestWriter::new();
+    let changelog_writer = FileSystemChangelogWriter::new();
+    let git_provider = Git2Provider::new();
+
+    let operation = ReleaseOperation::new(
+        project_provider,
+        changeset_io,
+        manifest_writer,
+        changelog_writer,
+        git_provider,
+    );
+    let input = ReleaseInput {
+        dry_run: false,
+        convert_inherited: false,
+        no_commit: true,
+        no_tags: true,
+        keep_changesets: true,
+        prerelease,
+        force: false,
+        graduate: false,
+    };
+
+    operation.execute(dir.path(), &input)
+}
+
+fn write_consumed_changeset(
+    dir: &TempDir,
+    filename: &str,
+    package: &str,
+    bump: &str,
+    summary: &str,
+    consumed_version: &str,
+) {
+    let content = format!(
+        r#"---
+consumedForPrerelease: "{consumed_version}"
+"{package}": {bump}
+---
+
+{summary}
+"#
+    );
+    fs::write(dir.path().join(".changeset").join(filename), content).expect("write changeset");
+}
+
+#[test]
+fn workspace_with_mixed_prerelease_and_stable_packages_graduates_prereleases_only() {
+    let dir = create_mixed_prerelease_workspace();
+    write_changeset(
+        &dir,
+        "fix-pre.md",
+        "prerelease-crate",
+        "patch",
+        "Fix bug in prerelease",
+    );
+    write_changeset(
+        &dir,
+        "fix-stable.md",
+        "stable-crate",
+        "patch",
+        "Fix bug in stable",
+    );
+
+    let result = run_release_with_prerelease(&dir, None).expect("release should succeed");
+
+    let ReleaseOutcome::Executed(output) = result else {
+        panic!("expected Executed outcome");
+    };
+
+    assert_eq!(
+        output.planned_releases.len(),
+        1,
+        "only prerelease packages should graduate when any prerelease exists"
+    );
+
+    let prerelease_pkg = output
+        .planned_releases
+        .iter()
+        .find(|r| r.name == "prerelease-crate")
+        .expect("prerelease-crate should be in releases");
+    assert_eq!(
+        prerelease_pkg.new_version.to_string(),
+        "1.0.0",
+        "prerelease should graduate to stable when no --prerelease flag"
+    );
+
+    assert!(
+        output
+            .unchanged_packages
+            .contains(&"stable-crate".to_string()),
+        "stable packages are skipped during graduation; run a second release for them"
+    );
+}
+
+#[test]
+fn prerelease_with_multiple_prerelease_packages() {
+    let dir = TempDir::new().expect("create temp dir");
+
+    fs::write(
+        dir.path().join("Cargo.toml"),
+        r#"[workspace]
+members = ["crates/*"]
+resolver = "2"
+"#,
+    )
+    .expect("write workspace Cargo.toml");
+
+    fs::create_dir_all(dir.path().join("crates/crate-alpha/src")).expect("create crate-alpha dir");
+    fs::write(
+        dir.path().join("crates/crate-alpha/Cargo.toml"),
+        r#"[package]
+name = "crate-alpha"
+version = "1.0.0-alpha.1"
+edition = "2021"
+"#,
+    )
+    .expect("write crate-alpha Cargo.toml");
+    fs::write(dir.path().join("crates/crate-alpha/src/lib.rs"), "").expect("write lib.rs");
+
+    fs::create_dir_all(dir.path().join("crates/crate-beta/src")).expect("create crate-beta dir");
+    fs::write(
+        dir.path().join("crates/crate-beta/Cargo.toml"),
+        r#"[package]
+name = "crate-beta"
+version = "2.0.0-beta.1"
+edition = "2021"
+"#,
+    )
+    .expect("write crate-beta Cargo.toml");
+    fs::write(dir.path().join("crates/crate-beta/src/lib.rs"), "").expect("write lib.rs");
+
+    fs::create_dir_all(dir.path().join(".changeset")).expect("create .changeset dir");
+
+    write_changeset(&dir, "fix-alpha.md", "crate-alpha", "patch", "Fix in alpha");
+    write_changeset(
+        &dir,
+        "feature-beta.md",
+        "crate-beta",
+        "minor",
+        "Feature for beta",
+    );
+
+    let result = run_release_with_prerelease(&dir, Some(changeset_core::PrereleaseSpec::Beta))
+        .expect("release should succeed");
+
+    let ReleaseOutcome::Executed(output) = result else {
+        panic!("expected Executed outcome");
+    };
+
+    assert_eq!(output.planned_releases.len(), 2);
+
+    let alpha_pkg = output
+        .planned_releases
+        .iter()
+        .find(|r| r.name == "crate-alpha")
+        .expect("crate-alpha should be in releases");
+    assert_eq!(
+        alpha_pkg.new_version.to_string(),
+        "1.0.0-beta.1",
+        "alpha package should switch to beta.1 (tag change resets number)"
+    );
+
+    let beta_pkg = output
+        .planned_releases
+        .iter()
+        .find(|r| r.name == "crate-beta")
+        .expect("crate-beta should be in releases");
+    assert_eq!(
+        beta_pkg.new_version.to_string(),
+        "2.0.0-beta.2",
+        "beta package already at beta.1 should increment to beta.2"
+    );
+}
+
+#[test]
+fn alpha_to_beta_tag_transition_resets_number() {
+    let dir = create_single_package_project();
+
+    fs::write(
+        dir.path().join("Cargo.toml"),
+        r#"[package]
+name = "my-crate"
+version = "1.0.0-alpha.5"
+edition = "2021"
+"#,
+    )
+    .expect("update version to alpha.5");
+
+    write_changeset(&dir, "feature.md", "my-crate", "minor", "Add feature");
+
+    let result = run_release_with_prerelease(&dir, Some(changeset_core::PrereleaseSpec::Beta))
+        .expect("release should succeed");
+
+    let ReleaseOutcome::Executed(output) = result else {
+        panic!("expected Executed outcome");
+    };
+
+    assert_eq!(output.planned_releases.len(), 1);
+    assert_eq!(
+        output.planned_releases[0].new_version.to_string(),
+        "1.0.0-beta.1",
+        "switching from alpha to beta should reset prerelease number to 1"
+    );
+
+    let version = read_version(&dir.path().join("Cargo.toml"));
+    assert_eq!(
+        version, "1.0.0-beta.1",
+        "Cargo.toml should be updated to beta.1"
+    );
+}
+
+#[test]
+fn beta_to_rc_tag_transition_resets_number() {
+    let dir = create_single_package_project();
+
+    fs::write(
+        dir.path().join("Cargo.toml"),
+        r#"[package]
+name = "my-crate"
+version = "2.0.0-beta.3"
+edition = "2021"
+"#,
+    )
+    .expect("update version to beta.3");
+
+    write_changeset(&dir, "fix.md", "my-crate", "patch", "Fix bug");
+
+    let result = run_release_with_prerelease(&dir, Some(changeset_core::PrereleaseSpec::Rc))
+        .expect("release should succeed");
+
+    let ReleaseOutcome::Executed(output) = result else {
+        panic!("expected Executed outcome");
+    };
+
+    assert_eq!(output.planned_releases.len(), 1);
+    assert_eq!(
+        output.planned_releases[0].new_version.to_string(),
+        "2.0.0-rc.1",
+        "switching from beta to rc should reset prerelease number to 1"
+    );
+}
+
+#[test]
+fn custom_prerelease_tag_works() {
+    let dir = create_single_package_project();
+    write_changeset(&dir, "feature.md", "my-crate", "minor", "Add feature");
+
+    let result = run_release_with_prerelease(
+        &dir,
+        Some(changeset_core::PrereleaseSpec::Custom(
+            "nightly".to_string(),
+        )),
+    )
+    .expect("release should succeed");
+
+    let ReleaseOutcome::Executed(output) = result else {
+        panic!("expected Executed outcome");
+    };
+
+    assert_eq!(output.planned_releases.len(), 1);
+    assert_eq!(
+        output.planned_releases[0].new_version.to_string(),
+        "1.1.0-nightly.1",
+        "custom prerelease tag should be applied"
+    );
+}
+
+#[test]
+fn consumed_changesets_aggregated_in_changelog_on_graduation() {
+    let dir = create_single_package_project();
+
+    fs::write(
+        dir.path().join("Cargo.toml"),
+        r#"[package]
+name = "my-crate"
+version = "1.0.1-alpha.2"
+edition = "2021"
+"#,
+    )
+    .expect("update version to alpha.2");
+
+    write_consumed_changeset(
+        &dir,
+        "fix1.md",
+        "my-crate",
+        "patch",
+        "Fix bug one from alpha.1",
+        "1.0.1-alpha.1",
+    );
+    write_consumed_changeset(
+        &dir,
+        "fix2.md",
+        "my-crate",
+        "patch",
+        "Fix bug two from alpha.2",
+        "1.0.1-alpha.2",
+    );
+
+    let result = run_release_with_prerelease(&dir, None).expect("graduation should succeed");
+
+    let ReleaseOutcome::Executed(output) = result else {
+        panic!("expected Executed outcome");
+    };
+
+    assert_eq!(output.planned_releases.len(), 1);
+    assert_eq!(
+        output.planned_releases[0].new_version.to_string(),
+        "1.0.1",
+        "graduation should produce stable version"
+    );
+
+    let changelog_path = dir.path().join("CHANGELOG.md");
+    assert!(changelog_path.exists(), "CHANGELOG.md should be created");
+
+    let changelog_content = fs::read_to_string(&changelog_path).expect("read CHANGELOG.md");
+
+    assert!(
+        changelog_content.contains("Fix bug one from alpha.1"),
+        "changelog should contain first consumed changeset: {changelog_content}"
+    );
+    assert!(
+        changelog_content.contains("Fix bug two from alpha.2"),
+        "changelog should contain second consumed changeset: {changelog_content}"
+    );
+    assert!(
+        changelog_content.contains("## [1.0.1]"),
+        "changelog should have stable version header: {changelog_content}"
+    );
+}
+
+#[test]
+fn consumed_changesets_from_multiple_prereleases_aggregated() {
+    let dir = create_single_package_project();
+
+    fs::write(
+        dir.path().join("Cargo.toml"),
+        r#"[package]
+name = "my-crate"
+version = "2.0.0-rc.1"
+edition = "2021"
+"#,
+    )
+    .expect("update version to rc.1");
+
+    write_consumed_changeset(
+        &dir,
+        "feature.md",
+        "my-crate",
+        "minor",
+        "Add major feature",
+        "2.0.0-alpha.1",
+    );
+    write_consumed_changeset(
+        &dir,
+        "fix.md",
+        "my-crate",
+        "patch",
+        "Fix edge case",
+        "2.0.0-beta.1",
+    );
+    write_consumed_changeset(
+        &dir,
+        "perf.md",
+        "my-crate",
+        "patch",
+        "Improve performance",
+        "2.0.0-rc.1",
+    );
+
+    let result = run_release_with_prerelease(&dir, None).expect("graduation should succeed");
+
+    let ReleaseOutcome::Executed(output) = result else {
+        panic!("expected Executed outcome");
+    };
+
+    assert_eq!(
+        output.planned_releases[0].new_version.to_string(),
+        "2.0.0",
+        "graduation should produce stable version"
+    );
+
+    let changelog_path = dir.path().join("CHANGELOG.md");
+    let changelog_content = fs::read_to_string(&changelog_path).expect("read CHANGELOG.md");
+
+    assert!(
+        changelog_content.contains("Add major feature"),
+        "changelog should contain alpha changeset"
+    );
+    assert!(
+        changelog_content.contains("Fix edge case"),
+        "changelog should contain beta changeset"
+    );
+    assert!(
+        changelog_content.contains("Improve performance"),
+        "changelog should contain rc changeset"
     );
 }

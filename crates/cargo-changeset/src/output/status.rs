@@ -103,13 +103,23 @@ impl PlainTextStatusFormatter {
     }
 
     fn format_consumed_prerelease_changesets(output: &mut String, status: &StatusOutput) {
+        const MAX_DISPLAYED: usize = 10;
+
         if status.consumed_prerelease_changesets.is_empty() {
             return;
         }
 
         output.push('\n');
         output.push_str("Consumed pre-release changesets:\n");
-        for (path, version) in &status.consumed_prerelease_changesets {
+
+        let total = status.consumed_prerelease_changesets.len();
+        let display_count = total.min(MAX_DISPLAYED);
+
+        for (path, version) in status
+            .consumed_prerelease_changesets
+            .iter()
+            .take(display_count)
+        {
             if let Some(name) = path.file_name() {
                 output.push_str(&format!(
                     "  - {} (consumed for {})\n",
@@ -117,6 +127,10 @@ impl PlainTextStatusFormatter {
                     version
                 ));
             }
+        }
+
+        if total > MAX_DISPLAYED {
+            output.push_str(&format!("  ... and {} more\n", total - MAX_DISPLAYED));
         }
     }
 }
@@ -204,6 +218,7 @@ mod tests {
                 .collect(),
             category,
             consumed_for_prerelease: None,
+            graduate: false,
         }
     }
 
@@ -617,5 +632,56 @@ mod tests {
         let result = formatter.format_status(&status);
 
         assert!(!result.contains("Consumed pre-release changesets:"));
+    }
+
+    #[test]
+    fn format_consumed_changesets_truncates_large_lists() {
+        let formatter = PlainTextStatusFormatter;
+        let mut status = empty_status();
+        status.consumed_prerelease_changesets = (1..=15)
+            .map(|i| {
+                (
+                    PathBuf::from(format!(".changeset/fix{i}.md")),
+                    format!("1.0.1-alpha.{i}"),
+                )
+            })
+            .collect();
+
+        let result = formatter.format_status(&status);
+
+        assert!(result.contains("Consumed pre-release changesets:"));
+        assert!(result.contains("fix1.md"));
+        assert!(result.contains("fix10.md"));
+        assert!(
+            !result.contains("fix11.md"),
+            "11th entry should be truncated"
+        );
+        assert!(
+            result.contains("... and 5 more"),
+            "should show truncation message"
+        );
+    }
+
+    #[test]
+    fn format_consumed_changesets_no_truncation_when_under_limit() {
+        let formatter = PlainTextStatusFormatter;
+        let mut status = empty_status();
+        status.consumed_prerelease_changesets = (1..=5)
+            .map(|i| {
+                (
+                    PathBuf::from(format!(".changeset/fix{i}.md")),
+                    format!("1.0.1-alpha.{i}"),
+                )
+            })
+            .collect();
+
+        let result = formatter.format_status(&status);
+
+        assert!(result.contains("fix1.md"));
+        assert!(result.contains("fix5.md"));
+        assert!(
+            !result.contains("... and"),
+            "should not show truncation for small lists"
+        );
     }
 }

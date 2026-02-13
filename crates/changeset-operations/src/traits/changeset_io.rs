@@ -1,3 +1,29 @@
+//! Changeset I/O traits for reading and writing changeset files.
+//!
+//! # Consumed Changeset Lifecycle
+//!
+//! Changesets follow a specific lifecycle during the prerelease workflow:
+//!
+//! 1. **Creation**: A changeset file is created via `cargo changeset add` with no
+//!    `consumedForPrerelease` field.
+//!
+//! 2. **Consumption**: When a prerelease is created (`cargo changeset release --prerelease`),
+//!    changesets are marked as consumed by setting `consumedForPrerelease` to the prerelease
+//!    version string (e.g., "1.0.1-alpha.1"). This prevents the same changes from being
+//!    included in subsequent prereleases while preserving the changeset for the eventual
+//!    stable release.
+//!
+//! 3. **Exclusion**: Consumed changesets are excluded from `list_changesets()` but included
+//!    in `list_consumed_changesets()`. This ensures subsequent prereleases only process
+//!    new changes.
+//!
+//! 4. **Aggregation**: When graduating from prerelease to stable, consumed changesets are
+//!    loaded and aggregated into the final changelog entry alongside any new changesets.
+//!    The `consumedForPrerelease` flag is cleared during graduation.
+//!
+//! 5. **Deletion**: After a stable release, all changeset files (both previously consumed
+//!    and newly processed) are deleted, completing the lifecycle.
+
 use std::path::{Path, PathBuf};
 
 use changeset_core::Changeset;
@@ -5,6 +31,9 @@ use semver::Version;
 
 use crate::Result;
 
+/// Reads changeset files from the filesystem.
+///
+/// See the [module-level documentation](self) for details on the consumed changeset lifecycle.
 pub trait ChangesetReader: Send + Sync {
     /// # Errors
     ///

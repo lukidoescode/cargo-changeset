@@ -272,7 +272,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_determine_project_kind_virtual() {
+    fn determine_project_kind_virtual() {
         let manifest = CargoManifest {
             package: None,
             workspace: Some(crate::manifest::WorkspaceSection {
@@ -289,7 +289,7 @@ mod tests {
     }
 
     #[test]
-    fn test_determine_project_kind_workspace_with_root() {
+    fn determine_project_kind_workspace_with_root() {
         let manifest = CargoManifest {
             package: Some(crate::manifest::Package {
                 name: "test".to_string(),
@@ -310,7 +310,7 @@ mod tests {
     }
 
     #[test]
-    fn test_determine_project_kind_single_package() {
+    fn determine_project_kind_single_package() {
         let manifest = CargoManifest {
             package: Some(crate::manifest::Package {
                 name: "test".to_string(),

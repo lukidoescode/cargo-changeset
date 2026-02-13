@@ -72,7 +72,12 @@ where
 
         let bumps_by_package = VersionPlanner::aggregate_bumps(&changesets);
 
-        let plan = VersionPlanner::plan_releases(&changesets, &project.packages)?;
+        let plan = VersionPlanner::plan_releases_with_behavior(
+            &changesets,
+            &project.packages,
+            None,
+            root_config.zero_version_behavior(),
+        )?;
 
         let (_, unchanged_packages) =
             VersionPlanner::partition_packages(&changesets, &project.packages);

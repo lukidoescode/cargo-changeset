@@ -17,6 +17,8 @@ struct FrontMatter {
     category: ChangeCategory,
     #[serde(default, rename = "consumedForPrerelease")]
     consumed_for_prerelease: Option<String>,
+    #[serde(default)]
+    graduate: bool,
     #[serde(flatten)]
     #[serde_as(as = "MapPreventDuplicates<_, _>")]
     releases: IndexMap<String, BumpType>,
@@ -95,6 +97,7 @@ pub fn parse_changeset(content: &str) -> Result<Changeset, FormatError> {
         releases,
         category: parsed.category,
         consumed_for_prerelease: parsed.consumed_for_prerelease,
+        graduate: parsed.graduate,
     })
 }
 
@@ -489,5 +492,58 @@ Release candidate.
             changeset.consumed_for_prerelease,
             Some("1.2.3-rc.1".to_string())
         );
+    }
+
+    #[test]
+    fn graduate_defaults_to_false() {
+        let content = r#"---
+"my-crate": patch
+---
+Some summary.
+"#;
+
+        let changeset = parse_changeset(content).expect("should parse");
+        assert!(!changeset.graduate);
+    }
+
+    #[test]
+    fn parses_graduate_true() {
+        let content = r#"---
+graduate: true
+"my-crate": major
+---
+Graduate to 1.0.0.
+"#;
+
+        let changeset = parse_changeset(content).expect("should parse");
+        assert!(changeset.graduate);
+    }
+
+    #[test]
+    fn parses_graduate_false() {
+        let content = r#"---
+graduate: false
+"my-crate": major
+---
+Major bump.
+"#;
+
+        let changeset = parse_changeset(content).expect("should parse");
+        assert!(!changeset.graduate);
+    }
+
+    #[test]
+    fn parses_graduate_with_category() {
+        let content = r#"---
+category: added
+graduate: true
+"my-crate": major
+---
+New major release.
+"#;
+
+        let changeset = parse_changeset(content).expect("should parse");
+        assert!(changeset.graduate);
+        assert_eq!(changeset.category, ChangeCategory::Added);
     }
 }

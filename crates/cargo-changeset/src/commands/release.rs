@@ -40,6 +40,7 @@ pub(crate) fn run(args: ReleaseArgs, start_path: &Path) -> Result<()> {
         keep_changesets: args.keep_changesets,
         prerelease,
         force: args.force,
+        graduate: args.graduate,
     };
     let outcome = operation.execute(start_path, &input)?;
 

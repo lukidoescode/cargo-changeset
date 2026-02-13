@@ -642,6 +642,7 @@ pub fn make_changeset(package_name: &str, bump: BumpType, summary: &str) -> Chan
         }],
         category: ChangeCategory::Changed,
         consumed_for_prerelease: None,
+        graduate: false,
     }
 }
 
@@ -869,7 +870,7 @@ mod tests {
     }
 
     #[test]
-    fn test_mock_list_changesets_filters_consumed() {
+    fn mock_list_changesets_filters_consumed() {
         let changeset_dir = PathBuf::from("/mock/.changeset");
         let unconsumed_path = changeset_dir.join("unconsumed.md");
         let consumed_path = changeset_dir.join("consumed.md");
@@ -892,7 +893,7 @@ mod tests {
     }
 
     #[test]
-    fn test_mock_list_consumed_changesets_returns_consumed() {
+    fn mock_list_consumed_changesets_returns_consumed() {
         let changeset_dir = PathBuf::from("/mock/.changeset");
         let unconsumed_path = changeset_dir.join("unconsumed.md");
         let consumed_path = changeset_dir.join("consumed.md");
@@ -915,7 +916,7 @@ mod tests {
     }
 
     #[test]
-    fn test_mock_mark_consumed_updates_state() {
+    fn mock_mark_consumed_updates_state() {
         let changeset_dir = PathBuf::from("/mock/.changeset");
         let path = changeset_dir.join("changeset.md");
 
@@ -947,7 +948,7 @@ mod tests {
     }
 
     #[test]
-    fn test_mock_clear_consumed_updates_state() {
+    fn mock_clear_consumed_updates_state() {
         let changeset_dir = PathBuf::from("/mock/.changeset");
         let path = changeset_dir.join("changeset.md");
 

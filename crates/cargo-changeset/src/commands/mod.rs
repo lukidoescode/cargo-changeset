@@ -104,7 +104,9 @@ pub(crate) struct ReleaseArgs {
     #[arg(long)]
     pub keep_changesets: bool,
 
-    /// Create a pre-release version (alpha, beta, rc, or custom tag).
+    /// Create a pre-release version with the specified tag.
+    /// Built-in tags: alpha, beta, rc. Custom tags are also supported
+    /// (e.g., --prerelease nightly, --prerelease canary, --prerelease dev).
     /// If tag is omitted on a pre-release version, reuses the current tag.
     /// To graduate a pre-release to stable, run without this flag.
     #[arg(long, value_name = "TAG", num_args = 0..=1, default_missing_value = "")]
@@ -113,6 +115,10 @@ pub(crate) struct ReleaseArgs {
     /// Force release without changesets (only valid for pre-release increment)
     #[arg(long, short = 'f')]
     pub force: bool,
+
+    /// Graduate all 0.x packages to 1.0.0
+    #[arg(long)]
+    pub graduate: bool,
 }
 
 pub(crate) struct ExecuteResult {

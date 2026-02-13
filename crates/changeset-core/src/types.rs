@@ -13,6 +13,14 @@ pub enum BumpType {
     Major,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ZeroVersionBehavior {
+    #[default]
+    EffectiveMinor,
+    AutoPromoteOnMajor,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -87,18 +95,33 @@ pub struct PackageRelease {
     pub bump_type: BumpType,
 }
 
+/// A changeset represents a single unit of change affecting one or more packages.
+///
+/// Changesets capture the intent to release: which packages are affected, what type of
+/// version bump each requires, and a human-readable summary of the change.
+///
+/// # Prerelease Consumption
+///
+/// The `consumed_for_prerelease` field tracks whether this changeset has been included
+/// in a prerelease. When set, it contains the prerelease version string (e.g., "1.0.1-alpha.1").
+/// Consumed changesets are excluded from subsequent prereleases but are aggregated into
+/// the changelog when graduating to a stable release.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Changeset {
     pub summary: String,
     pub releases: Vec<PackageRelease>,
     #[serde(default)]
     pub category: ChangeCategory,
+    /// Version string of the prerelease that consumed this changeset, if any.
+    /// Set during prerelease creation, cleared during graduation to stable.
     #[serde(
         default,
         skip_serializing_if = "Option::is_none",
         rename = "consumedForPrerelease"
     )]
     pub consumed_for_prerelease: Option<String>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub graduate: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

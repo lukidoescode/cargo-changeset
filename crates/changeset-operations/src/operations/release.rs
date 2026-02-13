@@ -24,6 +24,7 @@ pub struct ReleaseInput {
     pub keep_changesets: bool,
     pub prerelease: Option<PrereleaseSpec>,
     pub force: bool,
+    pub graduate: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -83,13 +84,22 @@ fn find_previous_tag(planned_releases: &[PackageVersion]) -> Option<String> {
     Some(previous_version.to_string())
 }
 
-fn is_graduation_release(packages: &[PackageInfo], input: &ReleaseInput) -> bool {
+fn is_prerelease_graduation(packages: &[PackageInfo], input: &ReleaseInput) -> bool {
     if input.prerelease.is_some() {
         return false;
     }
     packages
         .iter()
         .any(|p| changeset_version::is_prerelease(&p.version))
+}
+
+fn is_zero_graduation(packages: &[PackageInfo], input: &ReleaseInput) -> bool {
+    if !input.graduate {
+        return false;
+    }
+    packages
+        .iter()
+        .any(|p| changeset_version::is_zero_version(&p.version))
 }
 
 pub struct ReleaseOperation<P, RW, M, C, G> {
@@ -394,7 +404,9 @@ where
 
         let changeset_dir = project.root.join(root_config.changeset_dir());
         let changeset_files = self.changeset_io.list_changesets(&changeset_dir)?;
-        let is_graduating = is_graduation_release(&project.packages, input);
+        let is_prerelease_graduation = is_prerelease_graduation(&project.packages, input);
+        let is_zero_graduation = is_zero_graduation(&project.packages, input);
+        let is_graduating = is_prerelease_graduation || is_zero_graduation;
 
         if changeset_files.is_empty() && !is_graduating {
             if input.prerelease.is_some() && !input.force {
@@ -415,13 +427,24 @@ where
 
         let (changesets, aggregator) = self.load_changesets(&changeset_dir, &changeset_files)?;
 
-        let planned_releases = if is_graduating {
+        // Release type dispatch: selects the appropriate version planning strategy based on
+        // the current state and input flags. The three cases are mutually exclusive:
+        // 1. Zero graduation (0.x -> 1.0.0): when --graduate flag is set and packages are at 0.x
+        // 2. Prerelease graduation (X.Y.Z-tag.N -> X.Y.Z): stable release of existing prerelease
+        // 3. Normal release: standard bump or prerelease creation based on changesets
+        // A strategy pattern could improve OCP compliance, but the current approach is
+        // acceptable for three well-defined, stable cases.
+        let planned_releases = if is_zero_graduation {
+            VersionPlanner::plan_zero_graduation(&project.packages, input.prerelease.as_ref())?
+                .releases
+        } else if is_prerelease_graduation {
             VersionPlanner::plan_graduation(&project.packages)?.releases
         } else {
-            VersionPlanner::plan_releases_with_prerelease(
+            VersionPlanner::plan_releases_with_behavior(
                 &changesets,
                 &project.packages,
                 input.prerelease.as_ref(),
+                root_config.zero_version_behavior(),
             )?
             .releases
         };
@@ -477,7 +500,7 @@ where
         }
 
         let should_delete_changesets_actual =
-            should_delete_changesets && !is_prerelease_release && !is_graduating;
+            should_delete_changesets && !is_prerelease_release && !is_prerelease_graduation;
 
         let git_result = self.perform_git_operations(
             &project.root,
@@ -673,6 +696,7 @@ mod tests {
             keep_changesets: true,
             prerelease: None,
             force: false,
+            graduate: false,
         }
     }
 
@@ -877,6 +901,7 @@ mod tests {
             keep_changesets: true,
             prerelease: None,
             force: false,
+            graduate: false,
         };
 
         let result = operation
@@ -911,6 +936,7 @@ mod tests {
             keep_changesets: true,
             prerelease: None,
             force: false,
+            graduate: false,
         };
 
         let ReleaseOutcome::Executed(output) = operation
@@ -947,6 +973,7 @@ mod tests {
             keep_changesets: true,
             prerelease: None,
             force: false,
+            graduate: false,
         };
 
         let result = operation.execute(Path::new("/any"), &input);
@@ -975,6 +1002,7 @@ mod tests {
             keep_changesets: true,
             prerelease: None,
             force: false,
+            graduate: false,
         };
 
         let result = operation.execute(Path::new("/any"), &input);
@@ -1010,6 +1038,7 @@ mod tests {
             keep_changesets: true,
             prerelease: None,
             force: false,
+            graduate: false,
         };
 
         let ReleaseOutcome::Executed(_) = operation
@@ -1049,6 +1078,7 @@ mod tests {
             keep_changesets: true,
             prerelease: None,
             force: false,
+            graduate: false,
         };
 
         let result = operation.execute(Path::new("/any"), &input);
@@ -1080,6 +1110,7 @@ mod tests {
             keep_changesets: true,
             prerelease: None,
             force: false,
+            graduate: false,
         };
 
         let result = operation.execute(Path::new("/any"), &input);
@@ -1111,6 +1142,7 @@ mod tests {
             keep_changesets: false,
             prerelease: None,
             force: false,
+            graduate: false,
         };
 
         let result = operation.execute(Path::new("/any"), &input);
@@ -1144,6 +1176,7 @@ mod tests {
             keep_changesets: true,
             prerelease: None,
             force: false,
+            graduate: false,
         };
 
         let ReleaseOutcome::Executed(output) = operation
@@ -1189,6 +1222,7 @@ mod tests {
             keep_changesets: true,
             prerelease: None,
             force: false,
+            graduate: false,
         };
 
         let ReleaseOutcome::Executed(output) = operation
@@ -1232,6 +1266,7 @@ mod tests {
             keep_changesets: true,
             prerelease: None,
             force: false,
+            graduate: false,
         };
 
         let ReleaseOutcome::Executed(output) = operation
@@ -1272,6 +1307,7 @@ mod tests {
             keep_changesets: true,
             prerelease: None,
             force: false,
+            graduate: false,
         };
 
         let ReleaseOutcome::Executed(output) = operation
@@ -1315,6 +1351,7 @@ mod tests {
             keep_changesets: false,
             prerelease: None,
             force: false,
+            graduate: false,
         };
 
         let ReleaseOutcome::Executed(output) = operation
@@ -1358,6 +1395,7 @@ mod tests {
             keep_changesets: true,
             prerelease: None,
             force: false,
+            graduate: false,
         };
 
         let ReleaseOutcome::Executed(output) = operation
@@ -1403,6 +1441,7 @@ mod tests {
             keep_changesets: false,
             prerelease: None,
             force: false,
+            graduate: false,
         };
 
         let _ = operation
@@ -1450,6 +1489,7 @@ mod tests {
             keep_changesets: true,
             prerelease: None,
             force: false,
+            graduate: false,
         };
 
         let ReleaseOutcome::Executed(output) = operation
@@ -1473,7 +1513,7 @@ mod tests {
     }
 
     #[test]
-    fn test_prerelease_marks_changesets_as_consumed() {
+    fn prerelease_marks_changesets_as_consumed() {
         use std::sync::Arc;
 
         let project_provider = MockProjectProvider::single_package("my-crate", "1.0.0");
@@ -1498,6 +1538,7 @@ mod tests {
             keep_changesets: true,
             prerelease: Some(PrereleaseSpec::Alpha),
             force: false,
+            graduate: false,
         };
 
         let result = operation
@@ -1518,7 +1559,7 @@ mod tests {
     }
 
     #[test]
-    fn test_prerelease_increment_requires_changesets_or_force() {
+    fn prerelease_increment_requires_changesets_or_force() {
         let project_provider = MockProjectProvider::single_package("my-crate", "1.0.0");
         let changeset_reader = MockChangesetReader::new();
         let manifest_writer = MockManifestWriter::new();
@@ -1532,6 +1573,7 @@ mod tests {
             keep_changesets: true,
             prerelease: Some(PrereleaseSpec::Alpha),
             force: false,
+            graduate: false,
         };
 
         let result = operation.execute(Path::new("/any"), &input);
@@ -1543,7 +1585,7 @@ mod tests {
     }
 
     #[test]
-    fn test_prerelease_with_force_returns_no_changesets() {
+    fn prerelease_with_force_returns_no_changesets() {
         let project_provider = MockProjectProvider::single_package("my-crate", "1.0.0");
         let changeset_reader = MockChangesetReader::new();
         let manifest_writer = MockManifestWriter::new();
@@ -1557,6 +1599,7 @@ mod tests {
             keep_changesets: true,
             prerelease: Some(PrereleaseSpec::Alpha),
             force: true,
+            graduate: false,
         };
 
         let result = operation
@@ -1570,7 +1613,7 @@ mod tests {
     }
 
     #[test]
-    fn test_graduation_clears_consumed_flag() {
+    fn graduation_clears_consumed_flag() {
         use std::sync::Arc;
 
         let project_provider = MockProjectProvider::single_package("my-crate", "1.0.1-alpha.1");
@@ -1598,6 +1641,7 @@ mod tests {
             keep_changesets: true,
             prerelease: None,
             force: false,
+            graduate: false,
         };
 
         let result = operation
@@ -1614,7 +1658,7 @@ mod tests {
     }
 
     #[test]
-    fn test_graduation_aggregates_consumed_changesets_in_changelog() {
+    fn graduation_aggregates_consumed_changesets_in_changelog() {
         use std::sync::Arc;
 
         let project_provider = MockProjectProvider::single_package("my-crate", "1.0.1-alpha.1");
@@ -1646,6 +1690,7 @@ mod tests {
             keep_changesets: true,
             prerelease: None,
             force: false,
+            graduate: false,
         };
 
         let result = operation
@@ -1666,7 +1711,7 @@ mod tests {
     }
 
     #[test]
-    fn test_consumed_changesets_excluded_from_normal_release() {
+    fn consumed_changesets_excluded_from_normal_release() {
         use std::sync::Arc;
 
         let project_provider = MockProjectProvider::single_package("my-crate", "1.0.0");
@@ -1701,6 +1746,7 @@ mod tests {
             keep_changesets: true,
             prerelease: None,
             force: false,
+            graduate: false,
         };
 
         let result = operation
@@ -1730,7 +1776,7 @@ mod tests {
     }
 
     #[test]
-    fn test_prerelease_with_different_tag_resets_number() {
+    fn prerelease_with_different_tag_resets_number() {
         use std::sync::Arc;
 
         let project_provider = MockProjectProvider::single_package("my-crate", "1.0.1-alpha.2");
@@ -1755,6 +1801,7 @@ mod tests {
             keep_changesets: true,
             prerelease: Some(PrereleaseSpec::Beta),
             force: false,
+            graduate: false,
         };
 
         let result = operation
@@ -1770,6 +1817,126 @@ mod tests {
             output.planned_releases[0].new_version.to_string(),
             "1.0.1-beta.1",
             "switching prerelease tag should reset number to 1"
+        );
+    }
+
+    #[test]
+    fn zero_graduation_deletes_changesets() {
+        use std::sync::Arc;
+
+        let project_provider = MockProjectProvider::single_package("my-crate", "0.5.0");
+        let changeset_path = PathBuf::from(".changeset/feature.md");
+        let changeset = make_changeset("my-crate", BumpType::Minor, "Add feature");
+        let changeset_reader =
+            Arc::new(MockChangesetReader::new().with_changeset(changeset_path.clone(), changeset));
+        let manifest_writer = MockManifestWriter::new();
+        let git_provider = Arc::new(MockGitProvider::new());
+
+        let operation = ReleaseOperation::new(
+            project_provider,
+            Arc::clone(&changeset_reader),
+            manifest_writer,
+            MockChangelogWriter::new(),
+            Arc::clone(&git_provider),
+        );
+        let input = ReleaseInput {
+            dry_run: false,
+            convert_inherited: false,
+            no_commit: true,
+            no_tags: true,
+            keep_changesets: false,
+            prerelease: None,
+            force: false,
+            graduate: true,
+        };
+
+        let ReleaseOutcome::Executed(output) = operation
+            .execute(Path::new("/any"), &input)
+            .expect("zero graduation should succeed")
+        else {
+            panic!("expected Executed outcome");
+        };
+
+        assert_eq!(
+            output.planned_releases[0].new_version.to_string(),
+            "1.0.0",
+            "zero graduation should bump to 1.0.0"
+        );
+
+        let git_result = output.git_result.expect("should have git result");
+        assert_eq!(
+            git_result.changesets_deleted.len(),
+            1,
+            "zero graduation should delete changesets"
+        );
+        assert!(
+            git_result.changesets_deleted.contains(&changeset_path),
+            "deleted list should contain the changeset file"
+        );
+
+        let deleted_files = git_provider.deleted_files();
+        assert!(
+            deleted_files.contains(&changeset_path),
+            "changeset file should be deleted via git provider"
+        );
+    }
+
+    #[test]
+    fn prerelease_graduation_preserves_changesets() {
+        use std::sync::Arc;
+
+        let project_provider = MockProjectProvider::single_package("my-crate", "1.0.1-alpha.1");
+        let consumed_path = PathBuf::from(".changeset/consumed.md");
+        let changeset = make_changeset("my-crate", BumpType::Patch, "Fix bug");
+        let changeset_reader = Arc::new(MockChangesetReader::new().with_consumed_changeset(
+            consumed_path.clone(),
+            changeset,
+            "1.0.1-alpha.1".to_string(),
+        ));
+        let manifest_writer = MockManifestWriter::new();
+        let git_provider = Arc::new(MockGitProvider::new());
+
+        let operation = ReleaseOperation::new(
+            project_provider,
+            Arc::clone(&changeset_reader),
+            manifest_writer,
+            MockChangelogWriter::new(),
+            Arc::clone(&git_provider),
+        );
+        let input = ReleaseInput {
+            dry_run: false,
+            convert_inherited: false,
+            no_commit: true,
+            no_tags: true,
+            keep_changesets: false,
+            prerelease: None,
+            force: false,
+            graduate: false,
+        };
+
+        let ReleaseOutcome::Executed(output) = operation
+            .execute(Path::new("/any"), &input)
+            .expect("prerelease graduation should succeed")
+        else {
+            panic!("expected Executed outcome");
+        };
+
+        assert_eq!(
+            output.planned_releases[0].new_version.to_string(),
+            "1.0.1",
+            "prerelease graduation should remove prerelease suffix"
+        );
+
+        let git_result = output.git_result.expect("should have git result");
+        assert!(
+            git_result.changesets_deleted.is_empty(),
+            "prerelease graduation should NOT delete changesets (they were already consumed)"
+        );
+
+        let deleted_files = git_provider.deleted_files();
+        assert!(
+            deleted_files.is_empty(),
+            "no files should be deleted during prerelease graduation"
         );
     }
 }

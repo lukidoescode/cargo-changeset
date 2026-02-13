@@ -100,6 +100,7 @@ where
             releases,
             category,
             consumed_for_prerelease: None,
+            graduate: false,
         };
 
         let (root_config, _) = self.project_provider.load_configs(&project)?;
