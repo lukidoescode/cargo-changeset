@@ -154,14 +154,14 @@ fn run_release(
     convert_inherited: bool,
 ) -> Result<ReleaseOutcome, OperationError> {
     let project_provider = FileSystemProjectProvider::new();
-    let changeset_reader = FileSystemChangesetIO::new(dir.path());
+    let changeset_io = FileSystemChangesetIO::new(dir.path());
     let manifest_writer = FileSystemManifestWriter::new();
     let changelog_writer = FileSystemChangelogWriter::new();
     let git_provider = Git2Provider::new();
 
     let operation = ReleaseOperation::new(
         project_provider,
-        changeset_reader,
+        changeset_io,
         manifest_writer,
         changelog_writer,
         git_provider,
@@ -172,6 +172,8 @@ fn run_release(
         no_commit: true,
         no_tags: true,
         keep_changesets: true,
+        prerelease: None,
+        force: false,
     };
 
     operation.execute(dir.path(), &input)
@@ -570,6 +572,8 @@ fn run_release_with_git(
         no_commit,
         no_tags,
         keep_changesets,
+        prerelease: None,
+        force: false,
     };
 
     operation.execute(dir.path(), &input)

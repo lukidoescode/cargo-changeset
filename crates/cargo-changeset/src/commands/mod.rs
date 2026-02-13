@@ -92,6 +92,15 @@ pub(crate) struct ReleaseArgs {
     /// Keep changeset files after release (do not delete them)
     #[arg(long)]
     pub keep_changesets: bool,
+
+    /// Create a pre-release version. Optionally specify tag (alpha, beta, rc, or custom).
+    /// If omitted on a pre-release version, reuses the current tag.
+    #[arg(long, value_name = "TAG", num_args = 0..=1, default_missing_value = "")]
+    pub prerelease: Option<String>,
+
+    /// Force release without changesets (only valid for pre-release increment)
+    #[arg(long, short = 'f')]
+    pub force: bool,
 }
 
 pub(crate) struct ExecuteResult {

@@ -108,7 +108,7 @@ impl ProjectProvider for MockProjectProvider {
 }
 
 pub struct MockChangesetReader {
-    changesets: HashMap<PathBuf, Changeset>,
+    changesets: Arc<Mutex<HashMap<PathBuf, Changeset>>>,
     listed_files: Vec<PathBuf>,
 }
 
@@ -116,25 +116,68 @@ impl MockChangesetReader {
     #[must_use]
     pub fn new() -> Self {
         Self {
-            changesets: HashMap::new(),
+            changesets: Arc::new(Mutex::new(HashMap::new())),
             listed_files: Vec::new(),
         }
     }
 
+    /// # Panics
+    ///
+    /// Panics if the internal mutex is poisoned.
     #[must_use]
     pub fn with_changeset(mut self, path: PathBuf, changeset: Changeset) -> Self {
         self.listed_files.push(path.clone());
-        self.changesets.insert(path, changeset);
+        self.changesets
+            .lock()
+            .expect("lock poisoned")
+            .insert(path, changeset);
         self
     }
 
+    /// # Panics
+    ///
+    /// Panics if the internal mutex is poisoned.
     #[must_use]
     pub fn with_changesets(mut self, changesets: Vec<(PathBuf, Changeset)>) -> Self {
-        for (path, changeset) in changesets {
-            self.listed_files.push(path.clone());
-            self.changesets.insert(path, changeset);
+        {
+            let mut locked = self.changesets.lock().expect("lock poisoned");
+            for (path, changeset) in changesets {
+                self.listed_files.push(path.clone());
+                locked.insert(path, changeset);
+            }
         }
         self
+    }
+
+    /// # Panics
+    ///
+    /// Panics if the internal mutex is poisoned.
+    #[must_use]
+    pub fn with_consumed_changeset(
+        mut self,
+        path: PathBuf,
+        mut changeset: Changeset,
+        version: String,
+    ) -> Self {
+        changeset.consumed_for_prerelease = Some(version);
+        self.listed_files.push(path.clone());
+        self.changesets
+            .lock()
+            .expect("lock poisoned")
+            .insert(path, changeset);
+        self
+    }
+
+    /// # Panics
+    ///
+    /// Panics if the internal mutex is poisoned.
+    #[must_use]
+    pub fn get_consumed_status(&self, path: &Path) -> Option<String> {
+        self.changesets
+            .lock()
+            .expect("lock poisoned")
+            .get(path)
+            .and_then(|c| c.consumed_for_prerelease.clone())
     }
 }
 
@@ -147,6 +190,8 @@ impl Default for MockChangesetReader {
 impl ChangesetReader for MockChangesetReader {
     fn read_changeset(&self, path: &Path) -> Result<Changeset> {
         self.changesets
+            .lock()
+            .expect("lock poisoned")
             .get(path)
             .cloned()
             .ok_or_else(|| crate::OperationError::ChangesetFileRead {
@@ -156,7 +201,103 @@ impl ChangesetReader for MockChangesetReader {
     }
 
     fn list_changesets(&self, _changeset_dir: &Path) -> Result<Vec<PathBuf>> {
-        Ok(self.listed_files.clone())
+        let changesets = self.changesets.lock().expect("lock poisoned");
+        Ok(self
+            .listed_files
+            .iter()
+            .filter(|p| {
+                changesets
+                    .get(*p)
+                    .is_some_and(|c| c.consumed_for_prerelease.is_none())
+            })
+            .cloned()
+            .collect())
+    }
+
+    fn list_consumed_changesets(&self, _changeset_dir: &Path) -> Result<Vec<PathBuf>> {
+        let changesets = self.changesets.lock().expect("lock poisoned");
+        Ok(self
+            .listed_files
+            .iter()
+            .filter(|p| {
+                changesets
+                    .get(*p)
+                    .is_some_and(|c| c.consumed_for_prerelease.is_some())
+            })
+            .cloned()
+            .collect())
+    }
+}
+
+impl ChangesetWriter for MockChangesetReader {
+    fn write_changeset(&self, _changeset_dir: &Path, _changeset: &Changeset) -> Result<String> {
+        Ok("mock-changeset.md".to_string())
+    }
+
+    fn filename_exists(&self, _changeset_dir: &Path, _filename: &str) -> bool {
+        false
+    }
+
+    fn mark_consumed_for_prerelease(
+        &self,
+        _changeset_dir: &Path,
+        paths: &[&Path],
+        version: &Version,
+    ) -> Result<()> {
+        let mut changesets = self.changesets.lock().expect("lock poisoned");
+        for path in paths {
+            if let Some(changeset) = changesets.get_mut(*path) {
+                changeset.consumed_for_prerelease = Some(version.to_string());
+            }
+        }
+        Ok(())
+    }
+
+    fn clear_consumed_for_prerelease(&self, _changeset_dir: &Path, paths: &[&Path]) -> Result<()> {
+        let mut changesets = self.changesets.lock().expect("lock poisoned");
+        for path in paths {
+            if let Some(changeset) = changesets.get_mut(*path) {
+                changeset.consumed_for_prerelease = None;
+            }
+        }
+        Ok(())
+    }
+}
+
+impl ChangesetReader for Arc<MockChangesetReader> {
+    fn read_changeset(&self, path: &Path) -> Result<Changeset> {
+        (**self).read_changeset(path)
+    }
+
+    fn list_changesets(&self, changeset_dir: &Path) -> Result<Vec<PathBuf>> {
+        (**self).list_changesets(changeset_dir)
+    }
+
+    fn list_consumed_changesets(&self, changeset_dir: &Path) -> Result<Vec<PathBuf>> {
+        (**self).list_consumed_changesets(changeset_dir)
+    }
+}
+
+impl ChangesetWriter for Arc<MockChangesetReader> {
+    fn write_changeset(&self, changeset_dir: &Path, changeset: &Changeset) -> Result<String> {
+        (**self).write_changeset(changeset_dir, changeset)
+    }
+
+    fn filename_exists(&self, changeset_dir: &Path, filename: &str) -> bool {
+        (**self).filename_exists(changeset_dir, filename)
+    }
+
+    fn mark_consumed_for_prerelease(
+        &self,
+        changeset_dir: &Path,
+        paths: &[&Path],
+        version: &Version,
+    ) -> Result<()> {
+        (**self).mark_consumed_for_prerelease(changeset_dir, paths, version)
+    }
+
+    fn clear_consumed_for_prerelease(&self, changeset_dir: &Path, paths: &[&Path]) -> Result<()> {
+        (**self).clear_consumed_for_prerelease(changeset_dir, paths)
     }
 }
 
@@ -206,6 +347,19 @@ impl ChangesetWriter for MockChangesetWriter {
 
     fn filename_exists(&self, _changeset_dir: &Path, _filename: &str) -> bool {
         false
+    }
+
+    fn mark_consumed_for_prerelease(
+        &self,
+        _changeset_dir: &Path,
+        _paths: &[&Path],
+        _version: &Version,
+    ) -> Result<()> {
+        Ok(())
+    }
+
+    fn clear_consumed_for_prerelease(&self, _changeset_dir: &Path, _paths: &[&Path]) -> Result<()> {
+        Ok(())
     }
 }
 
@@ -487,6 +641,7 @@ pub fn make_changeset(package_name: &str, bump: BumpType, summary: &str) -> Chan
             bump_type: bump,
         }],
         category: ChangeCategory::Changed,
+        consumed_for_prerelease: None,
     }
 }
 
@@ -647,6 +802,22 @@ impl ChangelogWriter for MockChangelogWriter {
     }
 }
 
+impl ChangelogWriter for Arc<MockChangelogWriter> {
+    fn write_release(
+        &self,
+        changelog_path: &Path,
+        release: &VersionRelease,
+        repo_info: Option<&RepositoryInfo>,
+        previous_version: Option<&str>,
+    ) -> Result<ChangelogWriteResult> {
+        (**self).write_release(changelog_path, release, repo_info, previous_version)
+    }
+
+    fn changelog_exists(&self, path: &Path) -> bool {
+        (**self).changelog_exists(path)
+    }
+}
+
 pub struct MockInheritedVersionChecker {
     inherited_paths: HashSet<PathBuf>,
 }
@@ -686,5 +857,126 @@ impl InheritedVersionChecker for FailingInheritedVersionChecker {
             std::io::ErrorKind::PermissionDenied,
             format!("mock read error for {}", manifest_path.display()),
         )))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn make_test_changeset(name: &str) -> Changeset {
+        make_changeset(name, BumpType::Patch, &format!("Fix {name}"))
+    }
+
+    #[test]
+    fn test_mock_list_changesets_filters_consumed() {
+        let changeset_dir = PathBuf::from("/mock/.changeset");
+        let unconsumed_path = changeset_dir.join("unconsumed.md");
+        let consumed_path = changeset_dir.join("consumed.md");
+
+        let reader = MockChangesetReader::new()
+            .with_changeset(unconsumed_path.clone(), make_test_changeset("pkg-a"))
+            .with_consumed_changeset(
+                consumed_path.clone(),
+                make_test_changeset("pkg-b"),
+                "1.0.0-pre.1".to_string(),
+            );
+
+        let listed = reader
+            .list_changesets(&changeset_dir)
+            .expect("list_changesets should succeed");
+
+        assert_eq!(listed.len(), 1);
+        assert!(listed.contains(&unconsumed_path));
+        assert!(!listed.contains(&consumed_path));
+    }
+
+    #[test]
+    fn test_mock_list_consumed_changesets_returns_consumed() {
+        let changeset_dir = PathBuf::from("/mock/.changeset");
+        let unconsumed_path = changeset_dir.join("unconsumed.md");
+        let consumed_path = changeset_dir.join("consumed.md");
+
+        let reader = MockChangesetReader::new()
+            .with_changeset(unconsumed_path.clone(), make_test_changeset("pkg-a"))
+            .with_consumed_changeset(
+                consumed_path.clone(),
+                make_test_changeset("pkg-b"),
+                "1.0.0-pre.1".to_string(),
+            );
+
+        let consumed = reader
+            .list_consumed_changesets(&changeset_dir)
+            .expect("list_consumed_changesets should succeed");
+
+        assert_eq!(consumed.len(), 1);
+        assert!(consumed.contains(&consumed_path));
+        assert!(!consumed.contains(&unconsumed_path));
+    }
+
+    #[test]
+    fn test_mock_mark_consumed_updates_state() {
+        let changeset_dir = PathBuf::from("/mock/.changeset");
+        let path = changeset_dir.join("changeset.md");
+
+        let reader =
+            MockChangesetReader::new().with_changeset(path.clone(), make_test_changeset("pkg-a"));
+
+        assert!(reader.get_consumed_status(&path).is_none());
+
+        let version: Version = "2.0.0-pre.1".parse().expect("valid version");
+        reader
+            .mark_consumed_for_prerelease(&changeset_dir, &[path.as_path()], &version)
+            .expect("mark_consumed should succeed");
+
+        assert_eq!(
+            reader.get_consumed_status(&path),
+            Some("2.0.0-pre.1".to_string())
+        );
+
+        let listed = reader
+            .list_changesets(&changeset_dir)
+            .expect("list_changesets should succeed");
+        assert!(listed.is_empty());
+
+        let consumed = reader
+            .list_consumed_changesets(&changeset_dir)
+            .expect("list_consumed_changesets should succeed");
+        assert_eq!(consumed.len(), 1);
+        assert!(consumed.contains(&path));
+    }
+
+    #[test]
+    fn test_mock_clear_consumed_updates_state() {
+        let changeset_dir = PathBuf::from("/mock/.changeset");
+        let path = changeset_dir.join("changeset.md");
+
+        let reader = MockChangesetReader::new().with_consumed_changeset(
+            path.clone(),
+            make_test_changeset("pkg-a"),
+            "1.0.0-pre.1".to_string(),
+        );
+
+        assert_eq!(
+            reader.get_consumed_status(&path),
+            Some("1.0.0-pre.1".to_string())
+        );
+
+        reader
+            .clear_consumed_for_prerelease(&changeset_dir, &[path.as_path()])
+            .expect("clear_consumed should succeed");
+
+        assert!(reader.get_consumed_status(&path).is_none());
+
+        let consumed = reader
+            .list_consumed_changesets(&changeset_dir)
+            .expect("list_consumed_changesets should succeed");
+        assert!(consumed.is_empty());
+
+        let listed = reader
+            .list_changesets(&changeset_dir)
+            .expect("list_changesets should succeed");
+        assert_eq!(listed.len(), 1);
+        assert!(listed.contains(&path));
     }
 }

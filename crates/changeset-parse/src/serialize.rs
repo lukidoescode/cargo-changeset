@@ -10,6 +10,11 @@ use crate::parse::FRONT_MATTER_DELIMITER;
 struct FrontMatterOutput<'a> {
     #[serde(skip_serializing_if = "is_default_category")]
     category: ChangeCategory,
+    #[serde(
+        skip_serializing_if = "Option::is_none",
+        rename = "consumedForPrerelease"
+    )]
+    consumed_for_prerelease: Option<&'a str>,
     #[serde(flatten)]
     releases: IndexMap<&'a str, BumpType>,
 }
@@ -32,6 +37,7 @@ pub fn serialize_changeset(changeset: &Changeset) -> Result<String, FormatError>
 
     let front_matter = FrontMatterOutput {
         category: changeset.category,
+        consumed_for_prerelease: changeset.consumed_for_prerelease.as_deref(),
         releases: releases_map,
     };
 
@@ -74,6 +80,7 @@ mod tests {
                 },
             ],
             category: ChangeCategory::default(),
+            consumed_for_prerelease: None,
         };
 
         let serialized = serialize_changeset(&original).expect("should serialize");
@@ -82,6 +89,10 @@ mod tests {
         assert_eq!(parsed.summary, original.summary);
         assert_eq!(parsed.releases.len(), original.releases.len());
         assert_eq!(parsed.category, original.category);
+        assert_eq!(
+            parsed.consumed_for_prerelease,
+            original.consumed_for_prerelease
+        );
 
         for (original_release, parsed_release) in
             original.releases.iter().zip(parsed.releases.iter())
@@ -110,6 +121,7 @@ mod tests {
                 },
             ],
             category: ChangeCategory::default(),
+            consumed_for_prerelease: None,
         };
 
         let serialized = serialize_changeset(&original).expect("should serialize");
@@ -126,6 +138,7 @@ mod tests {
             summary: "Some summary".to_string(),
             releases: vec![],
             category: ChangeCategory::default(),
+            consumed_for_prerelease: None,
         };
 
         let err = serialize_changeset(&changeset).expect_err("should fail");
@@ -141,6 +154,7 @@ mod tests {
                 bump_type: BumpType::Patch,
             }],
             category: ChangeCategory::Fixed,
+            consumed_for_prerelease: None,
         };
 
         let serialized = serialize_changeset(&original).expect("should serialize");
@@ -159,6 +173,7 @@ mod tests {
                 bump_type: BumpType::Minor,
             }],
             category: ChangeCategory::Changed,
+            consumed_for_prerelease: None,
         };
 
         let serialized = serialize_changeset(&changeset).expect("should serialize");
@@ -177,12 +192,78 @@ mod tests {
                 bump_type: BumpType::Patch,
             }],
             category: ChangeCategory::Security,
+            consumed_for_prerelease: None,
         };
 
         let serialized = serialize_changeset(&changeset).expect("should serialize");
         assert!(
             serialized.contains("category: security"),
             "Non-default category should be serialized"
+        );
+    }
+
+    #[test]
+    fn roundtrip_with_consumed_for_prerelease() {
+        let original = Changeset {
+            summary: "Pre-release fix".to_string(),
+            releases: vec![PackageRelease {
+                name: "my-crate".to_string(),
+                bump_type: BumpType::Patch,
+            }],
+            category: ChangeCategory::Fixed,
+            consumed_for_prerelease: Some("1.0.1-alpha.1".to_string()),
+        };
+
+        let serialized = serialize_changeset(&original).expect("should serialize");
+        let parsed = parse_changeset(&serialized).expect("should parse");
+
+        assert_eq!(
+            parsed.consumed_for_prerelease,
+            Some("1.0.1-alpha.1".to_string())
+        );
+        assert_eq!(parsed.category, ChangeCategory::Fixed);
+        assert_eq!(parsed.summary, original.summary);
+    }
+
+    #[test]
+    fn consumed_for_prerelease_serialized_with_camel_case() {
+        let changeset = Changeset {
+            summary: "Some change".to_string(),
+            releases: vec![PackageRelease {
+                name: "my-crate".to_string(),
+                bump_type: BumpType::Minor,
+            }],
+            category: ChangeCategory::Changed,
+            consumed_for_prerelease: Some("2.0.0-beta.3".to_string()),
+        };
+
+        let serialized = serialize_changeset(&changeset).expect("should serialize");
+        assert!(
+            serialized.contains("consumedForPrerelease:"),
+            "consumedForPrerelease should be serialized with camelCase, got: {serialized}"
+        );
+        assert!(
+            serialized.contains("2.0.0-beta.3"),
+            "version value should be present in serialized output, got: {serialized}"
+        );
+    }
+
+    #[test]
+    fn consumed_for_prerelease_none_not_serialized() {
+        let changeset = Changeset {
+            summary: "Some change".to_string(),
+            releases: vec![PackageRelease {
+                name: "my-crate".to_string(),
+                bump_type: BumpType::Minor,
+            }],
+            category: ChangeCategory::Changed,
+            consumed_for_prerelease: None,
+        };
+
+        let serialized = serialize_changeset(&changeset).expect("should serialize");
+        assert!(
+            !serialized.contains("consumedForPrerelease"),
+            "None consumed_for_prerelease should not be serialized"
         );
     }
 }

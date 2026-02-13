@@ -15,6 +15,8 @@ const MAX_INPUT_SIZE: usize = 100 * 1024 * 1024;
 struct FrontMatter {
     #[serde(default)]
     category: ChangeCategory,
+    #[serde(default, rename = "consumedForPrerelease")]
+    consumed_for_prerelease: Option<String>,
     #[serde(flatten)]
     #[serde_as(as = "MapPreventDuplicates<_, _>")]
     releases: IndexMap<String, BumpType>,
@@ -92,6 +94,7 @@ pub fn parse_changeset(content: &str) -> Result<Changeset, FormatError> {
         summary: body.trim().to_string(),
         releases,
         category: parsed.category,
+        consumed_for_prerelease: parsed.consumed_for_prerelease,
     })
 }
 
@@ -424,5 +427,67 @@ Some summary.
 
         let err = parse_changeset(content).expect_err("should fail");
         assert!(err.to_string().contains("YAML"));
+    }
+
+    #[test]
+    fn consumed_for_prerelease_defaults_to_none() {
+        let content = r#"---
+"my-crate": patch
+---
+Some summary.
+"#;
+
+        let changeset = parse_changeset(content).expect("should parse");
+        assert_eq!(changeset.consumed_for_prerelease, None);
+    }
+
+    #[test]
+    fn parses_consumed_for_prerelease() {
+        let content = r#"---
+consumedForPrerelease: 1.0.1-alpha.1
+"my-crate": patch
+---
+Some summary.
+"#;
+
+        let changeset = parse_changeset(content).expect("should parse");
+        assert_eq!(
+            changeset.consumed_for_prerelease,
+            Some("1.0.1-alpha.1".to_string())
+        );
+    }
+
+    #[test]
+    fn parses_consumed_for_prerelease_with_category() {
+        let content = r#"---
+category: fixed
+consumedForPrerelease: 2.0.0-beta.3
+"my-crate": patch
+---
+Fixed a bug.
+"#;
+
+        let changeset = parse_changeset(content).expect("should parse");
+        assert_eq!(changeset.category, ChangeCategory::Fixed);
+        assert_eq!(
+            changeset.consumed_for_prerelease,
+            Some("2.0.0-beta.3".to_string())
+        );
+    }
+
+    #[test]
+    fn parses_consumed_for_prerelease_with_quoted_value() {
+        let content = r#"---
+consumedForPrerelease: "1.2.3-rc.1"
+"my-crate": minor
+---
+Release candidate.
+"#;
+
+        let changeset = parse_changeset(content).expect("should parse");
+        assert_eq!(
+            changeset.consumed_for_prerelease,
+            Some("1.2.3-rc.1".to_string())
+        );
     }
 }

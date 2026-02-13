@@ -17,6 +17,7 @@ changeset-core = { workspace = true }
 changeset-git = { workspace = true }
 changeset-operations = { workspace = true }
 changeset-project = { workspace = true }
+changeset-version = { workspace = true }
 clap = { workspace = true }
 dialoguer = { workspace = true }
 tempfile = "3.25"
