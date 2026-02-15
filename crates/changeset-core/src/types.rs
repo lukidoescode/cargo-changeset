@@ -158,9 +158,17 @@ impl fmt::Display for PrereleaseSpec {
 }
 
 impl FromStr for PrereleaseSpec {
-    type Err = std::convert::Infallible;
+    type Err = crate::error::PrereleaseSpecParseError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
+        if s.is_empty() {
+            return Err(Self::Err::Empty);
+        }
+
+        if let Some(invalid_char) = s.chars().find(|c| !c.is_ascii_alphanumeric() && *c != '-') {
+            return Err(Self::Err::InvalidCharacter(s.to_string(), invalid_char));
+        }
+
         Ok(match s.to_lowercase().as_str() {
             "alpha" => Self::Alpha,
             "beta" => Self::Beta,
@@ -238,5 +246,53 @@ mod prerelease_spec_tests {
     fn value_enum_variants() {
         let variants = PrereleaseSpec::value_variants();
         assert_eq!(variants.len(), 3);
+    }
+
+    #[test]
+    fn from_str_rejects_empty_string() {
+        let result = "".parse::<PrereleaseSpec>();
+        assert!(result.is_err());
+        assert_eq!(
+            result.unwrap_err(),
+            crate::error::PrereleaseSpecParseError::Empty
+        );
+    }
+
+    #[test]
+    fn from_str_rejects_invalid_characters() {
+        let result = "alpha.1".parse::<PrereleaseSpec>();
+        assert!(result.is_err());
+        assert_eq!(
+            result.unwrap_err(),
+            crate::error::PrereleaseSpecParseError::InvalidCharacter("alpha.1".to_string(), '.')
+        );
+
+        let result = "pre release".parse::<PrereleaseSpec>();
+        assert!(result.is_err());
+        assert_eq!(
+            result.unwrap_err(),
+            crate::error::PrereleaseSpecParseError::InvalidCharacter(
+                "pre release".to_string(),
+                ' '
+            )
+        );
+
+        let result = "alpha_beta".parse::<PrereleaseSpec>();
+        assert!(result.is_err());
+        assert_eq!(
+            result.unwrap_err(),
+            crate::error::PrereleaseSpecParseError::InvalidCharacter("alpha_beta".to_string(), '_')
+        );
+    }
+
+    #[test]
+    fn from_str_accepts_valid_semver_identifiers() {
+        assert!("alpha".parse::<PrereleaseSpec>().is_ok());
+        assert!("alpha-1".parse::<PrereleaseSpec>().is_ok());
+        assert!("pre-release-2".parse::<PrereleaseSpec>().is_ok());
+        assert!("0".parse::<PrereleaseSpec>().is_ok());
+        assert!("123".parse::<PrereleaseSpec>().is_ok());
+        assert!("abc123".parse::<PrereleaseSpec>().is_ok());
+        assert!("ABC-123-xyz".parse::<PrereleaseSpec>().is_ok());
     }
 }

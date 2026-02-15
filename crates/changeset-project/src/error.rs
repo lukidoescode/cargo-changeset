@@ -44,4 +44,11 @@ pub enum ProjectError {
         #[source]
         source: globset::Error,
     },
+
+    #[error("failed to create directory '{path}'")]
+    DirectoryCreate {
+        path: PathBuf,
+        #[source]
+        source: std::io::Error,
+    },
 }

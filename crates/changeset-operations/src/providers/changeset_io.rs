@@ -3,6 +3,7 @@ use std::path::{Path, PathBuf};
 
 use changeset_core::Changeset;
 use changeset_parse::{parse_changeset, serialize_changeset};
+use changeset_project::CHANGESETS_SUBDIR;
 use semver::Version;
 
 use crate::Result;
@@ -48,26 +49,34 @@ impl ChangesetReader for FileSystemChangesetIO {
 }
 
 impl FileSystemChangesetIO {
+    fn resolve_base_path(&self, changeset_dir: &Path) -> PathBuf {
+        if changeset_dir.is_absolute() {
+            changeset_dir.to_path_buf()
+        } else {
+            self.project_root.join(changeset_dir)
+        }
+    }
+
     fn list_changesets_filtered(
         &self,
         changeset_dir: &Path,
         consumed_only: bool,
     ) -> Result<Vec<PathBuf>> {
-        let full_path = if changeset_dir.is_absolute() {
-            changeset_dir.to_path_buf()
-        } else {
-            self.project_root.join(changeset_dir)
+        let base_path = self.resolve_base_path(changeset_dir);
+        let full_path = base_path.join(CHANGESETS_SUBDIR);
+
+        let entries = match fs::read_dir(&full_path) {
+            Ok(entries) => entries,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+            Err(source) => {
+                return Err(OperationError::ChangesetList {
+                    path: full_path,
+                    source,
+                });
+            }
         };
 
-        if !full_path.exists() {
-            return Ok(Vec::new());
-        }
-
         let mut changesets = Vec::new();
-        let entries = fs::read_dir(&full_path).map_err(|source| OperationError::ChangesetList {
-            path: full_path.clone(),
-            source,
-        })?;
 
         for entry in entries {
             let entry = entry.map_err(|source| OperationError::ChangesetList {
@@ -108,18 +117,20 @@ impl FileSystemChangesetIO {
 }
 
 impl FileSystemChangesetIO {
-    fn resolve_changeset_path(&self, changeset_dir: &Path, path: &Path) -> PathBuf {
+    fn resolve_changeset_path(&self, changeset_dir: &Path, path: &Path) -> Result<PathBuf> {
         if path.is_absolute() {
-            path.to_path_buf()
+            Ok(path.to_path_buf())
         } else if path.starts_with(changeset_dir) {
-            self.project_root.join(path)
+            Ok(self.project_root.join(path))
         } else {
-            let full_changeset_dir = if changeset_dir.is_absolute() {
-                changeset_dir.to_path_buf()
-            } else {
-                self.project_root.join(changeset_dir)
-            };
-            full_changeset_dir.join(path.file_name().unwrap_or(path.as_ref()))
+            let full_changeset_dir = self.resolve_base_path(changeset_dir);
+            let filename =
+                path.file_name()
+                    .ok_or_else(|| OperationError::InvalidChangesetPath {
+                        path: path.to_path_buf(),
+                        reason: "path has no filename component",
+                    })?;
+            Ok(full_changeset_dir.join(CHANGESETS_SUBDIR).join(filename))
         }
     }
 }
@@ -150,8 +161,9 @@ where
 
 impl ChangesetWriter for FileSystemChangesetIO {
     fn write_changeset(&self, changeset_dir: &Path, changeset: &Changeset) -> Result<String> {
-        let filename = generate_unique_filename(changeset_dir);
-        let file_path = changeset_dir.join(&filename);
+        let changesets_subdir = changeset_dir.join(CHANGESETS_SUBDIR);
+        let filename = generate_unique_filename(&changesets_subdir);
+        let file_path = changesets_subdir.join(&filename);
 
         let content = serialize_changeset(changeset)?;
         fs::write(&file_path, content).map_err(OperationError::ChangesetFileWrite)?;
@@ -160,7 +172,10 @@ impl ChangesetWriter for FileSystemChangesetIO {
     }
 
     fn filename_exists(&self, changeset_dir: &Path, filename: &str) -> bool {
-        changeset_dir.join(filename).exists()
+        changeset_dir
+            .join(CHANGESETS_SUBDIR)
+            .join(filename)
+            .exists()
     }
 
     fn mark_consumed_for_prerelease(
@@ -171,7 +186,7 @@ impl ChangesetWriter for FileSystemChangesetIO {
     ) -> Result<()> {
         let version_string = version.to_string();
         for path in paths {
-            let full_path = self.resolve_changeset_path(changeset_dir, path);
+            let full_path = self.resolve_changeset_path(changeset_dir, path)?;
             update_changeset_file(&full_path, |changeset| {
                 changeset.consumed_for_prerelease = Some(version_string.clone());
             })?;
@@ -181,7 +196,7 @@ impl ChangesetWriter for FileSystemChangesetIO {
 
     fn clear_consumed_for_prerelease(&self, changeset_dir: &Path, paths: &[&Path]) -> Result<()> {
         for path in paths {
-            let full_path = self.resolve_changeset_path(changeset_dir, path);
+            let full_path = self.resolve_changeset_path(changeset_dir, path)?;
             update_changeset_file(&full_path, |changeset| {
                 changeset.consumed_for_prerelease = None;
             })?;

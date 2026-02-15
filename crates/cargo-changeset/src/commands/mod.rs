@@ -1,5 +1,6 @@
 mod add;
 mod init;
+mod manage;
 mod release;
 mod status;
 mod verify;
@@ -24,16 +25,24 @@ pub(crate) enum Commands {
         verbatim_doc_comment,
         after_long_help = "\
 Pre-release workflow:
-  1. cargo changeset release --prerelease alpha  → 1.0.0 becomes 1.0.1-alpha.1
-  2. cargo changeset release --prerelease        → increments to 1.0.1-alpha.2
-  3. cargo changeset release                     → graduates to stable 1.0.1
+  1. cargo changeset release --prerelease alpha      → All packages get alpha tag
+  2. cargo changeset release --prerelease foo:alpha  → Only foo gets alpha tag
+  3. cargo changeset release                         → Graduates prereleases to stable
 
-When graduating from a pre-release, all accumulated changes are combined
-into the final changelog entry."
+Graduation (0.x to 1.0.0):
+  - cargo changeset release --graduate foo --graduate bar
+  - Or configure in .changeset/graduation.toml
+
+Per-package configuration can also be set via:
+  - .changeset/pre-release.toml
+  - .changeset/graduation.toml
+Use 'cargo changeset manage' to configure these files."
     )]
     Release(ReleaseArgs),
     /// Initialize changeset directory in the project
     Init,
+    /// Manage release configuration files
+    Manage(ManageArgs),
 }
 
 #[derive(Args)]
@@ -104,21 +113,75 @@ pub(crate) struct ReleaseArgs {
     #[arg(long)]
     pub keep_changesets: bool,
 
-    /// Create a pre-release version with the specified tag.
-    /// Built-in tags: alpha, beta, rc. Custom tags are also supported
-    /// (e.g., --prerelease nightly, --prerelease canary, --prerelease dev).
+    /// Create pre-release for specific crate(s). Format: "crate:tag" or just "tag".
+    /// Can be specified multiple times. If no crate specified, applies to all.
+    /// Built-in tags: alpha, beta, rc. Custom tags are also supported.
     /// If tag is omitted on a pre-release version, reuses the current tag.
     /// To graduate a pre-release to stable, run without this flag.
-    #[arg(long, value_name = "TAG", num_args = 0..=1, default_missing_value = "")]
-    pub prerelease: Option<String>,
+    #[arg(long, value_name = "CRATE:TAG", num_args = 0..=1, default_missing_value = "")]
+    pub prerelease: Vec<String>,
 
     /// Force release without changesets (only valid for pre-release increment)
     #[arg(long, short = 'f')]
     pub force: bool,
 
-    /// Graduate all 0.x packages to 1.0.0
-    #[arg(long)]
-    pub graduate: bool,
+    /// Graduate specific 0.x crate(s) to 1.0.0.
+    /// In workspace: specify which crates to graduate.
+    /// For single package: graduates the package (no value needed).
+    /// Can be specified multiple times.
+    #[arg(long, value_name = "CRATE", num_args = 0..=1, default_missing_value = "")]
+    pub graduate: Vec<String>,
+}
+
+#[derive(Args)]
+pub(crate) struct ManageArgs {
+    #[command(subcommand)]
+    pub command: ManageCommand,
+}
+
+#[derive(Subcommand)]
+pub(crate) enum ManageCommand {
+    /// Manage active pre-releases (.changeset/pre-release.toml)
+    #[command(name = "pre-release")]
+    Prerelease(ManagePrereleaseArgs),
+
+    /// Manage graduation queue (.changeset/graduation.toml)
+    Graduation(ManageGraduationArgs),
+}
+
+#[derive(Args)]
+pub(crate) struct ManagePrereleaseArgs {
+    /// Add crate to pre-release (format: crate:tag)
+    #[arg(long, value_name = "CRATE:TAG")]
+    pub add: Vec<String>,
+
+    /// Remove crate from pre-release
+    #[arg(long, value_name = "CRATE")]
+    pub remove: Vec<String>,
+
+    /// Move crate from pre-release to graduation queue
+    /// (only valid if crate is NOT currently in prerelease version)
+    #[arg(long, value_name = "CRATE")]
+    pub graduate: Vec<String>,
+
+    /// List current pre-release configuration
+    #[arg(long, short)]
+    pub list: bool,
+}
+
+#[derive(Args)]
+pub(crate) struct ManageGraduationArgs {
+    /// Add crate to graduation queue (must be 0.x version)
+    #[arg(long, value_name = "CRATE")]
+    pub add: Vec<String>,
+
+    /// Remove crate from graduation queue
+    #[arg(long, value_name = "CRATE")]
+    pub remove: Vec<String>,
+
+    /// List crates marked for graduation
+    #[arg(long, short)]
+    pub list: bool,
 }
 
 pub(crate) struct ExecuteResult {
@@ -139,6 +202,10 @@ impl Commands {
                 ExecuteResult { quiet: false },
             ),
             Self::Init => (init::run(start_path), ExecuteResult { quiet: false }),
+            Self::Manage(args) => (
+                manage::run(args, start_path),
+                ExecuteResult { quiet: false },
+            ),
         }
     }
 }

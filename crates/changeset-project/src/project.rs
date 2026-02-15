@@ -4,6 +4,7 @@ use changeset_core::PackageInfo;
 use globset::GlobBuilder;
 use semver::Version;
 
+use crate::CHANGESETS_SUBDIR;
 use crate::config::RootChangesetConfig;
 use crate::error::ProjectError;
 use crate::manifest::{CargoManifest, VersionField, read_manifest};
@@ -46,14 +47,20 @@ pub fn discover_project(start_dir: &Path) -> Result<CargoProject, ProjectError> 
 
 /// # Errors
 ///
-/// Returns `ProjectError::Io` if directory creation fails.
+/// Returns `ProjectError::DirectoryCreate` if directory creation fails.
 pub fn ensure_changeset_dir(
     project: &CargoProject,
     config: &RootChangesetConfig,
 ) -> Result<PathBuf, ProjectError> {
     let changeset_dir = project.root.join(config.changeset_dir());
-    if !changeset_dir.exists() {
-        std::fs::create_dir_all(&changeset_dir)?;
+    let changesets_subdir = changeset_dir.join(CHANGESETS_SUBDIR);
+    if !changesets_subdir.exists() {
+        std::fs::create_dir_all(&changesets_subdir).map_err(|source| {
+            ProjectError::DirectoryCreate {
+                path: changesets_subdir,
+                source,
+            }
+        })?;
     }
     Ok(changeset_dir)
 }

@@ -90,6 +90,40 @@ pub enum OperationError {
 
     #[error("no changesets found; use --force to release without changesets")]
     NoChangesetsWithoutForce,
+
+    #[error("invalid changeset path '{path}': {reason}")]
+    InvalidChangesetPath { path: PathBuf, reason: &'static str },
+
+    #[error("failed to read release state file '{path}'")]
+    ReleaseStateRead {
+        path: PathBuf,
+        #[source]
+        source: std::io::Error,
+    },
+
+    #[error("failed to write release state file '{path}'")]
+    ReleaseStateWrite {
+        path: PathBuf,
+        #[source]
+        source: std::io::Error,
+    },
+
+    #[error("failed to parse release state file '{path}'")]
+    ReleaseStateParse {
+        path: PathBuf,
+        #[source]
+        source: toml::de::Error,
+    },
+
+    #[error("failed to serialize release state for '{path}'")]
+    ReleaseStateSerialize {
+        path: PathBuf,
+        #[source]
+        source: toml::ser::Error,
+    },
+
+    #[error("release validation failed")]
+    ValidationFailed(#[from] crate::operations::ValidationErrors),
 }
 
 pub type Result<T> = std::result::Result<T, OperationError>;

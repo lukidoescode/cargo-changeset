@@ -9,7 +9,8 @@ use tempfile::TempDir;
 
 fn create_changeset_dir() -> TempDir {
     let dir = TempDir::new().expect("create temp dir");
-    fs::create_dir_all(dir.path().join(".changeset")).expect("create .changeset dir");
+    fs::create_dir_all(dir.path().join(".changeset/changesets"))
+        .expect("create .changeset/changesets dir");
     dir
 }
 
@@ -22,7 +23,11 @@ fn write_changeset_file(dir: &TempDir, filename: &str, package: &str, bump: &str
 {summary}
 "#
     );
-    fs::write(dir.path().join(".changeset").join(filename), content).expect("write changeset file");
+    fs::write(
+        dir.path().join(".changeset/changesets").join(filename),
+        content,
+    )
+    .expect("write changeset file");
 }
 
 fn write_consumed_changeset_file(
@@ -42,12 +47,16 @@ consumedForPrerelease: "{consumed_version}"
 {summary}
 "#
     );
-    fs::write(dir.path().join(".changeset").join(filename), content)
-        .expect("write consumed changeset file");
+    fs::write(
+        dir.path().join(".changeset/changesets").join(filename),
+        content,
+    )
+    .expect("write consumed changeset file");
 }
 
 fn read_changeset_file(dir: &TempDir, filename: &str) -> String {
-    fs::read_to_string(dir.path().join(".changeset").join(filename)).expect("read changeset file")
+    fs::read_to_string(dir.path().join(".changeset/changesets").join(filename))
+        .expect("read changeset file")
 }
 
 #[test]
@@ -200,8 +209,11 @@ category: fixed
 
 Fix a security issue.
 "#;
-    fs::write(dir.path().join(".changeset/security-fix.md"), content)
-        .expect("write changeset file");
+    fs::write(
+        dir.path().join(".changeset/changesets/security-fix.md"),
+        content,
+    )
+    .expect("write changeset file");
 
     let changeset_io = FileSystemChangesetIO::new(dir.path());
     let changeset_dir = Path::new(".changeset");

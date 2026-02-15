@@ -5,6 +5,7 @@ mod inherited_version_checker;
 mod interaction;
 mod manifest_writer;
 mod project_provider;
+mod release_state_io;
 
 pub use changelog_writer::{ChangelogWriteResult, ChangelogWriter};
 pub use changeset_io::{ChangesetReader, ChangesetWriter};
@@ -15,3 +16,4 @@ pub use interaction::{
 };
 pub use manifest_writer::ManifestWriter;
 pub use project_provider::ProjectProvider;
+pub use release_state_io::ReleaseStateIO;

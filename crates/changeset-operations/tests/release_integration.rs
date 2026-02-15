@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
 use std::process::Command;
@@ -8,7 +9,7 @@ use changeset_operations::operations::{
 };
 use changeset_operations::providers::{
     FileSystemChangelogWriter, FileSystemChangesetIO, FileSystemManifestWriter,
-    FileSystemProjectProvider, Git2Provider,
+    FileSystemProjectProvider, FileSystemReleaseStateIO, Git2Provider,
 };
 use tempfile::TempDir;
 
@@ -28,7 +29,8 @@ edition = "2021"
     fs::create_dir_all(dir.path().join("src")).expect("create src dir");
     fs::write(dir.path().join("src/lib.rs"), "").expect("write lib.rs");
 
-    fs::create_dir_all(dir.path().join(".changeset")).expect("create .changeset dir");
+    fs::create_dir_all(dir.path().join(".changeset/changesets"))
+        .expect("create .changeset/changesets dir");
 
     dir
 }
@@ -69,7 +71,8 @@ edition = "2021"
     .expect("write crate-b Cargo.toml");
     fs::write(dir.path().join("crates/crate-b/src/lib.rs"), "").expect("write lib.rs");
 
-    fs::create_dir_all(dir.path().join(".changeset")).expect("create .changeset dir");
+    fs::create_dir_all(dir.path().join(".changeset/changesets"))
+        .expect("create .changeset/changesets dir");
 
     dir
 }
@@ -114,7 +117,8 @@ edition.workspace = true
     .expect("write crate-b Cargo.toml");
     fs::write(dir.path().join("crates/crate-b/src/lib.rs"), "").expect("write lib.rs");
 
-    fs::create_dir_all(dir.path().join(".changeset")).expect("create .changeset dir");
+    fs::create_dir_all(dir.path().join(".changeset/changesets"))
+        .expect("create .changeset/changesets dir");
 
     dir
 }
@@ -128,7 +132,11 @@ fn write_changeset(dir: &TempDir, filename: &str, package: &str, bump: &str, sum
 {summary}
 "#
     );
-    fs::write(dir.path().join(".changeset").join(filename), content).expect("write changeset");
+    fs::write(
+        dir.path().join(".changeset/changesets").join(filename),
+        content,
+    )
+    .expect("write changeset");
 }
 
 fn read_version(path: &Path) -> String {
@@ -158,6 +166,7 @@ fn run_release(
     let manifest_writer = FileSystemManifestWriter::new();
     let changelog_writer = FileSystemChangelogWriter::new();
     let git_provider = Git2Provider::new();
+    let release_state_io = FileSystemReleaseStateIO::new();
 
     let operation = ReleaseOperation::new(
         project_provider,
@@ -165,6 +174,7 @@ fn run_release(
         manifest_writer,
         changelog_writer,
         git_provider,
+        release_state_io,
     );
     let input = ReleaseInput {
         dry_run,
@@ -172,9 +182,10 @@ fn run_release(
         no_commit: true,
         no_tags: true,
         keep_changesets: true,
-        prerelease: None,
         force: false,
-        graduate: false,
+        per_package_config: HashMap::new(),
+        global_prerelease: None,
+        graduate_all: false,
     };
 
     operation.execute(dir.path(), &input)
@@ -313,7 +324,8 @@ edition = "2021"
 
     fs::create_dir_all(dir.path().join("src")).expect("create src dir");
     fs::write(dir.path().join("src/lib.rs"), "").expect("write lib.rs");
-    fs::create_dir_all(dir.path().join(".changeset")).expect("create .changeset dir");
+    fs::create_dir_all(dir.path().join(".changeset/changesets"))
+        .expect("create .changeset/changesets dir");
 
     write_changeset(&dir, "fix.md", "my-crate", "minor", "Add feature");
 
@@ -559,6 +571,7 @@ fn run_release_with_git(
     let manifest_writer = FileSystemManifestWriter::new();
     let changelog_writer = FileSystemChangelogWriter::new();
     let git_provider = Git2Provider::new();
+    let release_state_io = FileSystemReleaseStateIO::new();
 
     let operation = ReleaseOperation::new(
         project_provider,
@@ -566,6 +579,7 @@ fn run_release_with_git(
         manifest_writer,
         changelog_writer,
         git_provider,
+        release_state_io,
     );
     let input = ReleaseInput {
         dry_run: false,
@@ -573,9 +587,10 @@ fn run_release_with_git(
         no_commit,
         no_tags,
         keep_changesets,
-        prerelease: None,
         force: false,
-        graduate: false,
+        per_package_config: HashMap::new(),
+        global_prerelease: None,
+        graduate_all: false,
     };
 
     operation.execute(dir.path(), &input)
@@ -622,7 +637,7 @@ fn release_creates_commit_and_tags() {
         "tag should exist in git"
     );
 
-    let changeset_path = dir.path().join(".changeset/fix.md");
+    let changeset_path = dir.path().join(".changeset/changesets/fix.md");
     assert!(
         !changeset_path.exists(),
         "changeset file should have been deleted"
@@ -709,7 +724,7 @@ fn release_no_commit_skips_git_operations() {
     let tags = git_tags(&dir);
     assert!(tags.is_empty(), "no tags should have been created");
 
-    let changeset_path = dir.path().join(".changeset/fix.md");
+    let changeset_path = dir.path().join(".changeset/changesets/fix.md");
     assert!(
         changeset_path.exists(),
         "changeset should be kept with --keep-changesets"
@@ -770,7 +785,7 @@ fn release_keep_changesets_preserves_files() {
         "no changesets should be deleted"
     );
 
-    let changeset_path = dir.path().join(".changeset/fix.md");
+    let changeset_path = dir.path().join(".changeset/changesets/fix.md");
     assert!(
         changeset_path.exists(),
         "changeset should still exist with --keep-changesets"
@@ -832,7 +847,8 @@ edition = "2021"
     .expect("write stable-crate Cargo.toml");
     fs::write(dir.path().join("crates/stable-crate/src/lib.rs"), "").expect("write lib.rs");
 
-    fs::create_dir_all(dir.path().join(".changeset")).expect("create .changeset dir");
+    fs::create_dir_all(dir.path().join(".changeset/changesets"))
+        .expect("create .changeset/changesets dir");
 
     dir
 }
@@ -846,6 +862,7 @@ fn run_release_with_prerelease(
     let manifest_writer = FileSystemManifestWriter::new();
     let changelog_writer = FileSystemChangelogWriter::new();
     let git_provider = Git2Provider::new();
+    let release_state_io = FileSystemReleaseStateIO::new();
 
     let operation = ReleaseOperation::new(
         project_provider,
@@ -853,6 +870,7 @@ fn run_release_with_prerelease(
         manifest_writer,
         changelog_writer,
         git_provider,
+        release_state_io,
     );
     let input = ReleaseInput {
         dry_run: false,
@@ -860,9 +878,10 @@ fn run_release_with_prerelease(
         no_commit: true,
         no_tags: true,
         keep_changesets: true,
-        prerelease,
         force: false,
-        graduate: false,
+        per_package_config: HashMap::new(),
+        global_prerelease: prerelease,
+        graduate_all: false,
     };
 
     operation.execute(dir.path(), &input)
@@ -885,7 +904,11 @@ consumedForPrerelease: "{consumed_version}"
 {summary}
 "#
     );
-    fs::write(dir.path().join(".changeset").join(filename), content).expect("write changeset");
+    fs::write(
+        dir.path().join(".changeset/changesets").join(filename),
+        content,
+    )
+    .expect("write changeset");
 }
 
 #[test]
@@ -974,7 +997,8 @@ edition = "2021"
     .expect("write crate-beta Cargo.toml");
     fs::write(dir.path().join("crates/crate-beta/src/lib.rs"), "").expect("write lib.rs");
 
-    fs::create_dir_all(dir.path().join(".changeset")).expect("create .changeset dir");
+    fs::create_dir_all(dir.path().join(".changeset/changesets"))
+        .expect("create .changeset/changesets dir");
 
     write_changeset(&dir, "fix-alpha.md", "crate-alpha", "patch", "Fix in alpha");
     write_changeset(
@@ -1238,5 +1262,1275 @@ edition = "2021"
     assert!(
         changelog_content.contains("Improve performance"),
         "changelog should contain rc changeset"
+    );
+}
+
+// =============================================================================
+// Per-Package Release Control Integration Tests
+// =============================================================================
+
+fn create_workspace_with_zero_versions() -> TempDir {
+    let dir = TempDir::new().expect("create temp dir");
+
+    fs::write(
+        dir.path().join("Cargo.toml"),
+        r#"[workspace]
+members = ["crates/*"]
+resolver = "2"
+"#,
+    )
+    .expect("write workspace Cargo.toml");
+
+    fs::create_dir_all(dir.path().join("crates/crate-a/src")).expect("create crate-a dir");
+    fs::write(
+        dir.path().join("crates/crate-a/Cargo.toml"),
+        r#"[package]
+name = "crate-a"
+version = "0.5.0"
+edition = "2021"
+"#,
+    )
+    .expect("write crate-a Cargo.toml");
+    fs::write(dir.path().join("crates/crate-a/src/lib.rs"), "").expect("write lib.rs");
+
+    fs::create_dir_all(dir.path().join("crates/crate-b/src")).expect("create crate-b dir");
+    fs::write(
+        dir.path().join("crates/crate-b/Cargo.toml"),
+        r#"[package]
+name = "crate-b"
+version = "0.3.0"
+edition = "2021"
+"#,
+    )
+    .expect("write crate-b Cargo.toml");
+    fs::write(dir.path().join("crates/crate-b/src/lib.rs"), "").expect("write lib.rs");
+
+    fs::create_dir_all(dir.path().join(".changeset/changesets"))
+        .expect("create .changeset/changesets dir");
+
+    dir
+}
+
+fn write_prerelease_toml(dir: &TempDir, content: &str) {
+    fs::write(dir.path().join(".changeset/pre-release.toml"), content)
+        .expect("write pre-release.toml");
+}
+
+fn write_graduation_toml(dir: &TempDir, content: &str) {
+    fs::write(dir.path().join(".changeset/graduation.toml"), content)
+        .expect("write graduation.toml");
+}
+
+fn read_prerelease_toml(dir: &TempDir) -> Option<String> {
+    let path = dir.path().join(".changeset/pre-release.toml");
+    if path.exists() {
+        Some(fs::read_to_string(path).expect("read pre-release.toml"))
+    } else {
+        None
+    }
+}
+
+fn read_graduation_toml(dir: &TempDir) -> Option<String> {
+    let path = dir.path().join(".changeset/graduation.toml");
+    if path.exists() {
+        Some(fs::read_to_string(path).expect("read graduation.toml"))
+    } else {
+        None
+    }
+}
+
+fn run_release_with_config(
+    dir: &TempDir,
+    per_package_config: HashMap<String, changeset_operations::operations::PackageReleaseConfig>,
+    global_prerelease: Option<changeset_core::PrereleaseSpec>,
+    graduate_all: bool,
+) -> Result<ReleaseOutcome, OperationError> {
+    let project_provider = FileSystemProjectProvider::new();
+    let changeset_io = FileSystemChangesetIO::new(dir.path());
+    let manifest_writer = FileSystemManifestWriter::new();
+    let changelog_writer = FileSystemChangelogWriter::new();
+    let git_provider = Git2Provider::new();
+    let release_state_io = FileSystemReleaseStateIO::new();
+
+    let operation = ReleaseOperation::new(
+        project_provider,
+        changeset_io,
+        manifest_writer,
+        changelog_writer,
+        git_provider,
+        release_state_io,
+    );
+    let input = ReleaseInput {
+        dry_run: false,
+        convert_inherited: false,
+        no_commit: true,
+        no_tags: true,
+        keep_changesets: true,
+        force: false,
+        per_package_config,
+        global_prerelease,
+        graduate_all,
+    };
+
+    operation.execute(dir.path(), &input)
+}
+
+// -----------------------------------------------------------------------------
+// TOML-based prerelease tests
+// -----------------------------------------------------------------------------
+
+#[test]
+fn release_respects_prerelease_toml() {
+    let dir = create_workspace_project();
+    write_prerelease_toml(&dir, "crate-a = \"alpha\"\n");
+    write_changeset(&dir, "feature.md", "crate-a", "minor", "Add new feature");
+
+    let result =
+        run_release_with_config(&dir, HashMap::new(), None, false).expect("release should succeed");
+
+    let ReleaseOutcome::Executed(output) = result else {
+        panic!("expected Executed outcome");
+    };
+
+    let release_a = output
+        .planned_releases
+        .iter()
+        .find(|r| r.name == "crate-a")
+        .expect("crate-a should be in releases");
+    assert!(
+        release_a.new_version.to_string().contains("alpha"),
+        "crate-a should have alpha prerelease tag, got: {}",
+        release_a.new_version
+    );
+}
+
+#[test]
+fn release_respects_graduation_toml() {
+    let dir = create_workspace_with_zero_versions();
+    write_graduation_toml(&dir, "graduation = [\"crate-a\"]\n");
+    write_changeset(&dir, "feature.md", "crate-a", "minor", "Add feature");
+
+    let result =
+        run_release_with_config(&dir, HashMap::new(), None, false).expect("release should succeed");
+
+    let ReleaseOutcome::Executed(output) = result else {
+        panic!("expected Executed outcome");
+    };
+
+    let release_a = output
+        .planned_releases
+        .iter()
+        .find(|r| r.name == "crate-a")
+        .expect("crate-a should be in releases");
+    assert_eq!(
+        release_a.new_version.to_string(),
+        "1.0.0",
+        "crate-a should graduate to 1.0.0"
+    );
+}
+
+#[test]
+fn release_fails_on_cli_toml_prerelease_conflict() {
+    let dir = create_workspace_project();
+    write_prerelease_toml(&dir, "crate-a = \"alpha\"\n");
+    write_changeset(&dir, "feature.md", "crate-a", "minor", "Add feature");
+
+    let mut per_package_config = HashMap::new();
+    per_package_config.insert(
+        "crate-a".to_string(),
+        changeset_operations::operations::PackageReleaseConfig {
+            prerelease: Some(changeset_core::PrereleaseSpec::Beta),
+            graduate_zero: false,
+        },
+    );
+
+    let result = run_release_with_config(&dir, per_package_config, None, false);
+
+    assert!(
+        result.is_err(),
+        "release should fail due to conflicting prerelease tags"
+    );
+    let err = result.expect_err("should be error");
+    let err_str = err.to_string();
+    assert!(
+        err_str.contains("validation failed") || err_str.contains("conflict"),
+        "error should indicate validation failure or conflict: {err_str}"
+    );
+}
+
+#[test]
+fn release_updates_toml_after_graduation() {
+    let dir = create_workspace_with_zero_versions();
+    write_graduation_toml(&dir, "graduation = [\"crate-a\"]\n");
+    write_changeset(&dir, "feature.md", "crate-a", "minor", "Add feature");
+
+    let before_toml = read_graduation_toml(&dir);
+    assert!(
+        before_toml.is_some(),
+        "graduation.toml should exist before release"
+    );
+    assert!(
+        before_toml.expect("should exist").contains("crate-a"),
+        "crate-a should be in graduation.toml before release"
+    );
+
+    let result =
+        run_release_with_config(&dir, HashMap::new(), None, false).expect("release should succeed");
+
+    let ReleaseOutcome::Executed(output) = result else {
+        panic!("expected Executed outcome");
+    };
+
+    assert_eq!(
+        output.planned_releases[0].new_version.to_string(),
+        "1.0.0",
+        "crate-a should graduate to 1.0.0"
+    );
+
+    let after_toml = read_graduation_toml(&dir);
+    assert!(
+        after_toml.is_none() || !after_toml.as_ref().is_some_and(|t| t.contains("crate-a")),
+        "crate-a should be removed from graduation.toml after graduation"
+    );
+}
+
+#[test]
+fn release_keeps_prerelease_state_during_prerelease_bumps() {
+    let dir = create_single_package_project();
+
+    fs::write(
+        dir.path().join("Cargo.toml"),
+        r#"[package]
+name = "my-crate"
+version = "1.0.0-alpha.1"
+edition = "2021"
+"#,
+    )
+    .expect("update to prerelease version");
+
+    write_prerelease_toml(&dir, "my-crate = \"alpha\"\n");
+    write_changeset(&dir, "fix.md", "my-crate", "patch", "Fix a bug");
+
+    let before_toml = read_prerelease_toml(&dir);
+    assert!(
+        before_toml.is_some() && before_toml.expect("exists").contains("my-crate"),
+        "pre-release.toml should contain my-crate before release"
+    );
+
+    let result = run_release_with_prerelease(&dir, Some(changeset_core::PrereleaseSpec::Alpha))
+        .expect("prerelease release should succeed");
+
+    let ReleaseOutcome::Executed(output) = result else {
+        panic!("expected Executed outcome");
+    };
+
+    assert!(
+        output.planned_releases[0]
+            .new_version
+            .to_string()
+            .contains("alpha.2"),
+        "should bump prerelease: {}",
+        output.planned_releases[0].new_version
+    );
+
+    let after_toml = read_prerelease_toml(&dir);
+    assert!(
+        after_toml.is_some() && after_toml.expect("exists").contains("my-crate"),
+        "my-crate should still be in pre-release.toml after prerelease bump"
+    );
+}
+
+#[test]
+fn workspace_graduate_requires_crate_names() {
+    let dir = create_workspace_with_zero_versions();
+    write_changeset(&dir, "feature.md", "crate-a", "minor", "Add feature");
+
+    let result = run_release_with_config(&dir, HashMap::new(), None, true);
+
+    assert!(
+        result.is_err(),
+        "release should fail when --graduate without crate names in workspace"
+    );
+    let err = result.expect_err("should be error");
+    let err_str = err.to_string();
+    assert!(
+        err_str.contains("require") || err_str.contains("validation"),
+        "error should indicate validation failure: {err_str}"
+    );
+}
+
+#[test]
+fn single_package_graduate_works_without_name() {
+    let dir = TempDir::new().expect("create temp dir");
+
+    fs::write(
+        dir.path().join("Cargo.toml"),
+        r#"[package]
+name = "my-crate"
+version = "0.5.0"
+edition = "2021"
+"#,
+    )
+    .expect("write Cargo.toml");
+
+    fs::create_dir_all(dir.path().join("src")).expect("create src dir");
+    fs::write(dir.path().join("src/lib.rs"), "").expect("write lib.rs");
+
+    fs::create_dir_all(dir.path().join(".changeset/changesets"))
+        .expect("create .changeset/changesets dir");
+    write_changeset(&dir, "feature.md", "my-crate", "minor", "Add feature");
+
+    let result = run_release_with_config(&dir, HashMap::new(), None, true)
+        .expect("release should succeed in single-package mode");
+
+    let ReleaseOutcome::Executed(output) = result else {
+        panic!("expected Executed outcome");
+    };
+
+    assert_eq!(
+        output.planned_releases[0].new_version.to_string(),
+        "1.0.0",
+        "single package should graduate to 1.0.0 without specifying name"
+    );
+}
+
+#[test]
+fn cannot_graduate_prerelease_version_explicit() {
+    let dir = TempDir::new().expect("create temp dir");
+
+    fs::write(
+        dir.path().join("Cargo.toml"),
+        r#"[package]
+name = "my-crate"
+version = "0.5.0-alpha.1"
+edition = "2021"
+"#,
+    )
+    .expect("write Cargo.toml");
+
+    fs::create_dir_all(dir.path().join("src")).expect("create src dir");
+    fs::write(dir.path().join("src/lib.rs"), "").expect("write lib.rs");
+
+    fs::create_dir_all(dir.path().join(".changeset/changesets"))
+        .expect("create .changeset/changesets dir");
+    write_changeset(&dir, "feature.md", "my-crate", "minor", "Add feature");
+
+    let mut per_package_config = HashMap::new();
+    per_package_config.insert(
+        "my-crate".to_string(),
+        changeset_operations::operations::PackageReleaseConfig {
+            prerelease: None,
+            graduate_zero: true,
+        },
+    );
+
+    let result = run_release_with_config(&dir, per_package_config, None, false);
+
+    assert!(
+        result.is_err(),
+        "release should fail when trying to graduate a prerelease version"
+    );
+    let err = result.expect_err("should be error");
+    let err_str = err.to_string();
+    assert!(
+        err_str.contains("prerelease") || err_str.contains("validation"),
+        "error should mention prerelease or validation: {err_str}"
+    );
+}
+
+#[test]
+fn cannot_graduate_stable_version() {
+    let dir = create_workspace_project();
+    write_changeset(&dir, "feature.md", "crate-a", "minor", "Add feature");
+
+    let mut per_package_config = HashMap::new();
+    per_package_config.insert(
+        "crate-a".to_string(),
+        changeset_operations::operations::PackageReleaseConfig {
+            prerelease: None,
+            graduate_zero: true,
+        },
+    );
+
+    let result = run_release_with_config(&dir, per_package_config, None, false);
+
+    assert!(
+        result.is_err(),
+        "release should fail when trying to graduate a stable version"
+    );
+    let err = result.expect_err("should be error");
+    let err_str = err.to_string();
+    assert!(
+        err_str.contains("stable") || err_str.contains("validation") || err_str.contains("1.0.0"),
+        "error should mention stable version: {err_str}"
+    );
+}
+
+#[test]
+fn graduation_plus_prerelease_together() {
+    let dir = create_workspace_with_zero_versions();
+    write_graduation_toml(&dir, "graduation = [\"crate-a\"]\n");
+    write_prerelease_toml(&dir, "crate-a = \"rc\"\n");
+    write_changeset(&dir, "feature.md", "crate-a", "minor", "Add feature");
+
+    let result = run_release_with_config(&dir, HashMap::new(), None, false);
+
+    assert!(
+        result.is_ok(),
+        "graduation + prerelease TOML should succeed: {:?}",
+        result.err()
+    );
+
+    let ReleaseOutcome::Executed(output) = result.expect("release should succeed") else {
+        panic!("expected Executed outcome");
+    };
+
+    let release_a = output
+        .planned_releases
+        .iter()
+        .find(|r| r.name == "crate-a")
+        .expect("crate-a should be released");
+
+    assert_eq!(
+        release_a.new_version.to_string(),
+        "1.0.0-rc.1",
+        "graduation + prerelease should produce 1.0.0-rc.1"
+    );
+}
+
+// -----------------------------------------------------------------------------
+// Cross-Effect Tests
+// -----------------------------------------------------------------------------
+
+#[test]
+fn release_preserves_unrelated_prerelease_state() {
+    let dir = create_workspace_project();
+
+    fs::write(
+        dir.path().join("crates/crate-a/Cargo.toml"),
+        r#"[package]
+name = "crate-a"
+version = "1.0.0-alpha.1"
+edition = "2021"
+"#,
+    )
+    .expect("update crate-a to prerelease");
+
+    fs::write(
+        dir.path().join("crates/crate-b/Cargo.toml"),
+        r#"[package]
+name = "crate-b"
+version = "2.0.0-beta.1"
+edition = "2021"
+"#,
+    )
+    .expect("update crate-b to prerelease");
+
+    write_prerelease_toml(&dir, "crate-a = \"alpha\"\ncrate-b = \"beta\"\n");
+
+    write_consumed_changeset(
+        &dir,
+        "fix-a.md",
+        "crate-a",
+        "patch",
+        "Fix crate-a",
+        "1.0.0-alpha.1",
+    );
+    write_changeset(&dir, "fix-b.md", "crate-b", "patch", "Fix crate-b");
+
+    let result = run_release_with_prerelease(&dir, Some(changeset_core::PrereleaseSpec::Beta))
+        .expect("release should succeed");
+
+    let ReleaseOutcome::Executed(output) = result else {
+        panic!("expected Executed outcome");
+    };
+
+    let release_a = output.planned_releases.iter().find(|r| r.name == "crate-a");
+    let release_b = output.planned_releases.iter().find(|r| r.name == "crate-b");
+
+    assert!(release_a.is_some(), "crate-a should be released");
+    assert!(release_b.is_some(), "crate-b should be released");
+
+    let after_toml = read_prerelease_toml(&dir).expect("pre-release.toml should still exist");
+    assert!(
+        after_toml.contains("crate-a") && after_toml.contains("crate-b"),
+        "both crates should still be in pre-release.toml: {after_toml}"
+    );
+}
+
+#[test]
+fn release_preserves_unrelated_graduation_state() {
+    let dir = create_workspace_with_zero_versions();
+    write_graduation_toml(&dir, "graduation = [\"crate-a\", \"crate-b\"]\n");
+    write_changeset(&dir, "feature-a.md", "crate-a", "minor", "Add feature to A");
+
+    let result =
+        run_release_with_config(&dir, HashMap::new(), None, false).expect("release should succeed");
+
+    let ReleaseOutcome::Executed(output) = result else {
+        panic!("expected Executed outcome");
+    };
+
+    let released_names: Vec<_> = output.planned_releases.iter().map(|r| &r.name).collect();
+    assert!(
+        released_names.contains(&&"crate-a".to_string()),
+        "crate-a should be released"
+    );
+
+    let release_a = output
+        .planned_releases
+        .iter()
+        .find(|r| r.name == "crate-a")
+        .expect("crate-a should be in releases");
+    assert_eq!(
+        release_a.new_version.to_string(),
+        "1.0.0",
+        "crate-a should graduate"
+    );
+
+    let after_toml = read_graduation_toml(&dir);
+    if let Some(ref toml) = after_toml {
+        assert!(
+            !toml.contains("\"crate-a\""),
+            "crate-a should be removed from graduation.toml"
+        );
+        assert!(
+            toml.contains("crate-b"),
+            "crate-b should still be in graduation.toml"
+        );
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Validator Integration Tests
+// -----------------------------------------------------------------------------
+
+#[test]
+fn validator_detects_unknown_package_in_prerelease() {
+    let dir = create_workspace_project();
+    write_changeset(&dir, "feature.md", "crate-a", "minor", "Add feature");
+
+    let mut per_package_config = HashMap::new();
+    per_package_config.insert(
+        "nonexistent-crate".to_string(),
+        changeset_operations::operations::PackageReleaseConfig {
+            prerelease: Some(changeset_core::PrereleaseSpec::Alpha),
+            graduate_zero: false,
+        },
+    );
+
+    let result = run_release_with_config(&dir, per_package_config, None, false);
+
+    assert!(result.is_err(), "should fail for unknown package");
+    let err = result.expect_err("should be error");
+    let err_str = err.to_string();
+    assert!(
+        err_str.contains("validation"),
+        "error should indicate validation failure: {err_str}"
+    );
+}
+
+#[test]
+fn validator_detects_unknown_package_in_graduate() {
+    let dir = create_workspace_project();
+    write_changeset(&dir, "feature.md", "crate-a", "minor", "Add feature");
+
+    let mut per_package_config = HashMap::new();
+    per_package_config.insert(
+        "nonexistent-crate".to_string(),
+        changeset_operations::operations::PackageReleaseConfig {
+            prerelease: None,
+            graduate_zero: true,
+        },
+    );
+
+    let result = run_release_with_config(&dir, per_package_config, None, false);
+
+    assert!(result.is_err(), "should fail for unknown package");
+    let err = result.expect_err("should be error");
+    let err_str = err.to_string();
+    assert!(
+        err_str.contains("validation"),
+        "error should indicate validation failure: {err_str}"
+    );
+}
+
+// -----------------------------------------------------------------------------
+// CLI prerelease with TOML state tests
+// -----------------------------------------------------------------------------
+
+#[test]
+fn cli_prerelease_matching_toml_succeeds() {
+    let dir = create_workspace_project();
+    write_prerelease_toml(&dir, "crate-a = \"alpha\"\n");
+    write_changeset(&dir, "feature.md", "crate-a", "minor", "Add feature");
+
+    let mut per_package_config = HashMap::new();
+    per_package_config.insert(
+        "crate-a".to_string(),
+        changeset_operations::operations::PackageReleaseConfig {
+            prerelease: Some(changeset_core::PrereleaseSpec::Alpha),
+            graduate_zero: false,
+        },
+    );
+
+    let result = run_release_with_config(&dir, per_package_config, None, false)
+        .expect("release should succeed when CLI matches TOML");
+
+    let ReleaseOutcome::Executed(output) = result else {
+        panic!("expected Executed outcome");
+    };
+
+    let release_a = output
+        .planned_releases
+        .iter()
+        .find(|r| r.name == "crate-a")
+        .expect("crate-a should be in releases");
+    assert!(
+        release_a.new_version.to_string().contains("alpha"),
+        "should have alpha tag: {}",
+        release_a.new_version
+    );
+}
+
+#[test]
+fn toml_prerelease_only_affects_specified_packages() {
+    let dir = create_workspace_project();
+    write_prerelease_toml(&dir, "crate-a = \"alpha\"\n");
+    write_changeset(&dir, "feature-a.md", "crate-a", "minor", "Feature A");
+    write_changeset(&dir, "feature-b.md", "crate-b", "minor", "Feature B");
+
+    let result =
+        run_release_with_config(&dir, HashMap::new(), None, false).expect("release should succeed");
+
+    let ReleaseOutcome::Executed(output) = result else {
+        panic!("expected Executed outcome");
+    };
+
+    let release_a = output
+        .planned_releases
+        .iter()
+        .find(|r| r.name == "crate-a")
+        .expect("crate-a should be in releases");
+    let release_b = output
+        .planned_releases
+        .iter()
+        .find(|r| r.name == "crate-b")
+        .expect("crate-b should be in releases");
+
+    assert!(
+        release_a.new_version.to_string().contains("alpha"),
+        "crate-a should have alpha tag: {}",
+        release_a.new_version
+    );
+    assert!(
+        !release_b.new_version.to_string().contains("alpha"),
+        "crate-b should NOT have alpha tag: {}",
+        release_b.new_version
+    );
+}
+
+#[test]
+fn global_prerelease_applies_to_all_packages() {
+    let dir = create_workspace_project();
+    write_changeset(&dir, "feature-a.md", "crate-a", "minor", "Feature A");
+    write_changeset(&dir, "feature-b.md", "crate-b", "minor", "Feature B");
+
+    let result = run_release_with_config(
+        &dir,
+        HashMap::new(),
+        Some(changeset_core::PrereleaseSpec::Beta),
+        false,
+    )
+    .expect("release should succeed");
+
+    let ReleaseOutcome::Executed(output) = result else {
+        panic!("expected Executed outcome");
+    };
+
+    for release in &output.planned_releases {
+        assert!(
+            release.new_version.to_string().contains("beta"),
+            "{} should have beta tag: {}",
+            release.name,
+            release.new_version
+        );
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Per-package prerelease tests
+// -----------------------------------------------------------------------------
+
+#[test]
+fn per_package_prerelease_different_tags() {
+    let dir = create_workspace_project();
+    write_prerelease_toml(&dir, "crate-a = \"alpha\"\ncrate-b = \"beta\"\n");
+    write_changeset(&dir, "feature-a.md", "crate-a", "minor", "Feature A");
+    write_changeset(&dir, "feature-b.md", "crate-b", "minor", "Feature B");
+
+    let result =
+        run_release_with_config(&dir, HashMap::new(), None, false).expect("release should succeed");
+
+    let ReleaseOutcome::Executed(output) = result else {
+        panic!("expected Executed outcome");
+    };
+
+    let release_a = output
+        .planned_releases
+        .iter()
+        .find(|r| r.name == "crate-a")
+        .expect("crate-a should be in releases");
+    let release_b = output
+        .planned_releases
+        .iter()
+        .find(|r| r.name == "crate-b")
+        .expect("crate-b should be in releases");
+
+    assert!(
+        release_a.new_version.to_string().contains("alpha"),
+        "crate-a should have alpha tag: {}",
+        release_a.new_version
+    );
+    assert!(
+        release_b.new_version.to_string().contains("beta"),
+        "crate-b should have beta tag: {}",
+        release_b.new_version
+    );
+}
+
+// -----------------------------------------------------------------------------
+// Graduation with TOML tests
+// -----------------------------------------------------------------------------
+
+#[test]
+fn graduation_toml_only_affects_specified_packages() {
+    let dir = create_workspace_with_zero_versions();
+    write_graduation_toml(&dir, "graduation = [\"crate-a\"]\n");
+    write_changeset(&dir, "feature-a.md", "crate-a", "minor", "Feature A");
+    write_changeset(&dir, "feature-b.md", "crate-b", "minor", "Feature B");
+
+    let result =
+        run_release_with_config(&dir, HashMap::new(), None, false).expect("release should succeed");
+
+    let ReleaseOutcome::Executed(output) = result else {
+        panic!("expected Executed outcome");
+    };
+
+    let release_a = output
+        .planned_releases
+        .iter()
+        .find(|r| r.name == "crate-a")
+        .expect("crate-a should be in releases");
+    let release_b = output
+        .planned_releases
+        .iter()
+        .find(|r| r.name == "crate-b")
+        .expect("crate-b should be in releases");
+
+    assert_eq!(
+        release_a.new_version.to_string(),
+        "1.0.0",
+        "crate-a should graduate to 1.0.0"
+    );
+    assert!(
+        release_b.new_version.major == 0,
+        "crate-b should NOT graduate, got: {}",
+        release_b.new_version
+    );
+}
+
+// -----------------------------------------------------------------------------
+// Workflow Integration Tests
+// -----------------------------------------------------------------------------
+
+#[test]
+fn manage_state_then_release_workflow() {
+    let dir = create_workspace_project();
+
+    write_prerelease_toml(&dir, "crate-a = \"alpha\"\n");
+
+    write_changeset(&dir, "feature-a.md", "crate-a", "minor", "Feature for A");
+
+    let result =
+        run_release_with_config(&dir, HashMap::new(), None, false).expect("release should succeed");
+
+    let ReleaseOutcome::Executed(output) = result else {
+        panic!("expected Executed outcome");
+    };
+
+    let release_a = output
+        .planned_releases
+        .iter()
+        .find(|r| r.name == "crate-a")
+        .expect("crate-a should be released");
+
+    assert!(
+        release_a.new_version.to_string().contains("alpha"),
+        "crate-a should have alpha tag from TOML: {}",
+        release_a.new_version
+    );
+}
+
+#[test]
+fn complete_release_cycle_with_state_cleanup() {
+    let dir = create_workspace_with_zero_versions();
+
+    write_graduation_toml(&dir, "graduation = [\"crate-a\"]\n");
+    write_changeset(&dir, "feature.md", "crate-a", "major", "Major release");
+
+    let graduation_toml_before = read_graduation_toml(&dir);
+    assert!(
+        graduation_toml_before.is_some(),
+        "graduation.toml should exist"
+    );
+    assert!(
+        graduation_toml_before.expect("exists").contains("crate-a"),
+        "crate-a should be in graduation queue"
+    );
+
+    let result =
+        run_release_with_config(&dir, HashMap::new(), None, false).expect("release should succeed");
+
+    let ReleaseOutcome::Executed(output) = result else {
+        panic!("expected Executed outcome");
+    };
+
+    let release_a = output
+        .planned_releases
+        .iter()
+        .find(|r| r.name == "crate-a")
+        .expect("crate-a should be released");
+
+    assert_eq!(
+        release_a.new_version.to_string(),
+        "1.0.0",
+        "crate-a should graduate to 1.0.0"
+    );
+
+    let graduation_toml_after = read_graduation_toml(&dir);
+    assert!(
+        graduation_toml_after.is_none()
+            || !graduation_toml_after
+                .as_ref()
+                .is_some_and(|t| t.contains("crate-a")),
+        "crate-a should be removed from graduation.toml after successful graduation"
+    );
+}
+
+// -----------------------------------------------------------------------------
+// Validation Error Integration Tests
+// -----------------------------------------------------------------------------
+
+#[test]
+fn release_fails_with_invalid_prerelease_tag_in_toml() {
+    let dir = create_workspace_project();
+    write_prerelease_toml(&dir, "crate-a = \"invalid.tag.with.dots\"\n");
+    write_changeset(&dir, "feature.md", "crate-a", "minor", "Add feature");
+
+    let result = run_release_with_config(&dir, HashMap::new(), None, false);
+
+    assert!(result.is_err(), "should fail with invalid prerelease tag");
+    let err = result.expect_err("should be error");
+    let err_str = err.to_string();
+    assert!(
+        err_str.contains("validation") || err_str.contains("invalid"),
+        "error should indicate validation failure: {err_str}"
+    );
+}
+
+#[test]
+fn release_fails_with_multiple_conflicting_configs() {
+    let dir = create_workspace_project();
+
+    write_prerelease_toml(&dir, "crate-a = \"alpha\"\ncrate-b = \"beta\"\n");
+    write_changeset(&dir, "feature-a.md", "crate-a", "minor", "Feature A");
+    write_changeset(&dir, "feature-b.md", "crate-b", "minor", "Feature B");
+
+    let mut per_package_config = HashMap::new();
+    per_package_config.insert(
+        "crate-a".to_string(),
+        changeset_operations::operations::PackageReleaseConfig {
+            prerelease: Some(changeset_core::PrereleaseSpec::Beta),
+            graduate_zero: false,
+        },
+    );
+    per_package_config.insert(
+        "crate-b".to_string(),
+        changeset_operations::operations::PackageReleaseConfig {
+            prerelease: Some(changeset_core::PrereleaseSpec::Alpha),
+            graduate_zero: false,
+        },
+    );
+
+    let result = run_release_with_config(&dir, per_package_config, None, false);
+
+    assert!(
+        result.is_err(),
+        "should fail with multiple conflicting configs"
+    );
+    let err = result.expect_err("should be error");
+    let err_str = err.to_string();
+    assert!(
+        err_str.contains("validation") || err_str.contains("2 error"),
+        "error should indicate multiple validation failures: {err_str}"
+    );
+}
+
+#[test]
+fn release_with_empty_prerelease_tag_in_toml_fails() {
+    let dir = create_workspace_project();
+    write_prerelease_toml(&dir, "crate-a = \"\"\n");
+    write_changeset(&dir, "feature.md", "crate-a", "minor", "Add feature");
+
+    let result = run_release_with_config(&dir, HashMap::new(), None, false);
+
+    assert!(result.is_err(), "should fail with empty prerelease tag");
+}
+
+#[test]
+fn release_validates_before_any_file_modifications() {
+    let dir = create_workspace_project();
+
+    fs::write(
+        dir.path().join("crates/crate-a/Cargo.toml"),
+        r#"[package]
+name = "crate-a"
+version = "1.0.0"
+edition = "2021"
+"#,
+    )
+    .expect("write crate-a Cargo.toml");
+
+    write_prerelease_toml(&dir, "crate-a = \"invalid.tag\"\n");
+    write_changeset(&dir, "feature.md", "crate-a", "minor", "Add feature");
+
+    let original_content =
+        fs::read_to_string(dir.path().join("crates/crate-a/Cargo.toml")).expect("read file");
+
+    let result = run_release_with_config(&dir, HashMap::new(), None, false);
+
+    assert!(result.is_err(), "should fail validation");
+
+    let after_content =
+        fs::read_to_string(dir.path().join("crates/crate-a/Cargo.toml")).expect("read file");
+    assert_eq!(
+        original_content, after_content,
+        "Cargo.toml should not be modified when validation fails"
+    );
+
+    assert!(
+        !dir.path().join("crates/crate-a/CHANGELOG.md").exists(),
+        "CHANGELOG.md should not be created when validation fails"
+    );
+}
+
+// -----------------------------------------------------------------------------
+// Mixed Scenario Tests
+// -----------------------------------------------------------------------------
+
+#[test]
+fn release_with_partial_prerelease_config() {
+    let dir = create_workspace_project();
+
+    write_prerelease_toml(&dir, "crate-a = \"alpha\"\n");
+    write_changeset(&dir, "feature-a.md", "crate-a", "minor", "Feature A");
+    write_changeset(&dir, "feature-b.md", "crate-b", "minor", "Feature B");
+
+    let result =
+        run_release_with_config(&dir, HashMap::new(), None, false).expect("release should succeed");
+
+    let ReleaseOutcome::Executed(output) = result else {
+        panic!("expected Executed outcome");
+    };
+
+    let release_a = output
+        .planned_releases
+        .iter()
+        .find(|r| r.name == "crate-a")
+        .expect("crate-a should be released");
+    let release_b = output
+        .planned_releases
+        .iter()
+        .find(|r| r.name == "crate-b")
+        .expect("crate-b should be released");
+
+    assert!(
+        release_a.new_version.to_string().contains("alpha"),
+        "crate-a should have alpha prerelease: {}",
+        release_a.new_version
+    );
+    assert!(
+        !release_b.new_version.to_string().contains('-'),
+        "crate-b should be stable: {}",
+        release_b.new_version
+    );
+}
+
+#[test]
+fn release_with_zero_versions_and_different_bumps() {
+    let dir = create_workspace_with_zero_versions();
+    write_changeset(&dir, "major-a.md", "crate-a", "major", "Breaking A");
+    write_changeset(&dir, "minor-b.md", "crate-b", "minor", "Feature B");
+
+    let result =
+        run_release_with_config(&dir, HashMap::new(), None, false).expect("release should succeed");
+
+    let ReleaseOutcome::Executed(output) = result else {
+        panic!("expected Executed outcome");
+    };
+
+    let release_a = output
+        .planned_releases
+        .iter()
+        .find(|r| r.name == "crate-a")
+        .expect("crate-a should be released");
+    let release_b = output
+        .planned_releases
+        .iter()
+        .find(|r| r.name == "crate-b")
+        .expect("crate-b should be released");
+
+    assert_eq!(
+        release_a.new_version.to_string(),
+        "0.6.0",
+        "major bump on 0.x should become minor bump (EffectiveMinor)"
+    );
+    assert_eq!(
+        release_b.new_version.to_string(),
+        "0.3.1",
+        "minor bump on 0.x should become patch bump (EffectiveMinor)"
+    );
+}
+
+#[test]
+fn release_idempotent_state_updates() {
+    let dir = create_workspace_with_zero_versions();
+
+    write_graduation_toml(&dir, "graduation = [\"crate-a\", \"crate-b\"]\n");
+    write_changeset(&dir, "feature-a.md", "crate-a", "minor", "Feature A");
+
+    let _ = run_release_with_config(&dir, HashMap::new(), None, false)
+        .expect("first release should succeed");
+
+    let after_first_toml = read_graduation_toml(&dir);
+
+    if let Some(toml) = &after_first_toml {
+        assert!(
+            !toml.contains("\"crate-a\""),
+            "crate-a should be removed after graduation"
+        );
+        assert!(toml.contains("crate-b"), "crate-b should still be in queue");
+    }
+}
+
+#[test]
+fn graduation_with_prerelease_toml_produces_prerelease_stable() {
+    let dir = create_workspace_with_zero_versions();
+
+    write_graduation_toml(&dir, "graduation = [\"crate-a\"]\n");
+    write_prerelease_toml(&dir, "crate-a = \"alpha\"\n");
+    write_changeset(&dir, "feature.md", "crate-a", "minor", "Add feature");
+
+    let result =
+        run_release_with_config(&dir, HashMap::new(), None, false).expect("release should succeed");
+
+    let ReleaseOutcome::Executed(output) = result else {
+        panic!("expected Executed outcome");
+    };
+
+    let release_a = output
+        .planned_releases
+        .iter()
+        .find(|r| r.name == "crate-a")
+        .expect("crate-a should be in releases");
+
+    assert_eq!(
+        release_a.new_version.to_string(),
+        "1.0.0-alpha.1",
+        "graduation + prerelease should produce 1.0.0-alpha.1"
+    );
+
+    let graduation_after = read_graduation_toml(&dir);
+    assert!(
+        graduation_after.is_none()
+            || !graduation_after
+                .as_ref()
+                .is_some_and(|t| t.contains("crate-a")),
+        "crate-a should be removed from graduation.toml after graduation"
+    );
+
+    let prerelease_after = read_prerelease_toml(&dir);
+    assert!(
+        prerelease_after.is_some() && prerelease_after.expect("exists").contains("crate-a"),
+        "crate-a should remain in pre-release.toml (still in prerelease mode)"
+    );
+}
+
+fn create_three_crate_workspace() -> TempDir {
+    let dir = TempDir::new().expect("create temp dir");
+
+    fs::write(
+        dir.path().join("Cargo.toml"),
+        r#"[workspace]
+members = ["crates/*"]
+resolver = "2"
+"#,
+    )
+    .expect("write workspace Cargo.toml");
+
+    fs::create_dir_all(dir.path().join("crates/crate-a/src")).expect("create crate-a dir");
+    fs::write(
+        dir.path().join("crates/crate-a/Cargo.toml"),
+        r#"[package]
+name = "crate-a"
+version = "1.0.0"
+edition = "2021"
+"#,
+    )
+    .expect("write crate-a Cargo.toml");
+    fs::write(dir.path().join("crates/crate-a/src/lib.rs"), "").expect("write lib.rs");
+
+    fs::create_dir_all(dir.path().join("crates/crate-b/src")).expect("create crate-b dir");
+    fs::write(
+        dir.path().join("crates/crate-b/Cargo.toml"),
+        r#"[package]
+name = "crate-b"
+version = "0.5.0"
+edition = "2021"
+"#,
+    )
+    .expect("write crate-b Cargo.toml");
+    fs::write(dir.path().join("crates/crate-b/src/lib.rs"), "").expect("write lib.rs");
+
+    fs::create_dir_all(dir.path().join("crates/crate-c/src")).expect("create crate-c dir");
+    fs::write(
+        dir.path().join("crates/crate-c/Cargo.toml"),
+        r#"[package]
+name = "crate-c"
+version = "2.0.0"
+edition = "2021"
+"#,
+    )
+    .expect("write crate-c Cargo.toml");
+    fs::write(dir.path().join("crates/crate-c/src/lib.rs"), "").expect("write lib.rs");
+
+    fs::create_dir_all(dir.path().join(".changeset/changesets"))
+        .expect("create .changeset/changesets dir");
+
+    dir
+}
+
+#[test]
+fn release_with_mixed_config_from_all_sources() {
+    let dir = create_three_crate_workspace();
+
+    write_prerelease_toml(&dir, "crate-a = \"alpha\"\n");
+    write_graduation_toml(&dir, "graduation = [\"crate-b\"]\n");
+
+    write_changeset(&dir, "feature-a.md", "crate-a", "minor", "Feature for A");
+    write_changeset(&dir, "feature-b.md", "crate-b", "minor", "Feature for B");
+    write_changeset(&dir, "feature-c.md", "crate-c", "minor", "Feature for C");
+
+    let result =
+        run_release_with_config(&dir, HashMap::new(), None, false).expect("release should succeed");
+
+    let ReleaseOutcome::Executed(output) = result else {
+        panic!("expected Executed outcome");
+    };
+
+    assert_eq!(
+        output.planned_releases.len(),
+        3,
+        "all three crates should be released"
+    );
+
+    let release_a = output
+        .planned_releases
+        .iter()
+        .find(|r| r.name == "crate-a")
+        .expect("crate-a should be in releases");
+    assert!(
+        release_a.new_version.to_string().contains("alpha"),
+        "crate-a should have alpha prerelease: {}",
+        release_a.new_version
+    );
+
+    let release_b = output
+        .planned_releases
+        .iter()
+        .find(|r| r.name == "crate-b")
+        .expect("crate-b should be in releases");
+    assert_eq!(
+        release_b.new_version.to_string(),
+        "1.0.0",
+        "crate-b should graduate to 1.0.0"
+    );
+
+    let release_c = output
+        .planned_releases
+        .iter()
+        .find(|r| r.name == "crate-c")
+        .expect("crate-c should be in releases");
+    assert_eq!(
+        release_c.new_version.to_string(),
+        "2.1.0",
+        "crate-c should get normal minor bump"
+    );
+
+    let graduation_toml_after = read_graduation_toml(&dir);
+    assert!(
+        graduation_toml_after.is_none()
+            || !graduation_toml_after
+                .as_ref()
+                .is_some_and(|t| t.contains("crate-b")),
+        "crate-b should be removed from graduation.toml after graduation"
+    );
+
+    let prerelease_toml_after = read_prerelease_toml(&dir);
+    assert!(
+        prerelease_toml_after.is_some()
+            && prerelease_toml_after.expect("exists").contains("crate-a"),
+        "crate-a should remain in pre-release.toml (still in prerelease mode)"
+    );
+}
+
+#[test]
+fn manage_remove_then_release_produces_normal_version() {
+    let dir = create_workspace_project();
+
+    write_prerelease_toml(&dir, "crate-a = \"alpha\"\n");
+
+    let prerelease_path = dir.path().join(".changeset/pre-release.toml");
+    assert!(
+        prerelease_path.exists(),
+        "pre-release.toml should exist initially"
+    );
+
+    fs::remove_file(&prerelease_path).expect("simulate manage --remove by deleting TOML");
+
+    write_changeset(&dir, "feature.md", "crate-a", "minor", "Add feature");
+
+    let result =
+        run_release_with_config(&dir, HashMap::new(), None, false).expect("release should succeed");
+
+    let ReleaseOutcome::Executed(output) = result else {
+        panic!("expected Executed outcome");
+    };
+
+    let release_a = output
+        .planned_releases
+        .iter()
+        .find(|r| r.name == "crate-a")
+        .expect("crate-a should be in releases");
+    assert!(
+        !release_a.new_version.to_string().contains('-'),
+        "crate-a should get normal release (no prerelease tag): {}",
+        release_a.new_version
+    );
+    assert_eq!(
+        release_a.new_version.to_string(),
+        "1.1.0",
+        "crate-a should get normal minor bump"
     );
 }

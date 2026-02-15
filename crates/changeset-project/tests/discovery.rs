@@ -136,6 +136,13 @@ fn ensure_changeset_dir_creates_directory() {
     assert!(changeset_dir.exists());
     assert!(changeset_dir.is_dir());
     assert_eq!(changeset_dir, project.root.join(".changeset"));
+
+    let changesets_subdir = changeset_dir.join("changesets");
+    assert!(
+        changesets_subdir.exists(),
+        "changesets subdirectory should be created"
+    );
+    assert!(changesets_subdir.is_dir());
 }
 
 #[test]
