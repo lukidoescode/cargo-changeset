@@ -104,8 +104,9 @@ fn add_changeset(dir: &TempDir, package_name: &str) {
 }
 
 fn add_changeset_with_name(dir: &TempDir, package_name: &str, changeset_name: &str) {
-    fs::create_dir_all(dir.path().join(".changeset")).expect("failed to create .changeset dir");
-    let filename = format!(".changeset/{changeset_name}.md");
+    fs::create_dir_all(dir.path().join(".changeset/changesets"))
+        .expect("failed to create .changeset/changesets dir");
+    let filename = format!(".changeset/changesets/{changeset_name}.md");
     fs::write(
         dir.path().join(&filename),
         format!(
@@ -121,8 +122,9 @@ Test changeset for {package_name}.
 }
 
 fn add_multi_package_changeset(dir: &TempDir, packages: &[&str], changeset_name: &str) {
-    fs::create_dir_all(dir.path().join(".changeset")).expect("failed to create .changeset dir");
-    let filename = format!(".changeset/{changeset_name}.md");
+    fs::create_dir_all(dir.path().join(".changeset/changesets"))
+        .expect("failed to create .changeset/changesets dir");
+    let filename = format!(".changeset/changesets/{changeset_name}.md");
 
     let package_entries: String = packages
         .iter()
@@ -514,9 +516,10 @@ fn verify_fails_on_malformed_changeset() {
     )
     .expect("failed to modify lib.rs");
 
-    fs::create_dir_all(workspace.path().join(".changeset")).expect("failed to create .changeset");
+    fs::create_dir_all(workspace.path().join(".changeset/changesets"))
+        .expect("failed to create .changeset/changesets");
     fs::write(
-        workspace.path().join(".changeset/malformed.md"),
+        workspace.path().join(".changeset/changesets/malformed.md"),
         r#"---
 invalid yaml {{{ not closed
 ---
@@ -645,8 +648,12 @@ fn verify_deleted_changeset_fails() {
     git_add_and_commit(&workspace, "Add changeset");
 
     create_branch(&workspace, "feature");
-    fs::remove_file(workspace.path().join(".changeset/crate-a-changeset.md"))
-        .expect("failed to delete changeset");
+    fs::remove_file(
+        workspace
+            .path()
+            .join(".changeset/changesets/crate-a-changeset.md"),
+    )
+    .expect("failed to delete changeset");
     git_add_and_commit(&workspace, "Delete changeset");
 
     assert_cmd::cargo::cargo_bin_cmd!("cargo-changeset")
@@ -668,8 +675,12 @@ fn verify_deleted_changeset_with_allow_flag_passes() {
     git_add_and_commit(&workspace, "Add changeset");
 
     create_branch(&workspace, "feature");
-    fs::remove_file(workspace.path().join(".changeset/crate-a-changeset.md"))
-        .expect("failed to delete changeset");
+    fs::remove_file(
+        workspace
+            .path()
+            .join(".changeset/changesets/crate-a-changeset.md"),
+    )
+    .expect("failed to delete changeset");
     git_add_and_commit(&workspace, "Delete changeset");
 
     assert_cmd::cargo::cargo_bin_cmd!("cargo-changeset")
@@ -828,7 +839,9 @@ fn verify_feature_modifies_existing_changeset_from_main() {
     .expect("failed to modify lib.rs");
 
     fs::write(
-        workspace.path().join(".changeset/shared-changeset.md"),
+        workspace
+            .path()
+            .join(".changeset/changesets/shared-changeset.md"),
         r#"---
 "crate-a": minor
 ---
@@ -1213,8 +1226,12 @@ fn verify_deleted_and_added_changeset_in_same_branch() {
 
     create_branch(&workspace, "feature");
 
-    fs::remove_file(workspace.path().join(".changeset/old-changeset.md"))
-        .expect("failed to delete old changeset");
+    fs::remove_file(
+        workspace
+            .path()
+            .join(".changeset/changesets/old-changeset.md"),
+    )
+    .expect("failed to delete old changeset");
     add_changeset_with_name(&workspace, "crate-a", "new-changeset");
     git_add_and_commit(&workspace, "Replace old changeset with new one");
 
@@ -1243,8 +1260,12 @@ fn verify_deleted_and_added_changeset_with_allow_flag() {
     )
     .expect("failed to modify lib.rs");
 
-    fs::remove_file(workspace.path().join(".changeset/old-changeset.md"))
-        .expect("failed to delete old changeset");
+    fs::remove_file(
+        workspace
+            .path()
+            .join(".changeset/changesets/old-changeset.md"),
+    )
+    .expect("failed to delete old changeset");
     add_changeset_with_name(&workspace, "crate-a", "new-changeset");
     git_add_and_commit(&workspace, "Replace old changeset with new one plus code");
 

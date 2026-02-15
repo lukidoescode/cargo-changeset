@@ -72,7 +72,12 @@ where
 
         let bumps_by_package = VersionPlanner::aggregate_bumps(&changesets);
 
-        let plan = VersionPlanner::plan_releases(&changesets, &project.packages)?;
+        let plan = VersionPlanner::plan_releases_with_behavior(
+            &changesets,
+            &project.packages,
+            None,
+            root_config.zero_version_behavior(),
+        )?;
 
         let (_, unchanged_packages) =
             VersionPlanner::partition_packages(&changesets, &project.packages);
@@ -161,7 +166,7 @@ mod tests {
 
         let changeset = make_changeset("my-crate", BumpType::Minor, "Add feature");
         let changeset_reader = MockChangesetReader::new()
-            .with_changeset(PathBuf::from(".changeset/test.md"), changeset);
+            .with_changeset(PathBuf::from(".changeset/changesets/test.md"), changeset);
 
         let operation = make_operation(project_provider, changeset_reader);
 
@@ -191,8 +196,11 @@ mod tests {
         let changeset2 = make_changeset("my-crate", BumpType::Minor, "Add feature");
 
         let changeset_reader = MockChangesetReader::new().with_changesets(vec![
-            (PathBuf::from(".changeset/fix.md"), changeset1),
-            (PathBuf::from(".changeset/feature.md"), changeset2),
+            (PathBuf::from(".changeset/changesets/fix.md"), changeset1),
+            (
+                PathBuf::from(".changeset/changesets/feature.md"),
+                changeset2,
+            ),
         ]);
 
         let operation = make_operation(project_provider, changeset_reader);
@@ -219,7 +227,7 @@ mod tests {
 
         let changeset = make_changeset("crate-a", BumpType::Patch, "Fix crate-a");
         let changeset_reader = MockChangesetReader::new()
-            .with_changeset(PathBuf::from(".changeset/test.md"), changeset);
+            .with_changeset(PathBuf::from(".changeset/changesets/test.md"), changeset);
 
         let operation = make_operation(project_provider, changeset_reader);
 
@@ -236,7 +244,7 @@ mod tests {
         let project_provider = MockProjectProvider::single_package("my-crate", "1.0.0");
         let changeset = make_changeset("my-crate", BumpType::Patch, "Fix");
         let changeset_reader = MockChangesetReader::new()
-            .with_changeset(PathBuf::from(".changeset/fix.md"), changeset);
+            .with_changeset(PathBuf::from(".changeset/changesets/fix.md"), changeset);
 
         let inherited_checker = MockInheritedVersionChecker::new()
             .with_inherited(vec![PathBuf::from("/mock/project/Cargo.toml")]);
@@ -255,7 +263,7 @@ mod tests {
         let project_provider = MockProjectProvider::single_package("known-crate", "1.0.0");
         let changeset = make_changeset("unknown-crate", BumpType::Patch, "Fix");
         let changeset_reader = MockChangesetReader::new()
-            .with_changeset(PathBuf::from(".changeset/fix.md"), changeset);
+            .with_changeset(PathBuf::from(".changeset/changesets/fix.md"), changeset);
 
         let operation = make_operation(project_provider, changeset_reader);
 
@@ -276,8 +284,14 @@ mod tests {
         let changeset2 = make_changeset("crate-b", BumpType::Major, "Breaking change");
 
         let changeset_reader = MockChangesetReader::new().with_changesets(vec![
-            (PathBuf::from(".changeset/feature.md"), changeset1),
-            (PathBuf::from(".changeset/breaking.md"), changeset2),
+            (
+                PathBuf::from(".changeset/changesets/feature.md"),
+                changeset1,
+            ),
+            (
+                PathBuf::from(".changeset/changesets/breaking.md"),
+                changeset2,
+            ),
         ]);
 
         let operation = make_operation(project_provider, changeset_reader);
@@ -342,8 +356,10 @@ mod tests {
         let mut consumed_changeset = make_changeset("my-crate", BumpType::Patch, "Fix bug");
         consumed_changeset.consumed_for_prerelease = Some("1.0.1-alpha.1".to_string());
 
-        let changeset_reader = MockChangesetReader::new()
-            .with_changeset(PathBuf::from(".changeset/fix-bug.md"), consumed_changeset);
+        let changeset_reader = MockChangesetReader::new().with_changeset(
+            PathBuf::from(".changeset/changesets/fix-bug.md"),
+            consumed_changeset,
+        );
 
         let operation = make_operation(project_provider, changeset_reader);
 
@@ -356,7 +372,7 @@ mod tests {
         assert_eq!(result.consumed_prerelease_changesets.len(), 1);
         assert_eq!(
             result.consumed_prerelease_changesets[0].0,
-            PathBuf::from(".changeset/fix-bug.md")
+            PathBuf::from(".changeset/changesets/fix-bug.md")
         );
         assert_eq!(result.consumed_prerelease_changesets[0].1, "1.0.1-alpha.1");
     }
@@ -371,8 +387,14 @@ mod tests {
         consumed_changeset.consumed_for_prerelease = Some("1.0.1-alpha.1".to_string());
 
         let changeset_reader = MockChangesetReader::new().with_changesets(vec![
-            (PathBuf::from(".changeset/feature.md"), pending_changeset),
-            (PathBuf::from(".changeset/fix.md"), consumed_changeset),
+            (
+                PathBuf::from(".changeset/changesets/feature.md"),
+                pending_changeset,
+            ),
+            (
+                PathBuf::from(".changeset/changesets/fix.md"),
+                consumed_changeset,
+            ),
         ]);
 
         let operation = make_operation(project_provider, changeset_reader);
@@ -384,7 +406,7 @@ mod tests {
         assert_eq!(result.changeset_files.len(), 1);
         assert_eq!(
             result.changeset_files[0],
-            PathBuf::from(".changeset/feature.md")
+            PathBuf::from(".changeset/changesets/feature.md")
         );
 
         assert_eq!(result.changesets.len(), 1);
@@ -393,7 +415,7 @@ mod tests {
         assert_eq!(result.consumed_prerelease_changesets.len(), 1);
         assert_eq!(
             result.consumed_prerelease_changesets[0].0,
-            PathBuf::from(".changeset/fix.md")
+            PathBuf::from(".changeset/changesets/fix.md")
         );
         assert_eq!(result.consumed_prerelease_changesets[0].1, "1.0.1-alpha.1");
     }
@@ -409,8 +431,8 @@ mod tests {
         consumed2.consumed_for_prerelease = Some("1.0.1-alpha.2".to_string());
 
         let changeset_reader = MockChangesetReader::new().with_changesets(vec![
-            (PathBuf::from(".changeset/fix1.md"), consumed1),
-            (PathBuf::from(".changeset/fix2.md"), consumed2),
+            (PathBuf::from(".changeset/changesets/fix1.md"), consumed1),
+            (PathBuf::from(".changeset/changesets/fix2.md"), consumed2),
         ]);
 
         let operation = make_operation(project_provider, changeset_reader);

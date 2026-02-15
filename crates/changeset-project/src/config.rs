@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use changeset_changelog::{ChangelogConfig, ChangelogLocation, ComparisonLinksSetting};
+use changeset_core::ZeroVersionBehavior;
 use globset::{Glob, GlobSet, GlobSetBuilder};
 
 use crate::error::ProjectError;
@@ -84,6 +85,7 @@ pub struct RootChangesetConfig {
     changeset_dir: PathBuf,
     changelog_config: ChangelogConfig,
     git_config: GitConfig,
+    zero_version_behavior: ZeroVersionBehavior,
 }
 
 impl Default for RootChangesetConfig {
@@ -93,6 +95,7 @@ impl Default for RootChangesetConfig {
             changeset_dir: PathBuf::from(crate::DEFAULT_CHANGESET_DIR),
             changelog_config: ChangelogConfig::default(),
             git_config: GitConfig::default(),
+            zero_version_behavior: ZeroVersionBehavior::default(),
         }
     }
 }
@@ -121,6 +124,11 @@ impl RootChangesetConfig {
     #[must_use]
     pub fn git_config(&self) -> &GitConfig {
         &self.git_config
+    }
+
+    #[must_use]
+    pub fn zero_version_behavior(&self) -> ZeroVersionBehavior {
+        self.zero_version_behavior
     }
 
     #[cfg(any(test, feature = "testing"))]
@@ -234,11 +242,17 @@ fn parse_workspace_root_config(project_root: &Path) -> Result<RootChangesetConfi
 
     let git_config = build_git_config(changeset_metadata.as_ref());
 
+    let zero_version_behavior = changeset_metadata
+        .as_ref()
+        .and_then(|cs| cs.zero_version_behavior)
+        .unwrap_or_default();
+
     Ok(RootChangesetConfig {
         ignored_files,
         changeset_dir: PathBuf::from(changeset_dir),
         changelog_config,
         git_config,
+        zero_version_behavior,
     })
 }
 
@@ -280,11 +294,17 @@ fn parse_package_root_config(project_root: &Path) -> Result<RootChangesetConfig,
 
     let git_config = build_git_config(changeset_metadata.as_ref());
 
+    let zero_version_behavior = changeset_metadata
+        .as_ref()
+        .and_then(|cs| cs.zero_version_behavior)
+        .unwrap_or_default();
+
     Ok(RootChangesetConfig {
         ignored_files,
         changeset_dir: PathBuf::from(changeset_dir),
         changelog_config,
         git_config,
+        zero_version_behavior,
     })
 }
 
@@ -685,6 +705,88 @@ keep-changesets = true
         assert!(!git_config.commit());
         assert!(git_config.tags());
         assert!(git_config.keep_changesets());
+
+        Ok(())
+    }
+
+    #[test]
+    fn parse_zero_version_behavior_default() -> anyhow::Result<()> {
+        let toml = r#"
+[workspace]
+members = ["crates/*"]
+"#;
+        let dir = setup_with_config(toml)?;
+
+        let config = parse_workspace_root_config(dir.path())?;
+
+        assert_eq!(
+            config.zero_version_behavior(),
+            ZeroVersionBehavior::EffectiveMinor
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn parse_zero_version_behavior_effective_minor() -> anyhow::Result<()> {
+        let toml = r#"
+[workspace]
+members = ["crates/*"]
+
+[workspace.metadata.changeset]
+zero-version-behavior = "effective-minor"
+"#;
+        let dir = setup_with_config(toml)?;
+
+        let config = parse_workspace_root_config(dir.path())?;
+
+        assert_eq!(
+            config.zero_version_behavior(),
+            ZeroVersionBehavior::EffectiveMinor
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn parse_zero_version_behavior_auto_promote() -> anyhow::Result<()> {
+        let toml = r#"
+[workspace]
+members = ["crates/*"]
+
+[workspace.metadata.changeset]
+zero-version-behavior = "auto-promote-on-major"
+"#;
+        let dir = setup_with_config(toml)?;
+
+        let config = parse_workspace_root_config(dir.path())?;
+
+        assert_eq!(
+            config.zero_version_behavior(),
+            ZeroVersionBehavior::AutoPromoteOnMajor
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn parse_single_package_zero_version_behavior() -> anyhow::Result<()> {
+        let toml = r#"
+[package]
+name = "my-crate"
+version = "0.1.0"
+
+[package.metadata.changeset]
+zero-version-behavior = "auto-promote-on-major"
+"#;
+        let dir = setup_with_config(toml)?;
+
+        let config = parse_package_root_config(dir.path())?;
+
+        assert_eq!(
+            config.zero_version_behavior(),
+            ZeroVersionBehavior::AutoPromoteOnMajor
+        );
 
         Ok(())
     }

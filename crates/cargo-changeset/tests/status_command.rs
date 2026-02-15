@@ -19,7 +19,8 @@ edition = "2021"
     fs::create_dir_all(dir.path().join("src")).expect("create src dir");
     fs::write(dir.path().join("src/lib.rs"), "").expect("write lib.rs");
 
-    fs::create_dir_all(dir.path().join(".changeset")).expect("create .changeset dir");
+    fs::create_dir_all(dir.path().join(".changeset/changesets"))
+        .expect("create .changeset/changesets dir");
 
     dir
 }
@@ -60,7 +61,8 @@ edition = "2021"
     .expect("write crate-b Cargo.toml");
     fs::write(dir.path().join("crates/crate-b/src/lib.rs"), "").expect("write lib.rs");
 
-    fs::create_dir_all(dir.path().join(".changeset")).expect("create .changeset dir");
+    fs::create_dir_all(dir.path().join(".changeset/changesets"))
+        .expect("create .changeset/changesets dir");
 
     dir
 }
@@ -93,7 +95,8 @@ edition.workspace = true
     .expect("write crate-a Cargo.toml");
     fs::write(dir.path().join("crates/crate-a/src/lib.rs"), "").expect("write lib.rs");
 
-    fs::create_dir_all(dir.path().join(".changeset")).expect("create .changeset dir");
+    fs::create_dir_all(dir.path().join(".changeset/changesets"))
+        .expect("create .changeset/changesets dir");
 
     dir
 }
@@ -107,7 +110,11 @@ fn write_changeset(dir: &TempDir, filename: &str, package: &str, bump: &str, sum
 {summary}
 "#
     );
-    fs::write(dir.path().join(".changeset").join(filename), content).expect("write changeset");
+    fs::write(
+        dir.path().join(".changeset/changesets").join(filename),
+        content,
+    )
+    .expect("write changeset");
 }
 
 macro_rules! cargo_changeset_status {

@@ -1,18 +1,21 @@
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, RwLock};
 
 use changeset_changelog::{RepositoryInfo, VersionRelease};
 use changeset_core::{BumpType, ChangeCategory, Changeset, PackageInfo};
 use changeset_git::{CommitInfo, FileChange, TagInfo};
-use changeset_project::{CargoProject, PackageChangesetConfig, ProjectKind, RootChangesetConfig};
+use changeset_project::{
+    CargoProject, GraduationState, PackageChangesetConfig, PrereleaseState, ProjectKind,
+    RootChangesetConfig,
+};
 use semver::Version;
 
 use crate::Result;
 use crate::traits::{
     BumpSelection, CategorySelection, ChangelogWriteResult, ChangelogWriter, ChangesetReader,
     ChangesetWriter, DescriptionInput, GitProvider, InheritedVersionChecker, InteractionProvider,
-    ManifestWriter, PackageSelection, ProjectProvider,
+    ManifestWriter, PackageSelection, ProjectProvider, ReleaseStateIO,
 };
 
 pub struct MockProjectProvider {
@@ -642,6 +645,7 @@ pub fn make_changeset(package_name: &str, bump: BumpType, summary: &str) -> Chan
         }],
         category: ChangeCategory::Changed,
         consumed_for_prerelease: None,
+        graduate: false,
     }
 }
 
@@ -860,6 +864,107 @@ impl InheritedVersionChecker for FailingInheritedVersionChecker {
     }
 }
 
+pub struct MockReleaseStateIO {
+    prerelease_state: RwLock<Option<PrereleaseState>>,
+    graduation_state: RwLock<Option<GraduationState>>,
+}
+
+impl MockReleaseStateIO {
+    #[must_use]
+    pub fn new() -> Self {
+        Self {
+            prerelease_state: RwLock::new(None),
+            graduation_state: RwLock::new(None),
+        }
+    }
+
+    /// # Panics
+    ///
+    /// Panics if the internal lock is poisoned.
+    #[must_use]
+    pub fn with_prerelease_state(self, state: PrereleaseState) -> Self {
+        *self.prerelease_state.write().expect("lock poisoned") = Some(state);
+        self
+    }
+
+    /// # Panics
+    ///
+    /// Panics if the internal lock is poisoned.
+    #[must_use]
+    pub fn with_graduation_state(self, state: GraduationState) -> Self {
+        *self.graduation_state.write().expect("lock poisoned") = Some(state);
+        self
+    }
+
+    /// # Panics
+    ///
+    /// Panics if the internal lock is poisoned.
+    #[must_use]
+    pub fn get_graduation_state(&self) -> Option<GraduationState> {
+        self.graduation_state.read().expect("lock poisoned").clone()
+    }
+
+    /// # Panics
+    ///
+    /// Panics if the internal lock is poisoned.
+    #[must_use]
+    pub fn get_prerelease_state(&self) -> Option<PrereleaseState> {
+        self.prerelease_state.read().expect("lock poisoned").clone()
+    }
+}
+
+impl Default for MockReleaseStateIO {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl ReleaseStateIO for MockReleaseStateIO {
+    fn load_prerelease_state(&self, _changeset_dir: &Path) -> Result<Option<PrereleaseState>> {
+        Ok(self.prerelease_state.read().expect("lock poisoned").clone())
+    }
+
+    fn save_prerelease_state(&self, _changeset_dir: &Path, state: &PrereleaseState) -> Result<()> {
+        *self.prerelease_state.write().expect("lock poisoned") = if state.is_empty() {
+            None
+        } else {
+            Some(state.clone())
+        };
+        Ok(())
+    }
+
+    fn load_graduation_state(&self, _changeset_dir: &Path) -> Result<Option<GraduationState>> {
+        Ok(self.graduation_state.read().expect("lock poisoned").clone())
+    }
+
+    fn save_graduation_state(&self, _changeset_dir: &Path, state: &GraduationState) -> Result<()> {
+        *self.graduation_state.write().expect("lock poisoned") = if state.is_empty() {
+            None
+        } else {
+            Some(state.clone())
+        };
+        Ok(())
+    }
+}
+
+impl ReleaseStateIO for Arc<MockReleaseStateIO> {
+    fn load_prerelease_state(&self, changeset_dir: &Path) -> Result<Option<PrereleaseState>> {
+        (**self).load_prerelease_state(changeset_dir)
+    }
+
+    fn save_prerelease_state(&self, changeset_dir: &Path, state: &PrereleaseState) -> Result<()> {
+        (**self).save_prerelease_state(changeset_dir, state)
+    }
+
+    fn load_graduation_state(&self, changeset_dir: &Path) -> Result<Option<GraduationState>> {
+        (**self).load_graduation_state(changeset_dir)
+    }
+
+    fn save_graduation_state(&self, changeset_dir: &Path, state: &GraduationState) -> Result<()> {
+        (**self).save_graduation_state(changeset_dir, state)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -869,7 +974,7 @@ mod tests {
     }
 
     #[test]
-    fn test_mock_list_changesets_filters_consumed() {
+    fn mock_list_changesets_filters_consumed() {
         let changeset_dir = PathBuf::from("/mock/.changeset");
         let unconsumed_path = changeset_dir.join("unconsumed.md");
         let consumed_path = changeset_dir.join("consumed.md");
@@ -892,7 +997,7 @@ mod tests {
     }
 
     #[test]
-    fn test_mock_list_consumed_changesets_returns_consumed() {
+    fn mock_list_consumed_changesets_returns_consumed() {
         let changeset_dir = PathBuf::from("/mock/.changeset");
         let unconsumed_path = changeset_dir.join("unconsumed.md");
         let consumed_path = changeset_dir.join("consumed.md");
@@ -915,7 +1020,7 @@ mod tests {
     }
 
     #[test]
-    fn test_mock_mark_consumed_updates_state() {
+    fn mock_mark_consumed_updates_state() {
         let changeset_dir = PathBuf::from("/mock/.changeset");
         let path = changeset_dir.join("changeset.md");
 
@@ -947,7 +1052,7 @@ mod tests {
     }
 
     #[test]
-    fn test_mock_clear_consumed_updates_state() {
+    fn mock_clear_consumed_updates_state() {
         let changeset_dir = PathBuf::from("/mock/.changeset");
         let path = changeset_dir.join("changeset.md");
 

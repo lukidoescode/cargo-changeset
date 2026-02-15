@@ -9,7 +9,8 @@ use tempfile::TempDir;
 
 fn create_changeset_dir() -> TempDir {
     let dir = TempDir::new().expect("create temp dir");
-    fs::create_dir_all(dir.path().join(".changeset")).expect("create .changeset dir");
+    fs::create_dir_all(dir.path().join(".changeset/changesets"))
+        .expect("create .changeset/changesets dir");
     dir
 }
 
@@ -22,7 +23,11 @@ fn write_changeset_file(dir: &TempDir, filename: &str, package: &str, bump: &str
 {summary}
 "#
     );
-    fs::write(dir.path().join(".changeset").join(filename), content).expect("write changeset file");
+    fs::write(
+        dir.path().join(".changeset/changesets").join(filename),
+        content,
+    )
+    .expect("write changeset file");
 }
 
 fn write_consumed_changeset_file(
@@ -42,16 +47,20 @@ consumedForPrerelease: "{consumed_version}"
 {summary}
 "#
     );
-    fs::write(dir.path().join(".changeset").join(filename), content)
-        .expect("write consumed changeset file");
+    fs::write(
+        dir.path().join(".changeset/changesets").join(filename),
+        content,
+    )
+    .expect("write consumed changeset file");
 }
 
 fn read_changeset_file(dir: &TempDir, filename: &str) -> String {
-    fs::read_to_string(dir.path().join(".changeset").join(filename)).expect("read changeset file")
+    fs::read_to_string(dir.path().join(".changeset/changesets").join(filename))
+        .expect("read changeset file")
 }
 
 #[test]
-fn test_mark_consumed_for_prerelease_updates_frontmatter() {
+fn mark_consumed_for_prerelease_updates_frontmatter() {
     let dir = create_changeset_dir();
     write_changeset_file(&dir, "feature.md", "my-crate", "minor", "Add a feature");
 
@@ -84,7 +93,7 @@ fn test_mark_consumed_for_prerelease_updates_frontmatter() {
 }
 
 #[test]
-fn test_list_changesets_excludes_consumed() {
+fn list_changesets_excludes_consumed() {
     let dir = create_changeset_dir();
     write_changeset_file(&dir, "unconsumed.md", "crate-a", "patch", "Fix bug");
     write_consumed_changeset_file(
@@ -115,7 +124,7 @@ fn test_list_changesets_excludes_consumed() {
 }
 
 #[test]
-fn test_list_consumed_changesets_returns_only_consumed() {
+fn list_consumed_changesets_returns_only_consumed() {
     let dir = create_changeset_dir();
     write_changeset_file(&dir, "unconsumed.md", "crate-a", "patch", "Fix bug");
     write_consumed_changeset_file(
@@ -146,7 +155,7 @@ fn test_list_consumed_changesets_returns_only_consumed() {
 }
 
 #[test]
-fn test_clear_consumed_for_prerelease_removes_flag() {
+fn clear_consumed_for_prerelease_removes_flag() {
     let dir = create_changeset_dir();
     write_consumed_changeset_file(
         &dir,
@@ -191,7 +200,7 @@ fn test_clear_consumed_for_prerelease_removes_flag() {
 }
 
 #[test]
-fn test_mark_consumed_preserves_category() {
+fn mark_consumed_preserves_category() {
     let dir = create_changeset_dir();
     let content = r#"---
 category: fixed
@@ -200,8 +209,11 @@ category: fixed
 
 Fix a security issue.
 "#;
-    fs::write(dir.path().join(".changeset/security-fix.md"), content)
-        .expect("write changeset file");
+    fs::write(
+        dir.path().join(".changeset/changesets/security-fix.md"),
+        content,
+    )
+    .expect("write changeset file");
 
     let changeset_io = FileSystemChangesetIO::new(dir.path());
     let changeset_dir = Path::new(".changeset");
@@ -232,7 +244,7 @@ Fix a security issue.
 }
 
 #[test]
-fn test_mark_multiple_changesets_consumed() {
+fn mark_multiple_changesets_consumed() {
     let dir = create_changeset_dir();
     write_changeset_file(&dir, "fix1.md", "crate-a", "patch", "Fix bug 1");
     write_changeset_file(&dir, "fix2.md", "crate-b", "patch", "Fix bug 2");
@@ -263,7 +275,7 @@ fn test_mark_multiple_changesets_consumed() {
 }
 
 #[test]
-fn test_list_changesets_with_mixed_consumed_status() {
+fn list_changesets_with_mixed_consumed_status() {
     let dir = create_changeset_dir();
     write_changeset_file(&dir, "pending1.md", "crate-a", "patch", "Fix 1");
     write_changeset_file(&dir, "pending2.md", "crate-b", "minor", "Feature 1");

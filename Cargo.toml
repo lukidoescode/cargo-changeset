@@ -13,6 +13,7 @@ authors = ["Lukas Wagner <appdev.lukaswagner@gmail.com>"]
 pedantic = { level = "warn", priority = -1 }
 needless_pass_by_value = "allow"             # needed for Bevy systems
 type_complexity = "allow"                    # Some bevy types are just complex. We do not care about that. Clippy's type complexity metric is too strict
+struct_excessive_bools = "allow"             # CLI input structs map directly to command-line flags
 unwrap_used = "deny"
 
 [workspace.dependencies]

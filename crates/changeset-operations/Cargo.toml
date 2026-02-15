@@ -19,8 +19,10 @@ changeset-version = { workspace = true }
 chrono = { version = "0.4", default-features = false, features = ["std", "clock"] }
 indexmap = { workspace = true }
 semver = { workspace = true }
+serde = { workspace = true }
 thiserror = { workspace = true }
 petname = { workspace = true }
+toml = { workspace = true }
 
 [dev-dependencies]
 anyhow = "1.0.101"

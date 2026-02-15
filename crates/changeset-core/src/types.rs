@@ -13,6 +13,14 @@ pub enum BumpType {
     Major,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ZeroVersionBehavior {
+    #[default]
+    EffectiveMinor,
+    AutoPromoteOnMajor,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -87,18 +95,33 @@ pub struct PackageRelease {
     pub bump_type: BumpType,
 }
 
+/// A changeset represents a single unit of change affecting one or more packages.
+///
+/// Changesets capture the intent to release: which packages are affected, what type of
+/// version bump each requires, and a human-readable summary of the change.
+///
+/// # Prerelease Consumption
+///
+/// The `consumed_for_prerelease` field tracks whether this changeset has been included
+/// in a prerelease. When set, it contains the prerelease version string (e.g., "1.0.1-alpha.1").
+/// Consumed changesets are excluded from subsequent prereleases but are aggregated into
+/// the changelog when graduating to a stable release.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Changeset {
     pub summary: String,
     pub releases: Vec<PackageRelease>,
     #[serde(default)]
     pub category: ChangeCategory,
+    /// Version string of the prerelease that consumed this changeset, if any.
+    /// Set during prerelease creation, cleared during graduation to stable.
     #[serde(
         default,
         skip_serializing_if = "Option::is_none",
         rename = "consumedForPrerelease"
     )]
     pub consumed_for_prerelease: Option<String>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub graduate: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -135,9 +158,17 @@ impl fmt::Display for PrereleaseSpec {
 }
 
 impl FromStr for PrereleaseSpec {
-    type Err = std::convert::Infallible;
+    type Err = crate::error::PrereleaseSpecParseError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
+        if s.is_empty() {
+            return Err(Self::Err::Empty);
+        }
+
+        if let Some(invalid_char) = s.chars().find(|c| !c.is_ascii_alphanumeric() && *c != '-') {
+            return Err(Self::Err::InvalidCharacter(s.to_string(), invalid_char));
+        }
+
         Ok(match s.to_lowercase().as_str() {
             "alpha" => Self::Alpha,
             "beta" => Self::Beta,
@@ -215,5 +246,53 @@ mod prerelease_spec_tests {
     fn value_enum_variants() {
         let variants = PrereleaseSpec::value_variants();
         assert_eq!(variants.len(), 3);
+    }
+
+    #[test]
+    fn from_str_rejects_empty_string() {
+        let result = "".parse::<PrereleaseSpec>();
+        assert!(result.is_err());
+        assert_eq!(
+            result.unwrap_err(),
+            crate::error::PrereleaseSpecParseError::Empty
+        );
+    }
+
+    #[test]
+    fn from_str_rejects_invalid_characters() {
+        let result = "alpha.1".parse::<PrereleaseSpec>();
+        assert!(result.is_err());
+        assert_eq!(
+            result.unwrap_err(),
+            crate::error::PrereleaseSpecParseError::InvalidCharacter("alpha.1".to_string(), '.')
+        );
+
+        let result = "pre release".parse::<PrereleaseSpec>();
+        assert!(result.is_err());
+        assert_eq!(
+            result.unwrap_err(),
+            crate::error::PrereleaseSpecParseError::InvalidCharacter(
+                "pre release".to_string(),
+                ' '
+            )
+        );
+
+        let result = "alpha_beta".parse::<PrereleaseSpec>();
+        assert!(result.is_err());
+        assert_eq!(
+            result.unwrap_err(),
+            crate::error::PrereleaseSpecParseError::InvalidCharacter("alpha_beta".to_string(), '_')
+        );
+    }
+
+    #[test]
+    fn from_str_accepts_valid_semver_identifiers() {
+        assert!("alpha".parse::<PrereleaseSpec>().is_ok());
+        assert!("alpha-1".parse::<PrereleaseSpec>().is_ok());
+        assert!("pre-release-2".parse::<PrereleaseSpec>().is_ok());
+        assert!("0".parse::<PrereleaseSpec>().is_ok());
+        assert!("123".parse::<PrereleaseSpec>().is_ok());
+        assert!("abc123".parse::<PrereleaseSpec>().is_ok());
+        assert!("ABC-123-xyz".parse::<PrereleaseSpec>().is_ok());
     }
 }

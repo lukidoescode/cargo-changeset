@@ -103,13 +103,23 @@ impl PlainTextStatusFormatter {
     }
 
     fn format_consumed_prerelease_changesets(output: &mut String, status: &StatusOutput) {
+        const MAX_DISPLAYED: usize = 10;
+
         if status.consumed_prerelease_changesets.is_empty() {
             return;
         }
 
         output.push('\n');
         output.push_str("Consumed pre-release changesets:\n");
-        for (path, version) in &status.consumed_prerelease_changesets {
+
+        let total = status.consumed_prerelease_changesets.len();
+        let display_count = total.min(MAX_DISPLAYED);
+
+        for (path, version) in status
+            .consumed_prerelease_changesets
+            .iter()
+            .take(display_count)
+        {
             if let Some(name) = path.file_name() {
                 output.push_str(&format!(
                     "  - {} (consumed for {})\n",
@@ -117,6 +127,10 @@ impl PlainTextStatusFormatter {
                     version
                 ));
             }
+        }
+
+        if total > MAX_DISPLAYED {
+            output.push_str(&format!("  ... and {} more\n", total - MAX_DISPLAYED));
         }
     }
 }
@@ -204,6 +218,7 @@ mod tests {
                 .collect(),
             category,
             consumed_for_prerelease: None,
+            graduate: false,
         }
     }
 
@@ -240,7 +255,7 @@ mod tests {
             ChangeCategory::Fixed,
             "Fix bug",
         )];
-        status.changeset_files = vec![PathBuf::from(".changeset/fix-bug.md")];
+        status.changeset_files = vec![PathBuf::from(".changeset/changesets/fix-bug.md")];
         status.projected_releases = vec![make_package_version(
             "my-crate",
             "1.0.0",
@@ -279,8 +294,8 @@ mod tests {
             ),
         ];
         status.changeset_files = vec![
-            PathBuf::from(".changeset/fix.md"),
-            PathBuf::from(".changeset/feature.md"),
+            PathBuf::from(".changeset/changesets/fix.md"),
+            PathBuf::from(".changeset/changesets/feature.md"),
         ];
         status.projected_releases = vec![make_package_version(
             "my-crate",
@@ -311,7 +326,7 @@ mod tests {
             ChangeCategory::Fixed,
             "Fix",
         )];
-        status.changeset_files = vec![PathBuf::from(".changeset/fix.md")];
+        status.changeset_files = vec![PathBuf::from(".changeset/changesets/fix.md")];
         status.projected_releases = vec![make_package_version(
             "crate-a",
             "1.0.0",
@@ -340,7 +355,7 @@ mod tests {
             ChangeCategory::Fixed,
             "Fix",
         )];
-        status.changeset_files = vec![PathBuf::from(".changeset/fix.md")];
+        status.changeset_files = vec![PathBuf::from(".changeset/changesets/fix.md")];
         status.bumps_by_package = {
             let mut map = IndexMap::new();
             map.insert("unknown-crate".to_string(), vec![BumpType::Patch]);
@@ -363,7 +378,7 @@ mod tests {
             ChangeCategory::Fixed,
             "Fix",
         )];
-        status.changeset_files = vec![PathBuf::from(".changeset/fix.md")];
+        status.changeset_files = vec![PathBuf::from(".changeset/changesets/fix.md")];
         status.projected_releases = vec![make_package_version(
             "crate-a",
             "1.0.0",
@@ -402,8 +417,8 @@ mod tests {
             ),
         ];
         status.changeset_files = vec![
-            PathBuf::from(".changeset/fix-a.md"),
-            PathBuf::from(".changeset/feature-b.md"),
+            PathBuf::from(".changeset/changesets/fix-a.md"),
+            PathBuf::from(".changeset/changesets/feature-b.md"),
         ];
         status.projected_releases = vec![
             make_package_version("crate-a", "1.0.0", "1.0.1", BumpType::Patch),
@@ -433,7 +448,10 @@ mod tests {
             ChangeCategory::Fixed,
             "Fix",
         )];
-        status.changeset_files = vec![PathBuf::from("/"), PathBuf::from(".changeset/valid.md")];
+        status.changeset_files = vec![
+            PathBuf::from("/"),
+            PathBuf::from(".changeset/changesets/valid.md"),
+        ];
         status.projected_releases = vec![make_package_version(
             "my-crate",
             "1.0.0",
@@ -462,7 +480,7 @@ mod tests {
             ChangeCategory::Fixed,
             "Fix unknown",
         )];
-        status.changeset_files = vec![PathBuf::from(".changeset/fix.md")];
+        status.changeset_files = vec![PathBuf::from(".changeset/changesets/fix.md")];
         status.bumps_by_package = {
             let mut map = IndexMap::new();
             map.insert("unknown-crate".to_string(), vec![BumpType::Patch]);
@@ -492,11 +510,11 @@ mod tests {
         let mut status = empty_status();
         status.consumed_prerelease_changesets = vec![
             (
-                PathBuf::from(".changeset/fix-bug.md"),
+                PathBuf::from(".changeset/changesets/fix-bug.md"),
                 "1.0.1-alpha.1".to_string(),
             ),
             (
-                PathBuf::from(".changeset/add-feature.md"),
+                PathBuf::from(".changeset/changesets/add-feature.md"),
                 "1.0.1-alpha.2".to_string(),
             ),
         ];
@@ -518,7 +536,7 @@ mod tests {
             ChangeCategory::Fixed,
             "Fix another bug",
         )];
-        status.changeset_files = vec![PathBuf::from(".changeset/fix-another.md")];
+        status.changeset_files = vec![PathBuf::from(".changeset/changesets/fix-another.md")];
         status.projected_releases = vec![make_package_version(
             "my-crate",
             "1.0.1",
@@ -531,7 +549,7 @@ mod tests {
             map
         };
         status.consumed_prerelease_changesets = vec![(
-            PathBuf::from(".changeset/fix-bug.md"),
+            PathBuf::from(".changeset/changesets/fix-bug.md"),
             "1.0.1-alpha.1".to_string(),
         )];
 
@@ -553,7 +571,7 @@ mod tests {
             ChangeCategory::Fixed,
             "Fix bug",
         )];
-        status.changeset_files = vec![PathBuf::from(".changeset/fix.md")];
+        status.changeset_files = vec![PathBuf::from(".changeset/changesets/fix.md")];
         status.projected_releases = vec![make_package_version(
             "my-crate",
             "1.0.0",
@@ -566,7 +584,7 @@ mod tests {
             map
         };
         status.consumed_prerelease_changesets = vec![(
-            PathBuf::from(".changeset/consumed.md"),
+            PathBuf::from(".changeset/changesets/consumed.md"),
             "1.0.1-alpha.1".to_string(),
         )];
 
@@ -601,7 +619,7 @@ mod tests {
             ChangeCategory::Fixed,
             "Fix bug",
         )];
-        status.changeset_files = vec![PathBuf::from(".changeset/fix.md")];
+        status.changeset_files = vec![PathBuf::from(".changeset/changesets/fix.md")];
         status.projected_releases = vec![make_package_version(
             "my-crate",
             "1.0.0",
@@ -617,5 +635,56 @@ mod tests {
         let result = formatter.format_status(&status);
 
         assert!(!result.contains("Consumed pre-release changesets:"));
+    }
+
+    #[test]
+    fn format_consumed_changesets_truncates_large_lists() {
+        let formatter = PlainTextStatusFormatter;
+        let mut status = empty_status();
+        status.consumed_prerelease_changesets = (1..=15)
+            .map(|i| {
+                (
+                    PathBuf::from(format!(".changeset/changesets/fix{i}.md")),
+                    format!("1.0.1-alpha.{i}"),
+                )
+            })
+            .collect();
+
+        let result = formatter.format_status(&status);
+
+        assert!(result.contains("Consumed pre-release changesets:"));
+        assert!(result.contains("fix1.md"));
+        assert!(result.contains("fix10.md"));
+        assert!(
+            !result.contains("fix11.md"),
+            "11th entry should be truncated"
+        );
+        assert!(
+            result.contains("... and 5 more"),
+            "should show truncation message"
+        );
+    }
+
+    #[test]
+    fn format_consumed_changesets_no_truncation_when_under_limit() {
+        let formatter = PlainTextStatusFormatter;
+        let mut status = empty_status();
+        status.consumed_prerelease_changesets = (1..=5)
+            .map(|i| {
+                (
+                    PathBuf::from(format!(".changeset/changesets/fix{i}.md")),
+                    format!("1.0.1-alpha.{i}"),
+                )
+            })
+            .collect();
+
+        let result = formatter.format_status(&status);
+
+        assert!(result.contains("fix1.md"));
+        assert!(result.contains("fix5.md"));
+        assert!(
+            !result.contains("... and"),
+            "should not show truncation for small lists"
+        );
     }
 }

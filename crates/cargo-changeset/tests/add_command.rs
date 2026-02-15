@@ -158,8 +158,11 @@ mod non_interactive {
             .stdout(contains("Created changeset"))
             .stdout(contains("Fixed a bug"));
 
-        let changeset_dir = workspace.path().join(".changeset");
-        assert!(changeset_dir.exists(), ".changeset directory should exist");
+        let changeset_dir = workspace.path().join(".changeset/changesets");
+        assert!(
+            changeset_dir.exists(),
+            ".changeset/changesets directory should exist"
+        );
 
         let files: Vec<_> = fs::read_dir(&changeset_dir)
             .expect("read dir")
@@ -375,7 +378,7 @@ mod non_interactive {
             .success()
             .stdout(contains("Category: Fixed"));
 
-        let changeset_dir = workspace.path().join(".changeset");
+        let changeset_dir = workspace.path().join(".changeset/changesets");
         let files: Vec<_> = fs::read_dir(&changeset_dir)
             .expect("read dir")
             .filter_map(|e| e.ok())
@@ -439,7 +442,7 @@ mod non_interactive {
                 .success();
         }
 
-        let changeset_dir = workspace.path().join(".changeset");
+        let changeset_dir = workspace.path().join(".changeset/changesets");
         let files: Vec<_> = fs::read_dir(&changeset_dir)
             .expect("read dir")
             .filter_map(|e| e.ok())
@@ -625,8 +628,11 @@ MOCK_EDITOR_EOF
         let wait_result = session.expect(expectrl::Eof);
         assert!(wait_result.is_ok(), "Process should exit cleanly");
 
-        let changeset_dir = workspace.path().join(".changeset");
-        assert!(changeset_dir.exists(), ".changeset directory should exist");
+        let changeset_dir = workspace.path().join(".changeset/changesets");
+        assert!(
+            changeset_dir.exists(),
+            ".changeset/changesets directory should exist"
+        );
 
         let files: Vec<_> = fs::read_dir(&changeset_dir)
             .expect("read dir")
@@ -709,7 +715,7 @@ MOCK_EDITOR_EOF
         let wait_result = session.expect(expectrl::Eof);
         assert!(wait_result.is_ok(), "Process should exit cleanly");
 
-        let changeset_dir = workspace.path().join(".changeset");
+        let changeset_dir = workspace.path().join(".changeset/changesets");
         let files: Vec<_> = fs::read_dir(&changeset_dir)
             .expect("read dir")
             .filter_map(|e| e.ok())
@@ -753,7 +759,7 @@ MOCK_EDITOR_EOF
 
         session.expect(expectrl::Eof).ok();
 
-        let changeset_dir = workspace.path().join(".changeset");
+        let changeset_dir = workspace.path().join(".changeset/changesets");
         let files: Vec<_> = fs::read_dir(&changeset_dir)
             .expect("read dir")
             .filter_map(|e| e.ok())

@@ -211,7 +211,7 @@ mod tests {
 
         let git_provider = MockGitProvider::new().with_changed_files(vec![
             FileChange {
-                path: PathBuf::from(".changeset/test.md"),
+                path: PathBuf::from(".changeset/changesets/test.md"),
                 status: FileStatus::Added,
                 old_path: None,
             },
@@ -224,7 +224,7 @@ mod tests {
 
         let changeset = crate::mocks::make_changeset("my-crate", BumpType::Patch, "Fix bug");
         let changeset_reader = MockChangesetReader::new()
-            .with_changeset(PathBuf::from(".changeset/test.md"), changeset);
+            .with_changeset(PathBuf::from(".changeset/changesets/test.md"), changeset);
 
         let operation = VerifyOperation::new(project_provider, git_provider, changeset_reader);
 
@@ -283,7 +283,7 @@ mod tests {
     fn extract_deleted_changesets_identifies_deleted_md_files() {
         let changes = vec![
             FileChange {
-                path: PathBuf::from(".changeset/old.md"),
+                path: PathBuf::from(".changeset/changesets/old.md"),
                 status: FileStatus::Deleted,
                 old_path: None,
             },
@@ -297,24 +297,24 @@ mod tests {
         let deleted = extract_deleted_changesets(&changes, Path::new(".changeset"));
 
         assert_eq!(deleted.len(), 1);
-        assert_eq!(deleted[0], PathBuf::from(".changeset/old.md"));
+        assert_eq!(deleted[0], PathBuf::from(".changeset/changesets/old.md"));
     }
 
     #[test]
     fn extract_active_changesets_identifies_added_and_modified() {
         let changes = vec![
             FileChange {
-                path: PathBuf::from(".changeset/new.md"),
+                path: PathBuf::from(".changeset/changesets/new.md"),
                 status: FileStatus::Added,
                 old_path: None,
             },
             FileChange {
-                path: PathBuf::from(".changeset/updated.md"),
+                path: PathBuf::from(".changeset/changesets/updated.md"),
                 status: FileStatus::Modified,
                 old_path: None,
             },
             FileChange {
-                path: PathBuf::from(".changeset/deleted.md"),
+                path: PathBuf::from(".changeset/changesets/deleted.md"),
                 status: FileStatus::Deleted,
                 old_path: None,
             },
@@ -323,8 +323,8 @@ mod tests {
         let active = extract_active_changesets(&changes);
 
         assert_eq!(active.len(), 2);
-        assert!(active.contains(&PathBuf::from(".changeset/new.md")));
-        assert!(active.contains(&PathBuf::from(".changeset/updated.md")));
+        assert!(active.contains(&PathBuf::from(".changeset/changesets/new.md")));
+        assert!(active.contains(&PathBuf::from(".changeset/changesets/updated.md")));
     }
 
     #[test]
