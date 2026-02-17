@@ -15,6 +15,7 @@ path = "src/main.rs"
 [dependencies]
 changeset-core = { workspace = true }
 changeset-git = { workspace = true }
+changeset-manifest = { workspace = true }
 changeset-operations = { workspace = true }
 changeset-project = { workspace = true }
 changeset-version = { workspace = true }

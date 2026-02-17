@@ -1,5 +1,6 @@
 use std::path::Path;
 
+use changeset_manifest::{InitConfig, MetadataSection};
 use semver::Version;
 
 use crate::Result;
@@ -40,5 +41,18 @@ impl ManifestWriter for FileSystemManifestWriter {
 
     fn verify_version(&self, manifest_path: &Path, expected: &Version) -> Result<()> {
         Ok(changeset_manifest::verify_version(manifest_path, expected)?)
+    }
+
+    fn write_metadata(
+        &self,
+        manifest_path: &Path,
+        section: MetadataSection,
+        config: &InitConfig,
+    ) -> Result<()> {
+        Ok(changeset_manifest::write_metadata_section(
+            manifest_path,
+            section,
+            config,
+        )?)
     }
 }

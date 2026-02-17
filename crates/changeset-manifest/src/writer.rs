@@ -1,8 +1,9 @@
 use std::path::Path;
 
 use semver::Version;
-use toml_edit::value;
+use toml_edit::{Item, Table, value};
 
+use crate::config::{InitConfig, MetadataSection};
 use crate::error::ManifestError;
 use crate::reader::{read_document, read_version};
 
@@ -80,6 +81,101 @@ pub fn verify_version(path: &Path, expected: &Version) -> Result<(), ManifestErr
     }
 
     Ok(())
+}
+
+/// Writes changeset configuration to the metadata section of a Cargo.toml file.
+///
+/// # Errors
+///
+/// Returns an error if the manifest cannot be read, parsed, or written.
+pub fn write_metadata_section(
+    path: &Path,
+    section: MetadataSection,
+    config: &InitConfig,
+) -> Result<(), ManifestError> {
+    if config.is_empty() {
+        return Ok(());
+    }
+
+    let mut doc = read_document(path)?;
+
+    let root_key = match section {
+        MetadataSection::Workspace => "workspace",
+        MetadataSection::Package => "package",
+    };
+
+    let root = doc
+        .entry(root_key)
+        .or_insert_with(|| Item::Table(Table::new()));
+
+    let root_table = root
+        .as_table_mut()
+        .ok_or_else(|| ManifestError::InvalidSectionType {
+            path: path.to_path_buf(),
+            section: root_key.to_string(),
+        })?;
+
+    let metadata = root_table
+        .entry("metadata")
+        .or_insert_with(|| Item::Table(Table::new()));
+
+    let metadata_table =
+        metadata
+            .as_table_mut()
+            .ok_or_else(|| ManifestError::InvalidSectionType {
+                path: path.to_path_buf(),
+                section: format!("{root_key}.metadata"),
+            })?;
+
+    let changeset = metadata_table
+        .entry("changeset")
+        .or_insert_with(|| Item::Table(Table::new()));
+
+    let changeset_table =
+        changeset
+            .as_table_mut()
+            .ok_or_else(|| ManifestError::InvalidSectionType {
+                path: path.to_path_buf(),
+                section: format!("{root_key}.metadata.changeset"),
+            })?;
+
+    changeset_table.set_implicit(true);
+
+    if let Some(commit) = config.commit {
+        changeset_table.insert("commit", value(commit));
+    }
+
+    if let Some(tags) = config.tags {
+        changeset_table.insert("tags", value(tags));
+    }
+
+    if let Some(keep_changesets) = config.keep_changesets {
+        changeset_table.insert("keep_changesets", value(keep_changesets));
+    }
+
+    if let Some(tag_format) = config.tag_format {
+        changeset_table.insert("tag_format", value(tag_format.as_str()));
+    }
+
+    if let Some(changelog) = config.changelog {
+        changeset_table.insert("changelog", value(changelog.as_str()));
+    }
+
+    if let Some(comparison_links) = config.comparison_links {
+        changeset_table.insert("comparison_links", value(comparison_links.as_str()));
+    }
+
+    if let Some(zero_version_behavior) = config.zero_version_behavior {
+        changeset_table.insert(
+            "zero_version_behavior",
+            value(zero_version_behavior.as_str()),
+        );
+    }
+
+    std::fs::write(path, doc.to_string()).map_err(|source| ManifestError::Write {
+        path: path.to_path_buf(),
+        source,
+    })
 }
 
 #[cfg(test)]
@@ -219,5 +315,272 @@ version = "1.0.0"
             result,
             Err(ManifestError::VerificationFailed { .. })
         ));
+    }
+
+    #[test]
+    fn write_metadata_creates_workspace_section() {
+        let toml = r#"
+[workspace]
+members = ["crates/*"]
+"#;
+        let dir = tempfile::tempdir().expect("create temp dir");
+        let path = dir.path().join("Cargo.toml");
+        std::fs::write(&path, toml).expect("write test file");
+
+        let config = InitConfig {
+            commit: Some(true),
+            ..Default::default()
+        };
+
+        write_metadata_section(&path, MetadataSection::Workspace, &config).expect("write metadata");
+
+        let content = std::fs::read_to_string(&path).expect("read file");
+        assert!(content.contains("[workspace.metadata.changeset]"));
+        assert!(content.contains("commit = true"));
+    }
+
+    #[test]
+    fn write_metadata_creates_package_section() {
+        let toml = r#"
+[package]
+name = "test-crate"
+version = "1.0.0"
+"#;
+        let dir = tempfile::tempdir().expect("create temp dir");
+        let path = dir.path().join("Cargo.toml");
+        std::fs::write(&path, toml).expect("write test file");
+
+        let config = InitConfig {
+            tags: Some(true),
+            ..Default::default()
+        };
+
+        write_metadata_section(&path, MetadataSection::Package, &config).expect("write metadata");
+
+        let content = std::fs::read_to_string(&path).expect("read file");
+        assert!(content.contains("[package.metadata.changeset]"));
+        assert!(content.contains("tags = true"));
+    }
+
+    #[test]
+    fn write_metadata_preserves_existing_content() {
+        let toml = r#"# Workspace configuration
+[workspace]
+# Members list
+members = ["crates/*"]
+
+[workspace.package]
+edition = "2021"
+"#;
+        let dir = tempfile::tempdir().expect("create temp dir");
+        let path = dir.path().join("Cargo.toml");
+        std::fs::write(&path, toml).expect("write test file");
+
+        let config = InitConfig {
+            commit: Some(true),
+            ..Default::default()
+        };
+
+        write_metadata_section(&path, MetadataSection::Workspace, &config).expect("write metadata");
+
+        let content = std::fs::read_to_string(&path).expect("read file");
+        assert!(content.contains("# Workspace configuration"));
+        assert!(content.contains("# Members list"));
+        assert!(content.contains(r#"members = ["crates/*"]"#));
+        assert!(content.contains(r#"edition = "2021""#));
+    }
+
+    #[test]
+    fn write_metadata_updates_existing_section() {
+        let toml = r#"
+[workspace]
+members = ["crates/*"]
+
+[workspace.metadata.changeset]
+commit = false
+tags = false
+"#;
+        let dir = tempfile::tempdir().expect("create temp dir");
+        let path = dir.path().join("Cargo.toml");
+        std::fs::write(&path, toml).expect("write test file");
+
+        let config = InitConfig {
+            commit: Some(true),
+            tags: Some(true),
+            ..Default::default()
+        };
+
+        write_metadata_section(&path, MetadataSection::Workspace, &config).expect("write metadata");
+
+        let content = std::fs::read_to_string(&path).expect("read file");
+        assert!(content.contains("commit = true"));
+        assert!(content.contains("tags = true"));
+        assert!(!content.contains("commit = false"));
+        assert!(!content.contains("tags = false"));
+    }
+
+    #[test]
+    fn write_metadata_creates_nested_hierarchy() {
+        let toml = r#"
+[workspace]
+members = ["crates/*"]
+"#;
+        let dir = tempfile::tempdir().expect("create temp dir");
+        let path = dir.path().join("Cargo.toml");
+        std::fs::write(&path, toml).expect("write test file");
+
+        let config = InitConfig {
+            commit: Some(true),
+            tags: Some(true),
+            ..Default::default()
+        };
+
+        write_metadata_section(&path, MetadataSection::Workspace, &config).expect("write metadata");
+
+        let content = std::fs::read_to_string(&path).expect("read file");
+        assert!(content.contains("[workspace.metadata.changeset]"));
+        assert!(content.contains("commit = true"));
+        assert!(content.contains("tags = true"));
+    }
+
+    #[test]
+    fn write_metadata_merges_with_existing_metadata() {
+        let toml = r#"
+[workspace]
+members = ["crates/*"]
+
+[workspace.metadata.other]
+key = "value"
+"#;
+        let dir = tempfile::tempdir().expect("create temp dir");
+        let path = dir.path().join("Cargo.toml");
+        std::fs::write(&path, toml).expect("write test file");
+
+        let config = InitConfig {
+            commit: Some(true),
+            ..Default::default()
+        };
+
+        write_metadata_section(&path, MetadataSection::Workspace, &config).expect("write metadata");
+
+        let content = std::fs::read_to_string(&path).expect("read file");
+        assert!(content.contains("[workspace.metadata.other]"));
+        assert!(content.contains(r#"key = "value""#));
+        assert!(content.contains("[workspace.metadata.changeset]"));
+        assert!(content.contains("commit = true"));
+    }
+
+    #[test]
+    fn write_metadata_handles_all_config_options() {
+        use crate::config::{ChangelogLocation, ComparisonLinks, TagFormat, ZeroVersionBehavior};
+
+        let toml = r#"
+[workspace]
+members = ["crates/*"]
+"#;
+        let dir = tempfile::tempdir().expect("create temp dir");
+        let path = dir.path().join("Cargo.toml");
+        std::fs::write(&path, toml).expect("write test file");
+
+        let config = InitConfig {
+            commit: Some(true),
+            tags: Some(true),
+            keep_changesets: Some(false),
+            tag_format: Some(TagFormat::CratePrefixed),
+            changelog: Some(ChangelogLocation::PerPackage),
+            comparison_links: Some(ComparisonLinks::Enabled),
+            zero_version_behavior: Some(ZeroVersionBehavior::AutoPromoteOnMajor),
+        };
+
+        write_metadata_section(&path, MetadataSection::Workspace, &config).expect("write metadata");
+
+        let content = std::fs::read_to_string(&path).expect("read file");
+        assert!(content.contains("commit = true"));
+        assert!(content.contains("tags = true"));
+        assert!(content.contains("keep_changesets = false"));
+        assert!(content.contains(r#"tag_format = "crate-prefixed""#));
+        assert!(content.contains(r#"changelog = "per-package""#));
+        assert!(content.contains(r#"comparison_links = "enabled""#));
+        assert!(content.contains(r#"zero_version_behavior = "auto-promote-on-major""#));
+    }
+
+    #[test]
+    fn write_metadata_skips_none_values() {
+        let toml = r#"
+[workspace]
+members = ["crates/*"]
+"#;
+        let dir = tempfile::tempdir().expect("create temp dir");
+        let path = dir.path().join("Cargo.toml");
+        std::fs::write(&path, toml).expect("write test file");
+
+        let config = InitConfig {
+            commit: Some(true),
+            tags: None,
+            keep_changesets: None,
+            tag_format: None,
+            changelog: None,
+            comparison_links: None,
+            zero_version_behavior: None,
+        };
+
+        write_metadata_section(&path, MetadataSection::Workspace, &config).expect("write metadata");
+
+        let content = std::fs::read_to_string(&path).expect("read file");
+        assert!(content.contains("commit = true"));
+        assert!(!content.contains("tags"));
+        assert!(!content.contains("keep_changesets"));
+        assert!(!content.contains("tag_format"));
+        assert!(!content.contains("changelog"));
+        assert!(!content.contains("comparison_links"));
+        assert!(!content.contains("zero_version_behavior"));
+    }
+
+    #[test]
+    fn write_metadata_writes_correct_enum_values() {
+        use crate::config::{ChangelogLocation, ComparisonLinks, TagFormat, ZeroVersionBehavior};
+
+        let toml = r#"
+[workspace]
+members = ["crates/*"]
+"#;
+        let dir = tempfile::tempdir().expect("create temp dir");
+        let path = dir.path().join("Cargo.toml");
+        std::fs::write(&path, toml).expect("write test file");
+
+        let config = InitConfig {
+            tag_format: Some(TagFormat::VersionOnly),
+            changelog: Some(ChangelogLocation::Root),
+            comparison_links: Some(ComparisonLinks::Auto),
+            zero_version_behavior: Some(ZeroVersionBehavior::EffectiveMinor),
+            ..Default::default()
+        };
+
+        write_metadata_section(&path, MetadataSection::Workspace, &config).expect("write metadata");
+
+        let content = std::fs::read_to_string(&path).expect("read file");
+        assert!(content.contains(r#"tag_format = "version-only""#));
+        assert!(content.contains(r#"changelog = "root""#));
+        assert!(content.contains(r#"comparison_links = "auto""#));
+        assert!(content.contains(r#"zero_version_behavior = "effective-minor""#));
+    }
+
+    #[test]
+    fn write_metadata_empty_config_does_not_modify_file() {
+        let toml = r#"
+[workspace]
+members = ["crates/*"]
+"#;
+        let dir = tempfile::tempdir().expect("create temp dir");
+        let path = dir.path().join("Cargo.toml");
+        std::fs::write(&path, toml).expect("write test file");
+
+        let config = InitConfig::default();
+
+        write_metadata_section(&path, MetadataSection::Workspace, &config).expect("write metadata");
+
+        let content = std::fs::read_to_string(&path).expect("read file");
+        assert!(!content.contains("metadata"));
+        assert!(!content.contains("changeset"));
     }
 }

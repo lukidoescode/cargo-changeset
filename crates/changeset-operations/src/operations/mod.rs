@@ -8,7 +8,9 @@ mod verify;
 mod version_planner;
 
 pub use add::{AddInput, AddOperation, AddResult};
-pub use init::{InitOperation, InitOutput};
+pub use init::{
+    InitInput, InitOperation, InitOutput, InitPlan, build_config_from_input, build_default_config,
+};
 pub use release::{
     ChangelogUpdate, CommitResult, GitOperationResult, PackageVersion, ReleaseInput,
     ReleaseOperation, ReleaseOutcome, ReleaseOutput, TagResult,
