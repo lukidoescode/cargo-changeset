@@ -42,4 +42,10 @@ pub enum ManifestError {
         #[source]
         source: semver::Error,
     },
+
+    #[error("missing section '{section}' in manifest '{path}'")]
+    MissingSection { path: PathBuf, section: String },
+
+    #[error("expected '{section}' to be a table in manifest '{path}'")]
+    InvalidSectionType { path: PathBuf, section: String },
 }

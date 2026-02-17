@@ -1,5 +1,6 @@
 use std::path::Path;
 
+use changeset_manifest::{InitConfig, MetadataSection};
 use semver::Version;
 
 use super::inherited_version_checker::InheritedVersionChecker;
@@ -20,4 +21,16 @@ pub trait ManifestWriter: InheritedVersionChecker + Send + Sync {
     ///
     /// Returns an error if the version does not match the expected value.
     fn verify_version(&self, manifest_path: &Path, expected: &Version) -> Result<()>;
+
+    /// Writes changeset configuration to the metadata section of a Cargo.toml file.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the manifest cannot be read, parsed, or written.
+    fn write_metadata(
+        &self,
+        manifest_path: &Path,
+        section: MetadataSection,
+        config: &InitConfig,
+    ) -> Result<()>;
 }

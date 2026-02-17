@@ -3,11 +3,14 @@ use std::io::{IsTerminal, Write as _};
 use std::process::Command;
 
 use changeset_core::{BumpType, ChangeCategory, PackageInfo};
+use changeset_manifest::{ChangelogLocation, ComparisonLinks, TagFormat, ZeroVersionBehavior};
 use changeset_operations::Result;
 use changeset_operations::traits::{
-    BumpSelection, CategorySelection, DescriptionInput, InteractionProvider, PackageSelection,
+    BumpSelection, CategorySelection, ChangelogSettingsInput, DescriptionInput, GitSettingsInput,
+    InitInteractionProvider, InteractionProvider, PackageSelection, ProjectContext,
+    VersionSettingsInput,
 };
-use dialoguer::{MultiSelect, Select};
+use dialoguer::{Confirm, MultiSelect, Select};
 
 use crate::error::CliError;
 
@@ -35,7 +38,7 @@ impl InteractionProvider for TerminalInteractionProvider {
 
         let selection = MultiSelect::new()
             .with_prompt("Select packages to include in changeset")
-            .items(&items)
+            .items(items)
             .interact_opt()
             .map_err(|e| match e {
                 dialoguer::Error::IO(io_err) => cli_to_operation_error(CliError::Io(io_err)),
@@ -225,4 +228,252 @@ impl InteractionProvider for NonInteractiveProvider {
     fn get_description(&self) -> Result<DescriptionInput> {
         Err(changeset_operations::OperationError::MissingDescription)
     }
+}
+
+pub struct TerminalInitInteractionProvider;
+
+impl TerminalInitInteractionProvider {
+    #[must_use]
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+impl InitInteractionProvider for TerminalInitInteractionProvider {
+    fn configure_git_settings(&self, context: ProjectContext) -> Result<Option<GitSettingsInput>> {
+        if !is_interactive() {
+            return Ok(None);
+        }
+
+        let configure = Confirm::new()
+            .with_prompt("Configure git settings?")
+            .default(true)
+            .interact_opt()
+            .map_err(|e| match e {
+                dialoguer::Error::IO(io) => cli_to_operation_error(CliError::Io(io)),
+            })?;
+
+        if configure != Some(true) {
+            return Ok(None);
+        }
+
+        let commit = select_bool("Create git commits on release?", true)?;
+        let tags = select_bool("Create git tags on release?", true)?;
+        let keep_changesets = select_bool("Keep changeset files after release?", false)?;
+        let tag_format = select_tag_format(context.is_single_package)?;
+
+        Ok(Some(GitSettingsInput {
+            commit,
+            tags,
+            keep_changesets,
+            tag_format,
+        }))
+    }
+
+    fn configure_changelog_settings(
+        &self,
+        context: ProjectContext,
+    ) -> Result<Option<ChangelogSettingsInput>> {
+        if !is_interactive() {
+            return Ok(None);
+        }
+
+        let configure = Confirm::new()
+            .with_prompt("Configure changelog settings?")
+            .default(true)
+            .interact_opt()
+            .map_err(|e| match e {
+                dialoguer::Error::IO(io) => cli_to_operation_error(CliError::Io(io)),
+            })?;
+
+        if configure != Some(true) {
+            return Ok(None);
+        }
+
+        let changelog = if context.is_single_package {
+            ChangelogLocation::Root
+        } else {
+            select_changelog_location()?
+        };
+        let comparison_links = select_comparison_links()?;
+
+        Ok(Some(ChangelogSettingsInput {
+            changelog,
+            comparison_links,
+        }))
+    }
+
+    fn configure_version_settings(&self) -> Result<Option<VersionSettingsInput>> {
+        if !is_interactive() {
+            return Ok(None);
+        }
+
+        let configure = Confirm::new()
+            .with_prompt("Configure version settings?")
+            .default(true)
+            .interact_opt()
+            .map_err(|e| match e {
+                dialoguer::Error::IO(io) => cli_to_operation_error(CliError::Io(io)),
+            })?;
+
+        if configure != Some(true) {
+            return Ok(None);
+        }
+
+        let zero_version_behavior = select_zero_version_behavior()?;
+
+        Ok(Some(VersionSettingsInput {
+            zero_version_behavior,
+        }))
+    }
+}
+
+fn select_bool(prompt: &str, default: bool) -> Result<bool> {
+    Confirm::new()
+        .with_prompt(prompt)
+        .default(default)
+        .interact()
+        .map_err(|e| match e {
+            dialoguer::Error::IO(io) => cli_to_operation_error(CliError::Io(io)),
+        })
+}
+
+fn select_tag_format(is_single_package: bool) -> Result<TagFormat> {
+    let (items, default_idx) = if is_single_package {
+        (
+            [
+                "version-only - Tags like v1.0.0 (default)",
+                "crate-prefixed - Tags like crate-name@1.0.0",
+            ],
+            0,
+        )
+    } else {
+        (
+            [
+                "version-only - Tags like v1.0.0",
+                "crate-prefixed - Tags like crate-name@1.0.0 (default)",
+            ],
+            1,
+        )
+    };
+
+    let selection = Select::new()
+        .with_prompt("Select tag format")
+        .items(items)
+        .default(default_idx)
+        .interact_opt()
+        .map_err(|e| match e {
+            dialoguer::Error::IO(io) => cli_to_operation_error(CliError::Io(io)),
+        })?;
+
+    match selection {
+        Some(0) => Ok(TagFormat::VersionOnly),
+        Some(1) => Ok(TagFormat::CratePrefixed),
+        _ => {
+            if is_single_package {
+                Ok(TagFormat::VersionOnly)
+            } else {
+                Ok(TagFormat::CratePrefixed)
+            }
+        }
+    }
+}
+
+fn select_changelog_location() -> Result<ChangelogLocation> {
+    let items = [
+        "root - Single CHANGELOG.md at project root (default)",
+        "per-package - CHANGELOG.md in each package directory",
+    ];
+
+    let selection = Select::new()
+        .with_prompt("Select changelog location")
+        .items(items)
+        .default(0)
+        .interact_opt()
+        .map_err(|e| match e {
+            dialoguer::Error::IO(io) => cli_to_operation_error(CliError::Io(io)),
+        })?;
+
+    match selection {
+        Some(0) => Ok(ChangelogLocation::Root),
+        Some(1) => Ok(ChangelogLocation::PerPackage),
+        _ => Ok(ChangelogLocation::default()),
+    }
+}
+
+fn select_comparison_links() -> Result<ComparisonLinks> {
+    let items = [
+        "auto - Generate links if git remote detected (default)",
+        "enabled - Always generate comparison links",
+        "disabled - Never generate comparison links",
+    ];
+
+    let selection = Select::new()
+        .with_prompt("Select comparison links mode")
+        .items(items)
+        .default(0)
+        .interact_opt()
+        .map_err(|e| match e {
+            dialoguer::Error::IO(io) => cli_to_operation_error(CliError::Io(io)),
+        })?;
+
+    match selection {
+        Some(0) => Ok(ComparisonLinks::Auto),
+        Some(1) => Ok(ComparisonLinks::Enabled),
+        Some(2) => Ok(ComparisonLinks::Disabled),
+        _ => Ok(ComparisonLinks::default()),
+    }
+}
+
+fn select_zero_version_behavior() -> Result<ZeroVersionBehavior> {
+    let items = [
+        "effective-minor - Major bump on 0.x increments minor (default)",
+        "auto-promote-on-major - Major bump on 0.x promotes to 1.0.0",
+    ];
+
+    let selection = Select::new()
+        .with_prompt("Select zero version (0.x.y) behavior")
+        .items(items)
+        .default(0)
+        .interact_opt()
+        .map_err(|e| match e {
+            dialoguer::Error::IO(io) => cli_to_operation_error(CliError::Io(io)),
+        })?;
+
+    match selection {
+        Some(0) => Ok(ZeroVersionBehavior::EffectiveMinor),
+        Some(1) => Ok(ZeroVersionBehavior::AutoPromoteOnMajor),
+        _ => Ok(ZeroVersionBehavior::default()),
+    }
+}
+
+/// Asks the user for confirmation before proceeding.
+///
+/// Returns `true` if the user confirms, `false` if they decline or cancel.
+///
+/// # Errors
+///
+/// Returns an error if the prompt cannot be displayed (e.g., not a terminal).
+pub fn confirm_proceed(prompt: &str) -> crate::error::Result<bool> {
+    if !is_interactive() {
+        return Err(CliError::NotATty);
+    }
+
+    let confirmed = Confirm::new()
+        .with_prompt(prompt)
+        .default(true)
+        .interact_opt()
+        .map_err(|e| match e {
+            dialoguer::Error::IO(io) => CliError::Io(io),
+        })?;
+
+    Ok(confirmed == Some(true))
+}
+
+/// Checks if stdin is a TTY or `CARGO_CHANGESET_FORCE_TTY` is set.
+///
+/// Used to determine if interactive prompts can be shown to the user.
+#[must_use]
+pub fn is_terminal_interactive() -> bool {
+    is_interactive()
 }

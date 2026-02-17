@@ -8,7 +8,8 @@ mod verify;
 use std::path::Path;
 
 use changeset_core::{BumpType, ChangeCategory};
-use clap::{Args, Subcommand};
+use changeset_manifest::{ChangelogLocation, ComparisonLinks, TagFormat, ZeroVersionBehavior};
+use clap::{Args, Subcommand, ValueEnum};
 
 use crate::error::Result;
 
@@ -40,9 +41,110 @@ Use 'cargo changeset manage' to configure these files."
     )]
     Release(ReleaseArgs),
     /// Initialize changeset directory in the project
-    Init,
+    Init(InitArgs),
     /// Manage release configuration files
     Manage(ManageArgs),
+}
+
+#[derive(Args)]
+pub(crate) struct InitArgs {
+    /// Use default configuration values without prompts
+    #[arg(long)]
+    pub defaults: bool,
+
+    /// Disable interactive prompts (use only CLI-provided values)
+    #[arg(long)]
+    pub no_interactive: bool,
+
+    /// Create git commits on release (default: true)
+    #[arg(long)]
+    pub commit: Option<bool>,
+
+    /// Create git tags on release (default: true)
+    #[arg(long)]
+    pub tags: Option<bool>,
+
+    /// Keep changeset files after release (default: false)
+    #[arg(long)]
+    pub keep_changesets: Option<bool>,
+
+    /// Tag format: "version-only" or "crate-prefixed" (default: version-only)
+    #[arg(long, value_name = "FORMAT")]
+    pub tag_format: Option<TagFormatArg>,
+
+    /// Changelog location: "root" or "per-package" (default: root)
+    #[arg(long, value_name = "LOCATION")]
+    pub changelog: Option<ChangelogLocationArg>,
+
+    /// Comparison links: "auto", "enabled", or "disabled" (default: auto)
+    #[arg(long, value_name = "MODE")]
+    pub comparison_links: Option<ComparisonLinksArg>,
+
+    /// Zero version behavior: "effective-minor" or "auto-promote-on-major" (default: effective-minor)
+    #[arg(long, value_name = "BEHAVIOR")]
+    pub zero_version_behavior: Option<ZeroVersionBehaviorArg>,
+}
+
+#[derive(Clone, Copy, ValueEnum)]
+pub(crate) enum TagFormatArg {
+    VersionOnly,
+    CratePrefixed,
+}
+
+impl From<TagFormatArg> for TagFormat {
+    fn from(arg: TagFormatArg) -> Self {
+        match arg {
+            TagFormatArg::VersionOnly => Self::VersionOnly,
+            TagFormatArg::CratePrefixed => Self::CratePrefixed,
+        }
+    }
+}
+
+#[derive(Clone, Copy, ValueEnum)]
+pub(crate) enum ChangelogLocationArg {
+    Root,
+    PerPackage,
+}
+
+impl From<ChangelogLocationArg> for ChangelogLocation {
+    fn from(arg: ChangelogLocationArg) -> Self {
+        match arg {
+            ChangelogLocationArg::Root => Self::Root,
+            ChangelogLocationArg::PerPackage => Self::PerPackage,
+        }
+    }
+}
+
+#[derive(Clone, Copy, ValueEnum)]
+pub(crate) enum ComparisonLinksArg {
+    Auto,
+    Enabled,
+    Disabled,
+}
+
+impl From<ComparisonLinksArg> for ComparisonLinks {
+    fn from(arg: ComparisonLinksArg) -> Self {
+        match arg {
+            ComparisonLinksArg::Auto => Self::Auto,
+            ComparisonLinksArg::Enabled => Self::Enabled,
+            ComparisonLinksArg::Disabled => Self::Disabled,
+        }
+    }
+}
+
+#[derive(Clone, Copy, ValueEnum)]
+pub(crate) enum ZeroVersionBehaviorArg {
+    EffectiveMinor,
+    AutoPromoteOnMajor,
+}
+
+impl From<ZeroVersionBehaviorArg> for ZeroVersionBehavior {
+    fn from(arg: ZeroVersionBehaviorArg) -> Self {
+        match arg {
+            ZeroVersionBehaviorArg::EffectiveMinor => Self::EffectiveMinor,
+            ZeroVersionBehaviorArg::AutoPromoteOnMajor => Self::AutoPromoteOnMajor,
+        }
+    }
 }
 
 #[derive(Args)]
@@ -201,7 +303,7 @@ impl Commands {
                 release::run(args, start_path),
                 ExecuteResult { quiet: false },
             ),
-            Self::Init => (init::run(start_path), ExecuteResult { quiet: false }),
+            Self::Init(args) => (init::run(args, start_path), ExecuteResult { quiet: false }),
             Self::Manage(args) => (
                 manage::run(args, start_path),
                 ExecuteResult { quiet: false },

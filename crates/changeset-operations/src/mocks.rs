@@ -5,6 +5,7 @@ use std::sync::{Arc, Mutex, RwLock};
 use changeset_changelog::{RepositoryInfo, VersionRelease};
 use changeset_core::{BumpType, ChangeCategory, Changeset, PackageInfo};
 use changeset_git::{CommitInfo, FileChange, TagInfo};
+use changeset_manifest::{InitConfig, MetadataSection};
 use changeset_project::{
     CargoProject, GraduationState, PackageChangesetConfig, PrereleaseState, ProjectKind,
     RootChangesetConfig,
@@ -13,9 +14,11 @@ use semver::Version;
 
 use crate::Result;
 use crate::traits::{
-    BumpSelection, CategorySelection, ChangelogWriteResult, ChangelogWriter, ChangesetReader,
-    ChangesetWriter, DescriptionInput, GitProvider, InheritedVersionChecker, InteractionProvider,
-    ManifestWriter, PackageSelection, ProjectProvider, ReleaseStateIO,
+    BumpSelection, CategorySelection, ChangelogSettingsInput, ChangelogWriteResult,
+    ChangelogWriter, ChangesetReader, ChangesetWriter, DescriptionInput, GitProvider,
+    GitSettingsInput, InheritedVersionChecker, InitInteractionProvider, InteractionProvider,
+    ManifestWriter, PackageSelection, ProjectContext, ProjectProvider, ReleaseStateIO,
+    VersionSettingsInput,
 };
 
 pub struct MockProjectProvider {
@@ -37,7 +40,16 @@ impl MockProjectProvider {
 
     #[must_use]
     pub fn with_changeset_dir(mut self, dir: PathBuf) -> Self {
+        if let Some(parent) = dir.parent() {
+            self.project.root = parent.to_path_buf();
+        }
         self.changeset_dir = dir;
+        self
+    }
+
+    #[must_use]
+    pub fn with_project_root(mut self, root: PathBuf) -> Self {
+        self.project.root = root;
         self
     }
 
@@ -653,6 +665,7 @@ pub struct MockManifestWriter {
     written_versions: Mutex<Vec<(PathBuf, Version)>>,
     inherited_paths: HashSet<PathBuf>,
     removed_workspace_version: Mutex<bool>,
+    written_metadata: Mutex<Vec<(PathBuf, MetadataSection, InitConfig)>>,
 }
 
 impl MockManifestWriter {
@@ -662,6 +675,7 @@ impl MockManifestWriter {
             written_versions: Mutex::new(Vec::new()),
             inherited_paths: HashSet::new(),
             removed_workspace_version: Mutex::new(false),
+            written_metadata: Mutex::new(Vec::new()),
         }
     }
 
@@ -688,6 +702,14 @@ impl MockManifestWriter {
             .removed_workspace_version
             .lock()
             .expect("lock poisoned")
+    }
+
+    /// # Panics
+    ///
+    /// Panics if the internal mutex is poisoned.
+    #[must_use]
+    pub fn written_metadata(&self) -> Vec<(PathBuf, MetadataSection, InitConfig)> {
+        self.written_metadata.lock().expect("lock poisoned").clone()
     }
 }
 
@@ -723,6 +745,20 @@ impl ManifestWriter for MockManifestWriter {
     fn verify_version(&self, _manifest_path: &Path, _expected: &Version) -> Result<()> {
         Ok(())
     }
+
+    fn write_metadata(
+        &self,
+        manifest_path: &Path,
+        section: MetadataSection,
+        config: &InitConfig,
+    ) -> Result<()> {
+        self.written_metadata.lock().expect("lock poisoned").push((
+            manifest_path.to_path_buf(),
+            section,
+            config.clone(),
+        ));
+        Ok(())
+    }
 }
 
 impl InheritedVersionChecker for Arc<MockManifestWriter> {
@@ -742,6 +778,15 @@ impl ManifestWriter for Arc<MockManifestWriter> {
 
     fn verify_version(&self, manifest_path: &Path, expected: &Version) -> Result<()> {
         (**self).verify_version(manifest_path, expected)
+    }
+
+    fn write_metadata(
+        &self,
+        manifest_path: &Path,
+        section: MetadataSection,
+        config: &InitConfig,
+    ) -> Result<()> {
+        (**self).write_metadata(manifest_path, section, config)
     }
 }
 
@@ -962,6 +1007,122 @@ impl ReleaseStateIO for Arc<MockReleaseStateIO> {
 
     fn save_graduation_state(&self, changeset_dir: &Path, state: &GraduationState) -> Result<()> {
         (**self).save_graduation_state(changeset_dir, state)
+    }
+}
+
+#[allow(clippy::struct_field_names, clippy::option_option)]
+pub struct MockInitInteractionProvider {
+    git_settings: Mutex<Option<Option<GitSettingsInput>>>,
+    changelog_settings: Mutex<Option<Option<ChangelogSettingsInput>>>,
+    version_settings: Mutex<Option<Option<VersionSettingsInput>>>,
+}
+
+impl MockInitInteractionProvider {
+    #[must_use]
+    pub fn new() -> Self {
+        Self {
+            git_settings: Mutex::new(None),
+            changelog_settings: Mutex::new(None),
+            version_settings: Mutex::new(None),
+        }
+    }
+
+    /// # Panics
+    ///
+    /// Panics if the internal mutex is poisoned.
+    #[must_use]
+    pub fn with_git_settings(self, settings: Option<GitSettingsInput>) -> Self {
+        *self.git_settings.lock().expect("lock poisoned") = Some(settings);
+        self
+    }
+
+    /// # Panics
+    ///
+    /// Panics if the internal mutex is poisoned.
+    #[must_use]
+    pub fn with_changelog_settings(self, settings: Option<ChangelogSettingsInput>) -> Self {
+        *self.changelog_settings.lock().expect("lock poisoned") = Some(settings);
+        self
+    }
+
+    /// # Panics
+    ///
+    /// Panics if the internal mutex is poisoned.
+    #[must_use]
+    pub fn with_version_settings(self, settings: Option<VersionSettingsInput>) -> Self {
+        *self.version_settings.lock().expect("lock poisoned") = Some(settings);
+        self
+    }
+
+    #[must_use]
+    pub fn all_skipped() -> Self {
+        Self::new()
+            .with_git_settings(None)
+            .with_changelog_settings(None)
+            .with_version_settings(None)
+    }
+
+    #[must_use]
+    pub fn all_defaults() -> Self {
+        Self::new()
+            .with_git_settings(Some(GitSettingsInput::default()))
+            .with_changelog_settings(Some(ChangelogSettingsInput::default()))
+            .with_version_settings(Some(VersionSettingsInput::default()))
+    }
+}
+
+impl Default for MockInitInteractionProvider {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl InitInteractionProvider for MockInitInteractionProvider {
+    fn configure_git_settings(&self, _context: ProjectContext) -> Result<Option<GitSettingsInput>> {
+        Ok(self
+            .git_settings
+            .lock()
+            .expect("lock poisoned")
+            .clone()
+            .flatten())
+    }
+
+    fn configure_changelog_settings(
+        &self,
+        _context: ProjectContext,
+    ) -> Result<Option<ChangelogSettingsInput>> {
+        Ok(self
+            .changelog_settings
+            .lock()
+            .expect("lock poisoned")
+            .clone()
+            .flatten())
+    }
+
+    fn configure_version_settings(&self) -> Result<Option<VersionSettingsInput>> {
+        Ok(self
+            .version_settings
+            .lock()
+            .expect("lock poisoned")
+            .clone()
+            .flatten())
+    }
+}
+
+impl InitInteractionProvider for Arc<MockInitInteractionProvider> {
+    fn configure_git_settings(&self, context: ProjectContext) -> Result<Option<GitSettingsInput>> {
+        (**self).configure_git_settings(context)
+    }
+
+    fn configure_changelog_settings(
+        &self,
+        context: ProjectContext,
+    ) -> Result<Option<ChangelogSettingsInput>> {
+        (**self).configure_changelog_settings(context)
+    }
+
+    fn configure_version_settings(&self) -> Result<Option<VersionSettingsInput>> {
+        (**self).configure_version_settings()
     }
 }
 
