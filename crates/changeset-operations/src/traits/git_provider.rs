@@ -53,4 +53,25 @@ pub trait GitProvider: Send + Sync {
     /// - Any file cannot be deleted (permissions, in use, etc.)
     /// - The git index cannot be updated to stage the deletion
     fn delete_files(&self, project_root: &Path, paths: &[&Path]) -> Result<()>;
+
+    /// Deletes a tag by name.
+    ///
+    /// Returns `Ok(true)` if the tag was deleted, `Ok(false)` if the tag was not found.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the delete operation fails for reasons other than "not found".
+    fn delete_tag(&self, project_root: &Path, tag_name: &str) -> Result<bool>;
+
+    /// Performs a soft reset to the parent of HEAD (HEAD~1).
+    ///
+    /// This undoes the last commit while keeping changes staged.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if:
+    /// - HEAD cannot be resolved
+    /// - HEAD has no parent (initial commit)
+    /// - The reset operation fails
+    fn reset_to_parent(&self, project_root: &Path) -> Result<()>;
 }

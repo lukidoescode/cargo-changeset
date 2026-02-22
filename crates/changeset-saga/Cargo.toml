@@ -1,0 +1,18 @@
+[package]
+name = "changeset-saga"
+version = "0.0.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+description = "Saga pattern for atomic multi-step operations"
+
+[dependencies]
+thiserror = { workspace = true }
+
+[dev-dependencies]
+anyhow = "1.0"
+
+[lints]
+workspace = true

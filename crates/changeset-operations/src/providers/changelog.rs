@@ -5,6 +5,7 @@ use changeset_changelog::{Changelog, RepositoryInfo, VersionRelease};
 use crate::Result;
 use crate::traits::{ChangelogWriteResult, ChangelogWriter};
 
+#[derive(Clone)]
 pub struct FileSystemChangelogWriter;
 
 impl FileSystemChangelogWriter {
@@ -47,6 +48,17 @@ impl ChangelogWriter for FileSystemChangelogWriter {
 
     fn changelog_exists(&self, path: &Path) -> bool {
         path.exists()
+    }
+
+    fn restore_changelog(&self, path: &Path, content: &str) -> Result<()> {
+        std::fs::write(path, content).map_err(crate::OperationError::ChangesetFileWrite)
+    }
+
+    fn delete_changelog(&self, path: &Path) -> Result<()> {
+        if path.exists() {
+            std::fs::remove_file(path).map_err(crate::OperationError::ChangesetFileWrite)?;
+        }
+        Ok(())
     }
 }
 

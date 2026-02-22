@@ -1,6 +1,18 @@
 use std::path::PathBuf;
 
+use changeset_saga::SagaError;
 use thiserror::Error;
+
+/// Details about a failed compensation during saga rollback.
+#[derive(Debug)]
+pub struct CompensationFailure {
+    /// Name of the step whose compensation failed.
+    pub step: String,
+    /// Description of what the compensation was trying to do.
+    pub description: String,
+    /// The error that occurred during compensation.
+    pub error: Box<OperationError>,
+}
 
 #[derive(Debug, Error)]
 pub enum OperationError {
@@ -124,9 +136,65 @@ pub enum OperationError {
 
     #[error("release validation failed")]
     ValidationFailed(#[from] crate::operations::ValidationErrors),
+
+    #[error("failed to parse version '{version}' during {context}")]
+    VersionParse { version: String, context: String },
+
+    #[error("failed to delete {} tag(s) during compensation: {}", failed_tags.len(), failed_tags.join(", "))]
+    TagDeletionFailed { failed_tags: Vec<String> },
+
+    #[error("release saga failed at step '{step}'")]
+    SagaFailed {
+        step: String,
+        #[source]
+        source: Box<OperationError>,
+    },
+
+    #[error(
+        "release saga failed at step '{step}' and {} compensation(s) also failed", compensation_failures.len()
+    )]
+    SagaCompensationFailed {
+        step: String,
+        source: Box<OperationError>,
+        compensation_failures: Vec<CompensationFailure>,
+    },
 }
 
 pub type Result<T> = std::result::Result<T, OperationError>;
+
+impl From<SagaError<OperationError>> for OperationError {
+    fn from(err: SagaError<OperationError>) -> Self {
+        match err {
+            SagaError::StepFailed { step, source } => Self::SagaFailed {
+                step,
+                source: Box::new(source),
+            },
+            SagaError::CompensationFailed {
+                failed_step,
+                step_error,
+                compensation_errors,
+            } => {
+                let compensation_failures = compensation_errors
+                    .into_iter()
+                    .map(|e| CompensationFailure {
+                        step: e.step,
+                        description: e.description,
+                        error: Box::new(e.error),
+                    })
+                    .collect();
+                Self::SagaCompensationFailed {
+                    step: failed_step,
+                    source: Box::new(step_error),
+                    compensation_failures,
+                }
+            }
+            _ => Self::SagaFailed {
+                step: "unknown".to_string(),
+                source: Box::new(Self::Cancelled),
+            },
+        }
+    }
+}
 
 #[cfg(test)]
 mod tests {

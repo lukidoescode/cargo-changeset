@@ -4,14 +4,7 @@ use changeset_core::{PackageInfo, PrereleaseSpec};
 use changeset_project::{GraduationState, PrereleaseState, ProjectKind};
 use changeset_version::{is_prerelease, is_zero_version};
 
-/// Per-package release configuration from merged CLI + TOML sources.
-#[derive(Debug, Clone, Default)]
-pub struct PackageReleaseConfig {
-    /// Prerelease tag for this package (e.g., "alpha", "beta")
-    pub prerelease: Option<PrereleaseSpec>,
-    /// Whether to graduate this 0.x package to 1.0.0
-    pub graduate_zero: bool,
-}
+use crate::types::PackageReleaseConfig;
 
 /// Input from CLI for validation.
 #[derive(Debug, Clone, Default)]

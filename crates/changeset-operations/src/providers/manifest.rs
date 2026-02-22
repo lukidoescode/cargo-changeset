@@ -39,6 +39,21 @@ impl ManifestWriter for FileSystemManifestWriter {
         Ok(changeset_manifest::remove_workspace_version(manifest_path)?)
     }
 
+    fn read_workspace_version(&self, manifest_path: &Path) -> Result<Option<Version>> {
+        match changeset_manifest::read_workspace_version(manifest_path) {
+            Ok(version) => Ok(Some(version)),
+            Err(changeset_manifest::ManifestError::MissingField { .. }) => Ok(None),
+            Err(e) => Err(e.into()),
+        }
+    }
+
+    fn write_workspace_version(&self, manifest_path: &Path, version: &Version) -> Result<()> {
+        Ok(changeset_manifest::write_workspace_version(
+            manifest_path,
+            version,
+        )?)
+    }
+
     fn verify_version(&self, manifest_path: &Path, expected: &Version) -> Result<()> {
         Ok(changeset_manifest::verify_version(manifest_path, expected)?)
     }

@@ -7,8 +7,7 @@ use changeset_version::{
 };
 use indexmap::IndexMap;
 
-use super::release::PackageVersion;
-use super::release_validator::PackageReleaseConfig;
+use crate::types::{PackageReleaseConfig, PackageVersion};
 
 /// Result of planning version releases from changesets.
 #[derive(Debug, Clone)]
@@ -879,7 +878,6 @@ mod tests {
 
     mod per_package_config_tests {
         use super::*;
-        use crate::operations::release_validator::PackageReleaseConfig;
 
         #[test]
         fn per_package_prerelease_applies_to_specific_crate() {

@@ -1,8 +1,28 @@
-use crate::{CommitInfo, Result};
+use crate::{CommitInfo, GitError, Result};
 
 use super::Repository;
 
 impl Repository {
+    /// Performs a soft reset to the parent of HEAD (HEAD~1).
+    ///
+    /// This undoes the last commit while keeping changes staged.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if:
+    /// - HEAD cannot be resolved
+    /// - HEAD has no parent (initial commit)
+    /// - The reset operation fails
+    pub fn reset_to_parent(&self) -> Result<()> {
+        let head_commit = self.inner.head()?.peel_to_commit()?;
+        let parent = head_commit
+            .parent(0)
+            .map_err(|source| GitError::NoParentCommit { source })?;
+        self.inner
+            .reset(parent.as_object(), git2::ResetType::Soft, None)?;
+        Ok(())
+    }
+
     /// # Errors
     ///
     /// Returns an error if the commit cannot be created.
@@ -32,6 +52,7 @@ impl Repository {
 #[cfg(test)]
 mod tests {
     use super::super::tests::setup_test_repo;
+    use crate::GitError;
     use std::fs;
     use std::path::Path;
 
@@ -66,6 +87,40 @@ mod tests {
         let head = repo.inner.head()?.peel_to_commit()?;
         assert_eq!(head.message(), Some(message));
         assert_eq!(commit_info.message, message);
+
+        Ok(())
+    }
+
+    #[test]
+    fn reset_to_parent_undoes_last_commit() -> anyhow::Result<()> {
+        let (dir, repo) = setup_test_repo()?;
+
+        let initial_head = repo.inner.head()?.peel_to_commit()?.id();
+
+        fs::write(dir.path().join("file.txt"), "content")?;
+        repo.stage_files(&[Path::new("file.txt")])?;
+        repo.commit("Second commit")?;
+
+        let after_commit_head = repo.inner.head()?.peel_to_commit()?.id();
+        assert_ne!(initial_head, after_commit_head);
+
+        repo.reset_to_parent()?;
+
+        let after_reset_head = repo.inner.head()?.peel_to_commit()?.id();
+        assert_eq!(initial_head, after_reset_head);
+
+        Ok(())
+    }
+
+    #[test]
+    fn reset_to_parent_on_initial_commit_fails() -> anyhow::Result<()> {
+        let (_dir, repo) = setup_test_repo()?;
+
+        let result = repo.reset_to_parent();
+
+        assert!(result.is_err());
+        let err = result.expect_err("expected NoParentCommit error");
+        assert!(matches!(err, GitError::NoParentCommit { .. }));
 
         Ok(())
     }
