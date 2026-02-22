@@ -17,6 +17,20 @@ pub trait ManifestWriter: InheritedVersionChecker + Send + Sync {
     /// Returns an error if the manifest cannot be read or written.
     fn remove_workspace_version(&self, manifest_path: &Path) -> Result<()>;
 
+    /// Reads the workspace package version from a root manifest.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the manifest cannot be read or if the field is missing.
+    fn read_workspace_version(&self, manifest_path: &Path) -> Result<Option<Version>>;
+
+    /// Writes or restores the workspace package version in a root manifest.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the manifest cannot be read, parsed, or written.
+    fn write_workspace_version(&self, manifest_path: &Path, version: &Version) -> Result<()>;
+
     /// # Errors
     ///
     /// Returns an error if the version does not match the expected value.

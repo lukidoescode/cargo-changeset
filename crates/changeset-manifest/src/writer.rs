@@ -65,6 +65,48 @@ pub fn remove_workspace_version(path: &Path) -> Result<(), ManifestError> {
     })
 }
 
+/// Writes or restores the workspace package version in a root manifest.
+///
+/// # Errors
+///
+/// Returns an error if the manifest cannot be read, parsed, or written.
+pub fn write_workspace_version(path: &Path, version: &Version) -> Result<(), ManifestError> {
+    let mut doc = read_document(path)?;
+
+    let workspace = doc
+        .get_mut("workspace")
+        .ok_or_else(|| ManifestError::MissingField {
+            path: path.to_path_buf(),
+            field: "workspace".to_string(),
+        })?;
+
+    let workspace_table =
+        workspace
+            .as_table_like_mut()
+            .ok_or_else(|| ManifestError::MissingField {
+                path: path.to_path_buf(),
+                field: "workspace (as table)".to_string(),
+            })?;
+
+    let package = workspace_table
+        .entry("package")
+        .or_insert_with(|| Item::Table(Table::new()));
+
+    let package_table = package
+        .as_table_like_mut()
+        .ok_or_else(|| ManifestError::MissingField {
+            path: path.to_path_buf(),
+            field: "workspace.package (as table)".to_string(),
+        })?;
+
+    package_table.insert("version", value(version.to_string()));
+
+    std::fs::write(path, doc.to_string()).map_err(|source| ManifestError::Write {
+        path: path.to_path_buf(),
+        source,
+    })
+}
+
 /// # Errors
 ///
 /// Returns `ManifestError::VerificationFailed` if the version in the manifest

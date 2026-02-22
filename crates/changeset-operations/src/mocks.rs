@@ -249,6 +249,14 @@ impl ChangesetWriter for MockChangesetReader {
         Ok("mock-changeset.md".to_string())
     }
 
+    fn restore_changeset(&self, path: &Path, changeset: &Changeset) -> Result<()> {
+        self.changesets
+            .lock()
+            .expect("lock poisoned")
+            .insert(path.to_path_buf(), changeset.clone());
+        Ok(())
+    }
+
     fn filename_exists(&self, _changeset_dir: &Path, _filename: &str) -> bool {
         false
     }
@@ -296,6 +304,10 @@ impl ChangesetReader for Arc<MockChangesetReader> {
 impl ChangesetWriter for Arc<MockChangesetReader> {
     fn write_changeset(&self, changeset_dir: &Path, changeset: &Changeset) -> Result<String> {
         (**self).write_changeset(changeset_dir, changeset)
+    }
+
+    fn restore_changeset(&self, path: &Path, changeset: &Changeset) -> Result<()> {
+        (**self).restore_changeset(path, changeset)
     }
 
     fn filename_exists(&self, changeset_dir: &Path, filename: &str) -> bool {
@@ -360,6 +372,14 @@ impl ChangesetWriter for MockChangesetWriter {
         Ok(self.filename.clone())
     }
 
+    fn restore_changeset(&self, path: &Path, changeset: &Changeset) -> Result<()> {
+        self.written
+            .lock()
+            .expect("lock poisoned")
+            .push((path.to_path_buf(), changeset.clone()));
+        Ok(())
+    }
+
     fn filename_exists(&self, _changeset_dir: &Path, _filename: &str) -> bool {
         false
     }
@@ -387,6 +407,12 @@ pub struct MockGitProvider {
     commits: Mutex<Vec<String>>,
     tags_created: Mutex<Vec<(String, String)>>,
     deleted_files: Mutex<Vec<PathBuf>>,
+    deleted_tags: Mutex<Vec<String>>,
+    reset_count: Mutex<usize>,
+    fail_on_commit: Mutex<bool>,
+    fail_on_create_tag: Mutex<bool>,
+    fail_on_create_tag_nth: Mutex<Option<usize>>,
+    fail_on_stage_files: Mutex<bool>,
 }
 
 impl MockGitProvider {
@@ -401,6 +427,12 @@ impl MockGitProvider {
             commits: Mutex::new(Vec::new()),
             tags_created: Mutex::new(Vec::new()),
             deleted_files: Mutex::new(Vec::new()),
+            deleted_tags: Mutex::new(Vec::new()),
+            reset_count: Mutex::new(0),
+            fail_on_commit: Mutex::new(false),
+            fail_on_create_tag: Mutex::new(false),
+            fail_on_create_tag_nth: Mutex::new(None),
+            fail_on_stage_files: Mutex::new(false),
         }
     }
 
@@ -459,6 +491,50 @@ impl MockGitProvider {
     pub fn deleted_files(&self) -> Vec<PathBuf> {
         self.deleted_files.lock().expect("lock poisoned").clone()
     }
+
+    /// # Panics
+    ///
+    /// Panics if the internal mutex is poisoned.
+    #[must_use]
+    pub fn deleted_tags(&self) -> Vec<String> {
+        self.deleted_tags.lock().expect("lock poisoned").clone()
+    }
+
+    /// # Panics
+    ///
+    /// Panics if the internal mutex is poisoned.
+    #[must_use]
+    pub fn reset_count(&self) -> usize {
+        *self.reset_count.lock().expect("lock poisoned")
+    }
+
+    /// # Panics
+    ///
+    /// Panics if the internal mutex is poisoned.
+    pub fn set_fail_on_commit(&self, fail: bool) {
+        *self.fail_on_commit.lock().expect("lock poisoned") = fail;
+    }
+
+    /// # Panics
+    ///
+    /// Panics if the internal mutex is poisoned.
+    pub fn set_fail_on_create_tag(&self, fail: bool) {
+        *self.fail_on_create_tag.lock().expect("lock poisoned") = fail;
+    }
+
+    /// # Panics
+    ///
+    /// Panics if the internal mutex is poisoned.
+    pub fn set_fail_on_create_tag_nth(&self, n: usize) {
+        *self.fail_on_create_tag_nth.lock().expect("lock poisoned") = Some(n);
+    }
+
+    /// # Panics
+    ///
+    /// Panics if the internal mutex is poisoned.
+    pub fn set_fail_on_stage_files(&self, fail: bool) {
+        *self.fail_on_stage_files.lock().expect("lock poisoned") = fail;
+    }
 }
 
 impl Default for MockGitProvider {
@@ -486,6 +562,11 @@ impl GitProvider for MockGitProvider {
     }
 
     fn stage_files(&self, _project_root: &Path, paths: &[&Path]) -> Result<()> {
+        if *self.fail_on_stage_files.lock().expect("lock poisoned") {
+            return Err(crate::OperationError::Io(std::io::Error::other(
+                "mock stage files failure",
+            )));
+        }
         self.staged_files
             .lock()
             .expect("lock poisoned")
@@ -494,6 +575,11 @@ impl GitProvider for MockGitProvider {
     }
 
     fn commit(&self, _project_root: &Path, message: &str) -> Result<CommitInfo> {
+        if *self.fail_on_commit.lock().expect("lock poisoned") {
+            return Err(crate::OperationError::Io(std::io::Error::other(
+                "mock commit failure",
+            )));
+        }
         self.commits
             .lock()
             .expect("lock poisoned")
@@ -505,6 +591,21 @@ impl GitProvider for MockGitProvider {
     }
 
     fn create_tag(&self, _project_root: &Path, tag_name: &str, message: &str) -> Result<TagInfo> {
+        if *self.fail_on_create_tag.lock().expect("lock poisoned") {
+            return Err(crate::OperationError::Io(std::io::Error::other(
+                "mock create tag failure",
+            )));
+        }
+
+        let current_count = self.tags_created.lock().expect("lock poisoned").len();
+        if let Some(n) = *self.fail_on_create_tag_nth.lock().expect("lock poisoned") {
+            if current_count == n {
+                return Err(crate::OperationError::Io(std::io::Error::other(
+                    "mock create tag failure (nth)",
+                )));
+            }
+        }
+
         self.tags_created
             .lock()
             .expect("lock poisoned")
@@ -524,6 +625,19 @@ impl GitProvider for MockGitProvider {
             .lock()
             .expect("lock poisoned")
             .extend(paths.iter().map(|p| p.to_path_buf()));
+        Ok(())
+    }
+
+    fn delete_tag(&self, _project_root: &Path, tag_name: &str) -> Result<bool> {
+        self.deleted_tags
+            .lock()
+            .expect("lock poisoned")
+            .push(tag_name.to_string());
+        Ok(true)
+    }
+
+    fn reset_to_parent(&self, _project_root: &Path) -> Result<()> {
+        *self.reset_count.lock().expect("lock poisoned") += 1;
         Ok(())
     }
 }
@@ -564,6 +678,14 @@ impl GitProvider for Arc<MockGitProvider> {
 
     fn delete_files(&self, project_root: &Path, paths: &[&Path]) -> Result<()> {
         (**self).delete_files(project_root, paths)
+    }
+
+    fn delete_tag(&self, project_root: &Path, tag_name: &str) -> Result<bool> {
+        (**self).delete_tag(project_root, tag_name)
+    }
+
+    fn reset_to_parent(&self, project_root: &Path) -> Result<()> {
+        (**self).reset_to_parent(project_root)
     }
 }
 
@@ -665,6 +787,7 @@ pub struct MockManifestWriter {
     written_versions: Mutex<Vec<(PathBuf, Version)>>,
     inherited_paths: HashSet<PathBuf>,
     removed_workspace_version: Mutex<bool>,
+    workspace_version: Mutex<Option<Version>>,
     written_metadata: Mutex<Vec<(PathBuf, MetadataSection, InitConfig)>>,
 }
 
@@ -675,6 +798,7 @@ impl MockManifestWriter {
             written_versions: Mutex::new(Vec::new()),
             inherited_paths: HashSet::new(),
             removed_workspace_version: Mutex::new(false),
+            workspace_version: Mutex::new(None),
             written_metadata: Mutex::new(Vec::new()),
         }
     }
@@ -682,6 +806,15 @@ impl MockManifestWriter {
     #[must_use]
     pub fn with_inherited(mut self, paths: Vec<PathBuf>) -> Self {
         self.inherited_paths = paths.into_iter().collect();
+        self
+    }
+
+    /// # Panics
+    ///
+    /// Panics if the internal mutex is poisoned.
+    #[must_use]
+    pub fn with_workspace_version(self, version: Version) -> Self {
+        *self.workspace_version.lock().expect("lock poisoned") = Some(version);
         self
     }
 
@@ -702,6 +835,17 @@ impl MockManifestWriter {
             .removed_workspace_version
             .lock()
             .expect("lock poisoned")
+    }
+
+    /// # Panics
+    ///
+    /// Panics if the internal mutex is poisoned.
+    #[must_use]
+    pub fn get_workspace_version(&self) -> Option<Version> {
+        self.workspace_version
+            .lock()
+            .expect("lock poisoned")
+            .clone()
     }
 
     /// # Panics
@@ -739,6 +883,24 @@ impl ManifestWriter for MockManifestWriter {
             .removed_workspace_version
             .lock()
             .expect("lock poisoned") = true;
+        *self.workspace_version.lock().expect("lock poisoned") = None;
+        Ok(())
+    }
+
+    fn read_workspace_version(&self, _manifest_path: &Path) -> Result<Option<Version>> {
+        Ok(self
+            .workspace_version
+            .lock()
+            .expect("lock poisoned")
+            .clone())
+    }
+
+    fn write_workspace_version(&self, _manifest_path: &Path, version: &Version) -> Result<()> {
+        *self.workspace_version.lock().expect("lock poisoned") = Some(version.clone());
+        *self
+            .removed_workspace_version
+            .lock()
+            .expect("lock poisoned") = false;
         Ok(())
     }
 
@@ -774,6 +936,14 @@ impl ManifestWriter for Arc<MockManifestWriter> {
 
     fn remove_workspace_version(&self, manifest_path: &Path) -> Result<()> {
         (**self).remove_workspace_version(manifest_path)
+    }
+
+    fn read_workspace_version(&self, manifest_path: &Path) -> Result<Option<Version>> {
+        (**self).read_workspace_version(manifest_path)
+    }
+
+    fn write_workspace_version(&self, manifest_path: &Path, version: &Version) -> Result<()> {
+        (**self).write_workspace_version(manifest_path, version)
     }
 
     fn verify_version(&self, manifest_path: &Path, expected: &Version) -> Result<()> {
@@ -825,6 +995,15 @@ impl Default for MockChangelogWriter {
     }
 }
 
+impl Clone for MockChangelogWriter {
+    fn clone(&self) -> Self {
+        Self {
+            written: Mutex::new(self.written.lock().expect("lock poisoned").clone()),
+            existing_changelogs: self.existing_changelogs.clone(),
+        }
+    }
+}
+
 impl ChangelogWriter for MockChangelogWriter {
     fn write_release(
         &self,
@@ -849,6 +1028,14 @@ impl ChangelogWriter for MockChangelogWriter {
     fn changelog_exists(&self, path: &Path) -> bool {
         self.existing_changelogs.contains(path)
     }
+
+    fn restore_changelog(&self, _path: &Path, _content: &str) -> Result<()> {
+        Ok(())
+    }
+
+    fn delete_changelog(&self, _path: &Path) -> Result<()> {
+        Ok(())
+    }
 }
 
 impl ChangelogWriter for Arc<MockChangelogWriter> {
@@ -864,6 +1051,14 @@ impl ChangelogWriter for Arc<MockChangelogWriter> {
 
     fn changelog_exists(&self, path: &Path) -> bool {
         (**self).changelog_exists(path)
+    }
+
+    fn restore_changelog(&self, path: &Path, content: &str) -> Result<()> {
+        (**self).restore_changelog(path, content)
+    }
+
+    fn delete_changelog(&self, path: &Path) -> Result<()> {
+        (**self).delete_changelog(path)
     }
 }
 

@@ -171,6 +171,19 @@ impl ChangesetWriter for FileSystemChangesetIO {
         Ok(filename)
     }
 
+    fn restore_changeset(&self, path: &Path, changeset: &Changeset) -> Result<()> {
+        let full_path = if path.is_absolute() {
+            path.to_path_buf()
+        } else {
+            self.project_root.join(path)
+        };
+
+        let content = serialize_changeset(changeset)?;
+        fs::write(&full_path, content).map_err(OperationError::ChangesetFileWrite)?;
+
+        Ok(())
+    }
+
     fn filename_exists(&self, changeset_dir: &Path, filename: &str) -> bool {
         changeset_dir
             .join(CHANGESETS_SUBDIR)

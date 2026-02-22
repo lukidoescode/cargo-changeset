@@ -27,4 +27,10 @@ pub enum GitError {
 
     #[error("diff delta has no file path")]
     MissingDeltaPath,
+
+    #[error("HEAD has no parent commit")]
+    NoParentCommit {
+        #[source]
+        source: git2::Error,
+    },
 }

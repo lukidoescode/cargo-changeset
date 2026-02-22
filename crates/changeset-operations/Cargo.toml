@@ -11,10 +11,11 @@ description = "Core operations and business logic for cargo-changeset"
 [dependencies]
 changeset-changelog = { workspace = true }
 changeset-core = { workspace = true }
-changeset-parse = { workspace = true }
-changeset-project = { workspace = true }
 changeset-git = { workspace = true }
 changeset-manifest = { workspace = true }
+changeset-parse = { workspace = true }
+changeset-project = { workspace = true }
+changeset-saga = { workspace = true }
 changeset-version = { workspace = true }
 chrono = { version = "0.4", default-features = false, features = ["std", "clock"] }
 indexmap = { workspace = true }

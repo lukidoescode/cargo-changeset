@@ -1,22 +1,32 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use changeset_changelog::{ChangelogLocation, ComparisonLinksSetting, RepositoryInfo};
-use changeset_core::{BumpType, PackageInfo, PrereleaseSpec};
+use changeset_core::{PackageInfo, PrereleaseSpec};
 use changeset_project::{GraduationState, ProjectKind, TagFormat};
+use changeset_saga::SagaBuilder;
 use chrono::Local;
 use indexmap::IndexMap;
 use semver::Version;
 
-use super::changelog_aggregation::ChangesetAggregator;
-use super::release_validator::{PackageReleaseConfig, ReleaseCliInput, ReleaseValidator};
-use super::version_planner::VersionPlanner;
+use super::context::ReleaseSagaContext;
+use super::saga_data::{ReleaseSagaData, SagaReleaseOptions};
+use super::saga_steps::{
+    ClearChangesetsConsumedStep, CreateCommitStep, CreateTagsStep, DeleteChangesetFilesStep,
+    MarkChangesetsConsumedStep, RemoveWorkspaceVersionStep, RestoreChangelogsStep, StageFilesStep,
+    UpdateReleaseStateStep, WriteManifestVersionsStep,
+};
+use super::validator::{ReleaseCliInput, ReleaseValidator};
 use crate::Result;
 use crate::error::OperationError;
+use crate::operations::changelog_aggregation::ChangesetAggregator;
+use crate::planner::VersionPlanner;
 use crate::traits::{
     ChangelogWriter, ChangesetReader, ChangesetWriter, GitProvider, ManifestWriter,
     ProjectProvider, ReleaseStateIO,
 };
+use crate::types::{PackageReleaseConfig, PackageVersion};
 
 pub struct ReleaseInput {
     pub dry_run: bool,
@@ -31,14 +41,6 @@ pub struct ReleaseInput {
     pub global_prerelease: Option<PrereleaseSpec>,
     /// Whether `--graduate` was passed without specific crates (single-package mode).
     pub graduate_all: bool,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct PackageVersion {
-    pub name: String,
-    pub current_version: Version,
-    pub new_version: Version,
-    pub bump_type: BumpType,
 }
 
 #[derive(Debug, Clone)]
@@ -110,6 +112,7 @@ struct ReleasePlan {
     output: ReleaseOutput,
     planned_releases: Vec<PackageVersion>,
     package_lookup: IndexMap<String, PackageInfo>,
+    changelog_backups: Vec<super::steps::ChangelogFileState>,
 }
 
 fn find_previous_tag(planned_releases: &[PackageVersion]) -> Option<String> {
@@ -153,21 +156,32 @@ fn is_zero_graduation(
 
 pub struct ReleaseOperation<P, RW, M, C, G, S> {
     project_provider: P,
-    changeset_io: RW,
-    manifest_writer: M,
+    changeset_io: Arc<RW>,
+    manifest_writer: Arc<M>,
     changelog_writer: C,
-    git_provider: G,
-    release_state_io: S,
+    git_provider: Arc<G>,
+    release_state_io: Arc<S>,
+}
+
+#[cfg(test)]
+impl<P, RW, M, C, G, S> ReleaseOperation<P, RW, M, C, G, S> {
+    pub(crate) fn manifest_writer(&self) -> &M {
+        &self.manifest_writer
+    }
+
+    pub(crate) fn git_provider(&self) -> &G {
+        &self.git_provider
+    }
 }
 
 impl<P, RW, M, C, G, S> ReleaseOperation<P, RW, M, C, G, S>
 where
     P: ProjectProvider,
-    RW: ChangesetReader + ChangesetWriter,
-    M: ManifestWriter,
-    C: ChangelogWriter,
-    G: GitProvider,
-    S: ReleaseStateIO,
+    RW: ChangesetReader + ChangesetWriter + Send + Sync + 'static,
+    M: ManifestWriter + Send + Sync + 'static,
+    C: ChangelogWriter + Clone + Send + Sync + 'static,
+    G: GitProvider + Send + Sync + 'static,
+    S: ReleaseStateIO + Send + Sync + 'static,
 {
     pub fn new(
         project_provider: P,
@@ -179,11 +193,11 @@ where
     ) -> Self {
         Self {
             project_provider,
-            changeset_io,
-            manifest_writer,
+            changeset_io: Arc::new(changeset_io),
+            manifest_writer: Arc::new(manifest_writer),
             changelog_writer,
-            git_provider,
-            release_state_io,
+            git_provider: Arc::new(git_provider),
+            release_state_io: Arc::new(release_state_io),
         }
     }
 
@@ -198,6 +212,78 @@ where
     fn detect_repository_info(&self, project_root: &Path) -> Option<RepositoryInfo> {
         let url = self.git_provider.remote_url(project_root).ok()??;
         RepositoryInfo::from_url(&url).ok()
+    }
+
+    fn capture_changelog_state(
+        &self,
+        project_root: &Path,
+        changelog_config: &changeset_changelog::ChangelogConfig,
+        planned_releases: &[PackageVersion],
+        package_lookup: &IndexMap<String, PackageInfo>,
+    ) -> Result<Vec<super::steps::ChangelogFileState>> {
+        use super::steps::ChangelogFileState;
+        let mut backups = Vec::new();
+
+        match changelog_config.changelog {
+            ChangelogLocation::Root => {
+                let changelog_path = project_root.join("CHANGELOG.md");
+                let max_version = planned_releases
+                    .iter()
+                    .map(|r| &r.new_version)
+                    .max()
+                    .cloned();
+
+                if let Some(version) = max_version {
+                    let file_existed = self.changelog_writer.changelog_exists(&changelog_path);
+                    let original_content = if file_existed {
+                        Some(std::fs::read_to_string(&changelog_path).map_err(|e| {
+                            OperationError::ChangesetFileRead {
+                                path: changelog_path.clone(),
+                                source: e,
+                            }
+                        })?)
+                    } else {
+                        None
+                    };
+
+                    backups.push(ChangelogFileState {
+                        path: changelog_path,
+                        version,
+                        package: None,
+                        original_content,
+                        file_existed,
+                    });
+                }
+            }
+            ChangelogLocation::PerPackage => {
+                for release in planned_releases {
+                    if let Some(pkg) = package_lookup.get(&release.name) {
+                        let changelog_path = pkg.path.join("CHANGELOG.md");
+                        let file_existed = self.changelog_writer.changelog_exists(&changelog_path);
+                        let original_content = if file_existed {
+                            Some(std::fs::read_to_string(&changelog_path).map_err(|e| {
+                                OperationError::ChangesetFileRead {
+                                    path: changelog_path.clone(),
+                                    source: e,
+                                }
+                            })?)
+                        } else {
+                            None
+                        };
+
+                        backups.push(ChangelogFileState {
+                            path: changelog_path,
+                            version: release.new_version.clone(),
+                            package: Some(release.name.clone()),
+                            original_content,
+                            file_existed,
+                        });
+                    }
+                }
+            }
+        }
+
+        Ok(backups)
     }
 
     fn generate_changelog_updates(
@@ -368,71 +454,6 @@ where
         Ok((changesets, aggregator))
     }
 
-    /// Handles marking changesets as consumed or clearing consumed flags.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if changeset files cannot be modified.
-    fn handle_changeset_consumption(
-        &self,
-        changeset_dir: &Path,
-        changeset_files: &[PathBuf],
-        new_version: &Version,
-        is_prerelease: bool,
-        is_graduating: bool,
-    ) -> Result<()> {
-        if is_prerelease && !changeset_files.is_empty() {
-            let paths_refs: Vec<&Path> = changeset_files.iter().map(AsRef::as_ref).collect();
-            self.changeset_io.mark_consumed_for_prerelease(
-                changeset_dir,
-                &paths_refs,
-                new_version,
-            )?;
-        }
-
-        if is_graduating {
-            let consumed_paths = self.changeset_io.list_consumed_changesets(changeset_dir)?;
-            if !consumed_paths.is_empty() {
-                let paths_refs: Vec<&Path> = consumed_paths.iter().map(AsRef::as_ref).collect();
-                self.changeset_io
-                    .clear_consumed_for_prerelease(changeset_dir, &paths_refs)?;
-            }
-        }
-
-        Ok(())
-    }
-
-    /// Writes version updates to package manifests and optionally removes workspace version.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if manifest files cannot be written or verified.
-    fn write_manifest_versions(
-        &self,
-        project_root: &Path,
-        package_lookup: &IndexMap<String, PackageInfo>,
-        planned_releases: &[PackageVersion],
-        inherited_packages: &[String],
-    ) -> Result<()> {
-        if !inherited_packages.is_empty() {
-            let root_manifest = project_root.join("Cargo.toml");
-            self.manifest_writer
-                .remove_workspace_version(&root_manifest)?;
-        }
-
-        for release in planned_releases {
-            if let Some(pkg) = package_lookup.get(&release.name) {
-                let manifest_path = pkg.path.join("Cargo.toml");
-                self.manifest_writer
-                    .write_version(&manifest_path, &release.new_version)?;
-                self.manifest_writer
-                    .verify_version(&manifest_path, &release.new_version)?;
-            }
-        }
-
-        Ok(())
-    }
-
     fn collect_unchanged_packages(
         packages: &[PackageInfo],
         planned_releases: &[PackageVersion],
@@ -575,16 +596,23 @@ where
         let unchanged_packages =
             Self::collect_unchanged_packages(&context.project.packages, &planned_releases);
 
-        let changelog_updates = if dry_run {
-            Vec::new()
+        let (changelog_updates, changelog_backups) = if dry_run {
+            (Vec::new(), Vec::new())
         } else {
-            self.generate_changelog_updates(
+            let backups = self.capture_changelog_state(
+                &context.project.root,
+                context.root_config.changelog_config(),
+                &planned_releases,
+                &package_lookup,
+            )?;
+            let updates = self.generate_changelog_updates(
                 &context.project.root,
                 context.root_config.changelog_config(),
                 &aggregator,
                 &planned_releases,
                 &package_lookup,
-            )?
+            )?;
+            (updates, backups)
         };
 
         let output = ReleaseOutput {
@@ -599,6 +627,7 @@ where
             output,
             planned_releases,
             package_lookup,
+            changelog_backups,
         })
     }
 
@@ -607,52 +636,96 @@ where
         context: &ReleaseContext,
         plan: ReleasePlan,
     ) -> Result<ReleaseOutcome> {
-        self.write_manifest_versions(
-            &context.project.root,
-            &plan.package_lookup,
-            &plan.planned_releases,
-            &context.inherited_packages,
-        )?;
+        let package_paths: IndexMap<String, PathBuf> = plan
+            .package_lookup
+            .iter()
+            .map(|(name, info)| (name.clone(), info.path.clone()))
+            .collect();
 
-        if let Some(first_release) = plan.planned_releases.first() {
-            self.handle_changeset_consumption(
-                &context.changeset_dir,
-                &context.changeset_files,
-                &first_release.new_version,
-                context.is_prerelease_release,
-                context.is_graduating,
-            )?;
-        }
+        let saga_data = ReleaseSagaData::new(
+            context.changeset_dir.clone(),
+            context.project.root.join("Cargo.toml"),
+            plan.planned_releases.clone(),
+            package_paths,
+            plan.output.changelog_updates.clone(),
+            context.changeset_files.clone(),
+        )
+        .with_options(SagaReleaseOptions {
+            is_prerelease_release: context.is_prerelease_release,
+            is_graduating: context.is_graduating,
+            is_prerelease_graduation: context.is_prerelease_graduation,
+            should_commit: context.git_options.should_commit,
+            should_create_tags: context.git_options.should_create_tags,
+            should_delete_changesets: context.git_options.should_delete_changesets,
+        })
+        .with_inherited_packages(context.inherited_packages.clone())
+        .with_prerelease_state(context.prerelease_state.as_ref())
+        .with_graduation_state(context.graduation_state.as_ref())
+        .with_changelog_backups(plan.changelog_backups);
 
-        let should_delete_changesets_actual = context.git_options.should_delete_changesets
-            && !context.is_prerelease_release
-            && !context.is_prerelease_graduation;
-
-        let git_result = self.perform_git_operations(
-            &context.project.root,
-            &context.project.kind,
-            &plan.package_lookup,
-            &plan.planned_releases,
-            &plan.output.changelog_updates,
-            &context.changeset_files,
-            context.root_config.git_config(),
-            context.git_options.should_commit,
-            context.git_options.should_create_tags,
-            should_delete_changesets_actual,
-            &context.inherited_packages,
-        )?;
-
-        self.update_release_state(
-            &context.changeset_dir,
-            context.prerelease_state.as_ref(),
-            context.graduation_state.as_ref(),
-            &plan.planned_releases,
-        )?;
+        let result = self.execute_release_saga(context, saga_data)?;
 
         Ok(ReleaseOutcome::Executed(ReleaseOutput {
-            git_result: Some(git_result),
+            git_result: Some(result.into_git_result()),
             ..plan.output
         }))
+    }
+
+    #[allow(clippy::items_after_statements)]
+    fn execute_release_saga(
+        &self,
+        context: &ReleaseContext,
+        saga_data: ReleaseSagaData,
+    ) -> Result<ReleaseSagaData> {
+        let git_config = context.root_config.git_config();
+        let use_crate_prefix = match &context.project.kind {
+            ProjectKind::SinglePackage => git_config.tag_format() == TagFormat::CratePrefixed,
+            ProjectKind::VirtualWorkspace | ProjectKind::WorkspaceWithRoot => true,
+        };
+
+        type RestoreChangelogs<G, M, RW, S, CW> = RestoreChangelogsStep<G, M, RW, S, CW>;
+        type WriteManifests<G, M, RW, S, CW> = WriteManifestVersionsStep<G, M, RW, S, CW>;
+        type RemoveWorkspace<G, M, RW, S, CW> = RemoveWorkspaceVersionStep<G, M, RW, S, CW>;
+        type MarkConsumed<G, M, RW, S, CW> = MarkChangesetsConsumedStep<G, M, RW, S, CW>;
+        type ClearConsumed<G, M, RW, S, CW> = ClearChangesetsConsumedStep<G, M, RW, S, CW>;
+        type DeleteChangesets<G, M, RW, S, CW> = DeleteChangesetFilesStep<G, M, RW, S, CW>;
+        type Stage<G, M, RW, S, CW> = StageFilesStep<G, M, RW, S, CW>;
+        type Commit<G, M, RW, S, CW> = CreateCommitStep<G, M, RW, S, CW>;
+        type Tags<G, M, RW, S, CW> = CreateTagsStep<G, M, RW, S, CW>;
+        type UpdateState<G, M, RW, S, CW> = UpdateReleaseStateStep<G, M, RW, S, CW>;
+
+        let saga = SagaBuilder::new()
+            .first_step(RestoreChangelogs::<G, M, RW, S, C>::new())
+            .then(WriteManifests::<G, M, RW, S, C>::new())
+            .then(RemoveWorkspace::<G, M, RW, S, C>::new())
+            .then(MarkConsumed::<G, M, RW, S, C>::new())
+            .then(ClearConsumed::<G, M, RW, S, C>::new())
+            .then(DeleteChangesets::<G, M, RW, S, C>::new())
+            .then(Stage::<G, M, RW, S, C>::new())
+            .then(Commit::<G, M, RW, S, C>::new(
+                git_config.commit_title_template().to_string(),
+                git_config.changes_in_body(),
+            ))
+            .then(Tags::<G, M, RW, S, C>::new(
+                git_config.tag_format(),
+                use_crate_prefix,
+            ))
+            .then(UpdateState::<G, M, RW, S, C>::new())
+            .build();
+
+        let saga_context = self.create_saga_context(&context.project.root);
+        saga.execute(&saga_context, saga_data).map_err(Into::into)
+    }
+
+    fn create_saga_context(&self, project_root: &Path) -> ReleaseSagaContext<G, M, RW, S, C> {
+        ReleaseSagaContext::new(
+            project_root.to_path_buf(),
+            Arc::clone(&self.git_provider),
+            Arc::clone(&self.manifest_writer),
+            Arc::clone(&self.changeset_io),
+            Arc::clone(&self.release_state_io),
+            Arc::new(self.changelog_writer.clone()),
+        )
     }
 
     fn build_cli_input(input: &ReleaseInput) -> ReleaseCliInput {
@@ -677,196 +750,6 @@ where
             graduate_all: input.graduate_all,
         }
     }
-
-    fn update_release_state(
-        &self,
-        changeset_dir: &Path,
-        prerelease_state: Option<&changeset_project::PrereleaseState>,
-        graduation_state: Option<&GraduationState>,
-        planned_releases: &[PackageVersion],
-    ) -> Result<()> {
-        if let Some(state) = prerelease_state {
-            let mut new_state = state.clone();
-            for release in planned_releases {
-                let was_prerelease = changeset_version::is_prerelease(&release.current_version);
-                let is_now_stable = !changeset_version::is_prerelease(&release.new_version);
-                if was_prerelease && is_now_stable {
-                    let _ = new_state.remove(&release.name);
-                }
-            }
-            self.release_state_io
-                .save_prerelease_state(changeset_dir, &new_state)?;
-        }
-
-        if let Some(state) = graduation_state {
-            let mut new_state = state.clone();
-            for release in planned_releases {
-                if release.current_version.major == 0 && release.new_version.major >= 1 {
-                    let _ = new_state.remove(&release.name);
-                }
-            }
-            self.release_state_io
-                .save_graduation_state(changeset_dir, &new_state)?;
-        }
-
-        Ok(())
-    }
-
-    #[allow(clippy::too_many_arguments)]
-    fn perform_git_operations(
-        &self,
-        project_root: &Path,
-        project_kind: &ProjectKind,
-        package_lookup: &IndexMap<String, PackageInfo>,
-        planned_releases: &[PackageVersion],
-        changelog_updates: &[ChangelogUpdate],
-        changeset_files: &[PathBuf],
-        git_config: &changeset_project::GitConfig,
-        should_commit: bool,
-        should_create_tags: bool,
-        should_delete_changesets: bool,
-        inherited_packages: &[String],
-    ) -> Result<GitOperationResult> {
-        let mut result = GitOperationResult::default();
-
-        let changesets_deleted = if should_delete_changesets {
-            let paths_refs: Vec<&Path> = changeset_files.iter().map(AsRef::as_ref).collect();
-            self.git_provider.delete_files(project_root, &paths_refs)?;
-            changeset_files.to_vec()
-        } else {
-            Vec::new()
-        };
-        result.changesets_deleted = changesets_deleted;
-
-        if !should_commit {
-            return Ok(result);
-        }
-
-        let files_to_stage = Self::collect_files_to_stage(
-            project_root,
-            package_lookup,
-            planned_releases,
-            changelog_updates,
-            &result.changesets_deleted,
-            should_delete_changesets,
-            inherited_packages,
-        );
-
-        let file_refs: Vec<&Path> = files_to_stage.iter().map(AsRef::as_ref).collect();
-        self.git_provider.stage_files(project_root, &file_refs)?;
-
-        let commit_message = Self::build_commit_message(planned_releases, git_config);
-        let commit_info = self.git_provider.commit(project_root, &commit_message)?;
-        result.commit = Some(CommitResult {
-            sha: commit_info.sha,
-            message: commit_info.message,
-        });
-
-        if should_create_tags {
-            let tags = self.create_tags(
-                project_root,
-                project_kind,
-                planned_releases,
-                git_config.tag_format(),
-            )?;
-            result.tags_created = tags;
-        }
-
-        Ok(result)
-    }
-
-    fn collect_files_to_stage(
-        project_root: &Path,
-        package_lookup: &IndexMap<String, PackageInfo>,
-        planned_releases: &[PackageVersion],
-        changelog_updates: &[ChangelogUpdate],
-        changesets_deleted: &[PathBuf],
-        should_delete_changesets: bool,
-        inherited_packages: &[String],
-    ) -> Vec<PathBuf> {
-        let mut files = Vec::new();
-
-        for release in planned_releases {
-            if let Some(pkg) = package_lookup.get(&release.name) {
-                files.push(pkg.path.join("Cargo.toml"));
-            }
-        }
-
-        if !inherited_packages.is_empty() {
-            files.push(project_root.join("Cargo.toml"));
-        }
-
-        for update in changelog_updates {
-            files.push(update.path.clone());
-        }
-
-        if should_delete_changesets {
-            files.extend(changesets_deleted.iter().cloned());
-        }
-
-        files
-    }
-
-    fn build_commit_message(
-        planned_releases: &[PackageVersion],
-        git_config: &changeset_project::GitConfig,
-    ) -> String {
-        let version_list: Vec<String> = planned_releases
-            .iter()
-            .map(|r| format!("{}-v{}", r.name, r.new_version))
-            .collect();
-        let new_version = version_list.join(", ");
-
-        let title = git_config
-            .commit_title_template()
-            .replace("{new-version}", &new_version);
-
-        if !git_config.changes_in_body() {
-            return title;
-        }
-
-        let body: Vec<String> = planned_releases
-            .iter()
-            .map(|r| format!("- {} {} -> {}", r.name, r.current_version, r.new_version))
-            .collect();
-
-        format!("{}\n\n{}", title, body.join("\n"))
-    }
-
-    fn create_tags(
-        &self,
-        project_root: &Path,
-        project_kind: &ProjectKind,
-        planned_releases: &[PackageVersion],
-        config_tag_format: TagFormat,
-    ) -> Result<Vec<TagResult>> {
-        let use_crate_prefix = match project_kind {
-            ProjectKind::SinglePackage => config_tag_format == TagFormat::CratePrefixed,
-            ProjectKind::VirtualWorkspace | ProjectKind::WorkspaceWithRoot => true,
-        };
-
-        let mut tags = Vec::new();
-        for release in planned_releases {
-            let tag_name = if use_crate_prefix {
-                format!("{}-v{}", release.name, release.new_version)
-            } else {
-                format!("v{}", release.new_version)
-            };
-
-            let tag_message = format!("Release {} v{}", release.name, release.new_version);
-
-            let tag_info = self
-                .git_provider
-                .create_tag(project_root, &tag_name, &tag_message)?;
-
-            tags.push(TagResult {
-                name: tag_info.name,
-                target_sha: tag_info.target_sha,
-            });
-        }
-
-        Ok(tags)
-    }
 }
 
 #[cfg(test)]
@@ -876,6 +759,7 @@ mod tests {
         MockChangelogWriter, MockChangesetReader, MockGitProvider, MockManifestWriter,
         MockProjectProvider, MockReleaseStateIO, make_changeset,
     };
+    use changeset_core::BumpType;
 
     fn default_input() -> ReleaseInput {
         ReleaseInput {
@@ -898,8 +782,8 @@ mod tests {
     ) -> ReleaseOperation<P, RW, M, MockChangelogWriter, MockGitProvider, MockReleaseStateIO>
     where
         P: ProjectProvider,
-        RW: ChangesetReader + ChangesetWriter,
-        M: ManifestWriter,
+        RW: ChangesetReader + ChangesetWriter + Send + Sync + 'static,
+        M: ManifestWriter + Send + Sync + 'static,
     {
         ReleaseOperation::new(
             project_provider,
@@ -2503,6 +2387,159 @@ mod tests {
         assert!(
             updated_state.is_none() || !updated_state.expect("state").contains("my-crate"),
             "graduated package should not be in prerelease state"
+        );
+    }
+
+    #[test]
+    fn saga_rollback_restores_manifest_versions_on_commit_failure() {
+        let project_provider = MockProjectProvider::single_package("my-crate", "1.0.0");
+        let changeset = make_changeset("my-crate", BumpType::Patch, "Fix a bug");
+        let changeset_reader = MockChangesetReader::new()
+            .with_changeset(PathBuf::from(".changeset/changesets/fix.md"), changeset);
+        let manifest_writer = MockManifestWriter::new();
+        let git_provider = MockGitProvider::new();
+        git_provider.set_fail_on_commit(true);
+
+        let operation = ReleaseOperation::new(
+            project_provider,
+            changeset_reader,
+            manifest_writer,
+            MockChangelogWriter::new(),
+            git_provider,
+            MockReleaseStateIO::new(),
+        );
+        let input = ReleaseInput {
+            dry_run: false,
+            convert_inherited: false,
+            no_commit: false,
+            no_tags: true,
+            keep_changesets: true,
+            force: false,
+            per_package_config: HashMap::new(),
+            global_prerelease: None,
+            graduate_all: false,
+        };
+
+        let result = operation.execute(Path::new("/any"), &input);
+
+        assert!(result.is_err(), "release should fail due to commit failure");
+
+        let versions = operation.manifest_writer().written_versions();
+        assert!(
+            versions.len() >= 2,
+            "should have written version twice (update then rollback), got {} writes",
+            versions.len()
+        );
+
+        let last_write = &versions.last().expect("should have at least one write");
+        assert_eq!(
+            last_write.1.to_string(),
+            "1.0.0",
+            "last write should restore original version"
+        );
+    }
+
+    #[test]
+    fn saga_rollback_deletes_tags_on_failure_after_tag_creation() {
+        use std::sync::Arc;
+
+        let project_provider =
+            MockProjectProvider::workspace(vec![("crate-a", "1.0.0"), ("crate-b", "2.0.0")]);
+        let changeset_a = make_changeset("crate-a", BumpType::Patch, "Fix in crate-a");
+        let changeset_b = make_changeset("crate-b", BumpType::Minor, "Feature in crate-b");
+        let changeset_reader = Arc::new(
+            MockChangesetReader::new()
+                .with_changeset(PathBuf::from(".changeset/changesets/fix-a.md"), changeset_a)
+                .with_changeset(
+                    PathBuf::from(".changeset/changesets/feat-b.md"),
+                    changeset_b,
+                ),
+        );
+        let manifest_writer = Arc::new(MockManifestWriter::new());
+        let git_provider = Arc::new(MockGitProvider::new());
+
+        let operation = ReleaseOperation::new(
+            project_provider,
+            Arc::clone(&changeset_reader),
+            Arc::clone(&manifest_writer),
+            MockChangelogWriter::new(),
+            Arc::clone(&git_provider),
+            Arc::new(MockReleaseStateIO::new()),
+        );
+        let input = ReleaseInput {
+            dry_run: false,
+            convert_inherited: false,
+            no_commit: false,
+            no_tags: false,
+            keep_changesets: true,
+            force: false,
+            per_package_config: HashMap::new(),
+            global_prerelease: None,
+            graduate_all: false,
+        };
+
+        let result = operation.execute(Path::new("/any"), &input);
+        assert!(result.is_ok(), "release should succeed");
+
+        let tags = git_provider.tags_created();
+        assert_eq!(tags.len(), 2, "should create tags for both packages");
+    }
+
+    #[test]
+    fn saga_rollback_resets_commit_when_tag_creation_fails() {
+        let project_provider = MockProjectProvider::single_package("my-crate", "1.0.0");
+        let changeset = make_changeset("my-crate", BumpType::Patch, "Fix a bug");
+        let changeset_reader = MockChangesetReader::new()
+            .with_changeset(PathBuf::from(".changeset/changesets/fix.md"), changeset);
+        let manifest_writer = MockManifestWriter::new();
+        let git_provider = MockGitProvider::new();
+        git_provider.set_fail_on_create_tag(true);
+
+        let operation = ReleaseOperation::new(
+            project_provider,
+            changeset_reader,
+            manifest_writer,
+            MockChangelogWriter::new(),
+            git_provider,
+            MockReleaseStateIO::new(),
+        );
+        let input = ReleaseInput {
+            dry_run: false,
+            convert_inherited: false,
+            no_commit: false,
+            no_tags: false,
+            keep_changesets: true,
+            force: false,
+            per_package_config: HashMap::new(),
+            global_prerelease: None,
+            graduate_all: false,
+        };
+
+        let result = operation.execute(Path::new("/any"), &input);
+
+        assert!(
+            result.is_err(),
+            "release should fail due to tag creation failure"
+        );
+
+        assert_eq!(
+            operation.git_provider().commits().len(),
+            1,
+            "should have created one commit before failure"
+        );
+
+        assert_eq!(
+            operation.git_provider().reset_count(),
+            1,
+            "should have reset the commit during rollback"
+        );
+
+        let versions = operation.manifest_writer().written_versions();
+        let last_write = versions.last().expect("should have version writes");
+        assert_eq!(
+            last_write.1.to_string(),
+            "1.0.0",
+            "manifest version should be restored to original"
         );
     }
 }

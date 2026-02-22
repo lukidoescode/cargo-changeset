@@ -101,6 +101,16 @@ fn print_operation_error(error: &changeset_operations::OperationError) {
         OperationError::Cancelled => {
             eprintln!("error: operation cancelled by user");
         }
+        OperationError::SagaFailed { step, source } => {
+            print_saga_failed(step, source.as_ref());
+        }
+        OperationError::SagaCompensationFailed {
+            step,
+            source,
+            compensation_failures,
+        } => {
+            print_saga_compensation_failed(step, source.as_ref(), compensation_failures);
+        }
         _ => {
             eprintln!("error: {error}");
             let mut source = std::error::Error::source(error);
@@ -110,4 +120,54 @@ fn print_operation_error(error: &changeset_operations::OperationError) {
             }
         }
     }
+}
+
+fn print_saga_failed(step: &str, source: &changeset_operations::OperationError) {
+    eprintln!();
+    eprintln!("Error: Release failed at step '{step}'");
+    eprintln!("  -> {source}");
+
+    let mut error_source = std::error::Error::source(source);
+    while let Some(cause) = error_source {
+        eprintln!("  -> {cause}");
+        error_source = std::error::Error::source(cause);
+    }
+
+    eprintln!();
+    eprintln!("Rollback completed successfully.");
+    eprintln!("Your workspace has been restored to its original state.");
+    eprintln!();
+}
+
+fn print_saga_compensation_failed(
+    step: &str,
+    source: &changeset_operations::OperationError,
+    compensation_failures: &[changeset_operations::CompensationFailure],
+) {
+    eprintln!();
+    eprintln!("Error: Release failed at step '{step}'");
+    eprintln!("  -> {source}");
+
+    let mut error_source = std::error::Error::source(source);
+    while let Some(cause) = error_source {
+        eprintln!("  -> {cause}");
+        error_source = std::error::Error::source(cause);
+    }
+
+    eprintln!();
+    eprintln!(
+        "Rollback partially failed ({} compensation(s) failed):",
+        compensation_failures.len()
+    );
+    eprintln!();
+
+    for failure in compensation_failures {
+        eprintln!("  x {} - {}", failure.step, failure.description);
+        eprintln!("    Error: {}", failure.error);
+    }
+
+    eprintln!();
+    eprintln!("WARNING: Your workspace may be in an inconsistent state.");
+    eprintln!("Manual cleanup may be required.");
+    eprintln!();
 }

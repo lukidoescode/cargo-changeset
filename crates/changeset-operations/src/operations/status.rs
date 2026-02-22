@@ -3,10 +3,10 @@ use std::path::{Path, PathBuf};
 use changeset_core::{BumpType, Changeset, PackageInfo};
 use indexmap::IndexMap;
 
-use super::release::PackageVersion;
-use super::version_planner::VersionPlanner;
 use crate::Result;
+use crate::planner::VersionPlanner;
 use crate::traits::{ChangesetReader, InheritedVersionChecker, ProjectProvider};
+use crate::types::PackageVersion;
 
 pub struct StatusOutput {
     /// All parsed changesets.

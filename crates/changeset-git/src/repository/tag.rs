@@ -3,6 +3,25 @@ use crate::{Result, TagInfo};
 use super::Repository;
 
 impl Repository {
+    /// Deletes a tag by name.
+    ///
+    /// Returns `Ok(true)` if the tag was deleted, `Ok(false)` if the tag was not found.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the delete operation fails for reasons other than "not found".
+    pub fn delete_tag(&self, name: &str) -> Result<bool> {
+        let refname = format!("refs/tags/{name}");
+        match self.inner.find_reference(&refname) {
+            Ok(mut reference) => {
+                reference.delete()?;
+                Ok(true)
+            }
+            Err(e) if e.code() == git2::ErrorCode::NotFound => Ok(false),
+            Err(e) => Err(e.into()),
+        }
+    }
+
     /// # Errors
     ///
     /// Returns an error if the tag cannot be created or already exists.
@@ -63,6 +82,32 @@ mod tests {
         let result = repo.create_tag("v1.0.0", "Duplicate tag");
 
         assert!(result.is_err());
+
+        Ok(())
+    }
+
+    #[test]
+    fn delete_existing_tag_returns_true() -> anyhow::Result<()> {
+        let (_dir, repo) = setup_test_repo()?;
+
+        repo.create_tag("v1.0.0", "Tag to delete")?;
+        assert!(repo.inner.find_reference("refs/tags/v1.0.0").is_ok());
+
+        let deleted = repo.delete_tag("v1.0.0")?;
+
+        assert!(deleted);
+        assert!(repo.inner.find_reference("refs/tags/v1.0.0").is_err());
+
+        Ok(())
+    }
+
+    #[test]
+    fn delete_nonexistent_tag_returns_false() -> anyhow::Result<()> {
+        let (_dir, repo) = setup_test_repo()?;
+
+        let deleted = repo.delete_tag("nonexistent-tag")?;
+
+        assert!(!deleted);
 
         Ok(())
     }

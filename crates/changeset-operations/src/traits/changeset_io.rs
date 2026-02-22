@@ -57,6 +57,17 @@ pub trait ChangesetWriter: Send + Sync {
     /// Returns an error if the changeset cannot be serialized or written.
     fn write_changeset(&self, changeset_dir: &Path, changeset: &Changeset) -> Result<String>;
 
+    /// Writes a changeset to a specific file path.
+    ///
+    /// Unlike `write_changeset`, this method writes to the exact path specified
+    /// rather than generating a new unique filename. This is used for saga
+    /// compensation to restore deleted changeset files.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the changeset cannot be serialized or written.
+    fn restore_changeset(&self, path: &Path, changeset: &Changeset) -> Result<()>;
+
     #[must_use]
     fn filename_exists(&self, changeset_dir: &Path, filename: &str) -> bool;
 

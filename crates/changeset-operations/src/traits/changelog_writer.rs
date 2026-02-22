@@ -23,4 +23,14 @@ pub trait ChangelogWriter: Send + Sync {
     ) -> Result<ChangelogWriteResult>;
 
     fn changelog_exists(&self, path: &Path) -> bool;
+
+    /// # Errors
+    ///
+    /// Returns an error if the changelog cannot be restored.
+    fn restore_changelog(&self, path: &Path, content: &str) -> Result<()>;
+
+    /// # Errors
+    ///
+    /// Returns an error if the changelog cannot be deleted.
+    fn delete_changelog(&self, path: &Path) -> Result<()>;
 }

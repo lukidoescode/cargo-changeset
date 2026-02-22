@@ -26,6 +26,7 @@ changeset-project = { path = "crates/changeset-project" }
 changeset-changelog = { path = "crates/changeset-changelog" }
 changeset-operations = { path = "crates/changeset-operations" }
 changeset-manifest = { path = "crates/changeset-manifest" }
+changeset-saga = { path = "crates/changeset-saga" }
 
 # External dependencies
 indexmap = { version = "2.7.1", features = ["serde"] }

@@ -106,6 +106,50 @@ pub fn has_workspace_package_version(path: &Path) -> Result<bool, ManifestError>
     Ok(package.get("version").is_some())
 }
 
+/// Reads the workspace package version from a root manifest.
+///
+/// # Errors
+///
+/// Returns an error if the manifest cannot be read, parsed, or if the
+/// workspace.package.version field is missing.
+pub fn read_workspace_version(path: &Path) -> Result<Version, ManifestError> {
+    let doc = read_document(path)?;
+
+    let workspace = doc
+        .get("workspace")
+        .ok_or_else(|| ManifestError::MissingField {
+            path: path.to_path_buf(),
+            field: "workspace".to_string(),
+        })?;
+
+    let package = workspace
+        .get("package")
+        .ok_or_else(|| ManifestError::MissingField {
+            path: path.to_path_buf(),
+            field: "workspace.package".to_string(),
+        })?;
+
+    let version_item = package
+        .get("version")
+        .ok_or_else(|| ManifestError::MissingField {
+            path: path.to_path_buf(),
+            field: "workspace.package.version".to_string(),
+        })?;
+
+    let version_str = version_item
+        .as_str()
+        .ok_or_else(|| ManifestError::MissingField {
+            path: path.to_path_buf(),
+            field: "workspace.package.version (as string)".to_string(),
+        })?;
+
+    Version::parse(version_str).map_err(|source| ManifestError::InvalidVersion {
+        path: path.to_path_buf(),
+        version: version_str.to_string(),
+        source,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
