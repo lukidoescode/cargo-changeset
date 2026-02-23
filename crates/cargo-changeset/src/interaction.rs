@@ -1,6 +1,8 @@
 use std::fs;
-use std::io::{IsTerminal, Write as _};
+use std::io::Write as _;
 use std::process::Command;
+
+use crate::environment::is_interactive;
 
 use changeset_core::{BumpType, ChangeCategory, PackageInfo};
 use changeset_manifest::{ChangelogLocation, ComparisonLinks, TagFormat, ZeroVersionBehavior};
@@ -114,10 +116,6 @@ impl InteractionProvider for TerminalInteractionProvider {
             get_description_terminal().map_err(cli_to_operation_error)
         }
     }
-}
-
-fn is_interactive() -> bool {
-    std::env::var("CARGO_CHANGESET_FORCE_TTY").is_ok() || std::io::stdin().is_terminal()
 }
 
 fn cli_to_operation_error(e: CliError) -> changeset_operations::OperationError {
@@ -470,10 +468,13 @@ pub fn confirm_proceed(prompt: &str) -> crate::error::Result<bool> {
     Ok(confirmed == Some(true))
 }
 
-/// Checks if stdin is a TTY or `CARGO_CHANGESET_FORCE_TTY` is set.
+/// Checks if the environment allows interactive prompts.
 ///
-/// Used to determine if interactive prompts can be shown to the user.
+/// Returns `true` when:
+/// - `CARGO_CHANGESET_NO_TTY` is NOT set
+/// - No CI environment is detected (CI, GITHUB_ACTIONS, etc.)
+/// - Either `CARGO_CHANGESET_FORCE_TTY` is set OR stdin is a terminal
 #[must_use]
 pub fn is_terminal_interactive() -> bool {
-    is_interactive()
+    crate::environment::is_interactive()
 }
