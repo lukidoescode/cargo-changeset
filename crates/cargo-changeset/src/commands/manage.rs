@@ -1,5 +1,6 @@
-use std::io::IsTerminal;
 use std::path::Path;
+
+use crate::environment::is_interactive;
 
 use changeset_core::PrereleaseSpec;
 use changeset_operations::providers::{FileSystemProjectProvider, FileSystemReleaseStateIO};
@@ -446,15 +447,6 @@ fn interactive_remove_graduation(
     println!("Removed {crate_name} from graduation queue");
 
     Ok(())
-}
-
-/// Returns true if the terminal supports interactive prompts.
-///
-/// Checks two conditions:
-/// - `CARGO_CHANGESET_FORCE_TTY` environment variable is set (for testing)
-/// - Standard input is a terminal (for normal usage)
-fn is_interactive() -> bool {
-    std::env::var("CARGO_CHANGESET_FORCE_TTY").is_ok() || std::io::stdin().is_terminal()
 }
 
 fn dialoguer_to_cli_error(e: dialoguer::Error) -> CliError {

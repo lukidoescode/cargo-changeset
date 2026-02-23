@@ -1,6 +1,8 @@
 use std::collections::HashMap;
-use std::io::{IsTerminal, Read as _};
+use std::io::Read as _;
 use std::path::Path;
+
+use crate::environment::is_interactive;
 
 use changeset_core::BumpType;
 use changeset_operations::operations::{AddInput, AddOperation, AddResult};
@@ -121,10 +123,6 @@ fn read_description_from_stdin() -> Result<String> {
     let mut buffer = String::new();
     std::io::stdin().read_to_string(&mut buffer)?;
     Ok(buffer)
-}
-
-fn is_interactive() -> bool {
-    std::env::var("CARGO_CHANGESET_FORCE_TTY").is_ok() || std::io::stdin().is_terminal()
 }
 
 #[cfg(test)]

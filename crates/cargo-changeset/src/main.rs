@@ -1,4 +1,5 @@
 mod commands;
+mod environment;
 mod error;
 mod interaction;
 mod output;
@@ -70,10 +71,33 @@ fn print_error(error: &CliError) {
 fn print_operation_error(error: &changeset_operations::OperationError) {
     use changeset_operations::OperationError;
 
+    use crate::environment::NonInteractiveReason;
+
     match error {
-        OperationError::InteractionRequired => {
-            eprintln!("error: interactive mode requires a terminal");
-        }
+        OperationError::InteractionRequired => match crate::environment::non_interactive_reason() {
+            Some(NonInteractiveReason::CiDetected { env_var }) => {
+                eprintln!(
+                    "error: interactive input required but running in CI environment \
+                         (detected via ${env_var})"
+                );
+                eprintln!();
+                eprintln!("To use this command non-interactively, provide:");
+                eprintln!("  --package <PACKAGE>    Specify package(s) to include");
+                eprintln!("  --bump <TYPE>          Bump type: major, minor, or patch");
+                eprintln!("  -m <MESSAGE>           Change description");
+                eprintln!();
+                eprintln!("Example:");
+                eprintln!(
+                    "  cargo changeset add --package my-crate --bump minor -m \"Added feature\""
+                );
+            }
+            Some(NonInteractiveReason::ExplicitDisable) => {
+                eprintln!("error: interactive mode disabled via CARGO_CHANGESET_NO_TTY");
+            }
+            Some(NonInteractiveReason::NoTerminal) | None => {
+                eprintln!("error: interactive mode requires a terminal");
+            }
+        },
         OperationError::MissingBumpType { package_name } => {
             eprintln!(
                 "error: missing bump type for package '{package_name}' (use --bump or --package-bump)"

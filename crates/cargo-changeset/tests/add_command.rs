@@ -109,6 +109,16 @@ mod non_interactive {
 
         assert_cmd::cargo::cargo_bin_cmd!("cargo-changeset")
             .arg("add")
+            .env_remove("CI")
+            .env_remove("GITHUB_ACTIONS")
+            .env_remove("GITLAB_CI")
+            .env_remove("CIRCLECI")
+            .env_remove("TRAVIS")
+            .env_remove("JENKINS_URL")
+            .env_remove("BUILDKITE")
+            .env_remove("TF_BUILD")
+            .env_remove("CARGO_CHANGESET_FORCE_TTY")
+            .env_remove("CARGO_CHANGESET_NO_TTY")
             .current_dir(workspace.path())
             .assert()
             .failure()
@@ -772,5 +782,110 @@ MOCK_EDITOR_EOF
             !content.contains("# This is a comment"),
             "Comments should be filtered"
         );
+    }
+}
+
+mod ci_detection {
+    use super::*;
+
+    #[test]
+    fn add_in_ci_environment_without_package_fails() {
+        let workspace = create_virtual_workspace();
+
+        assert_cmd::cargo::cargo_bin_cmd!("cargo-changeset")
+            .arg("add")
+            .env("CI", "true")
+            .env_remove("CARGO_CHANGESET_FORCE_TTY")
+            .env_remove("CARGO_CHANGESET_NO_TTY")
+            .current_dir(workspace.path())
+            .assert()
+            .failure()
+            .stderr(contains("CI environment"))
+            .stderr(contains("$CI"));
+    }
+
+    #[test]
+    fn add_with_no_tty_env_requires_message() {
+        let workspace = create_single_crate_workspace();
+
+        assert_cmd::cargo::cargo_bin_cmd!("cargo-changeset")
+            .arg("add")
+            .arg("--bump")
+            .arg("patch")
+            .env("CARGO_CHANGESET_NO_TTY", "1")
+            .env_remove("CARGO_CHANGESET_FORCE_TTY")
+            .env_remove("CI")
+            .current_dir(workspace.path())
+            .assert()
+            .failure()
+            .stderr(contains("missing description"));
+    }
+
+    #[test]
+    fn add_with_all_flags_succeeds_in_ci() {
+        let workspace = create_single_crate_workspace();
+
+        assert_cmd::cargo::cargo_bin_cmd!("cargo-changeset")
+            .arg("add")
+            .arg("--bump")
+            .arg("patch")
+            .arg("-m")
+            .arg("CI change")
+            .env("CI", "true")
+            .env_remove("CARGO_CHANGESET_FORCE_TTY")
+            .env_remove("CARGO_CHANGESET_NO_TTY")
+            .current_dir(workspace.path())
+            .assert()
+            .success()
+            .stdout(contains("Created changeset"));
+    }
+
+    #[test]
+    fn error_message_includes_helpful_guidance() {
+        let workspace = create_virtual_workspace();
+
+        assert_cmd::cargo::cargo_bin_cmd!("cargo-changeset")
+            .arg("add")
+            .env("GITHUB_ACTIONS", "true")
+            .env_remove("CARGO_CHANGESET_FORCE_TTY")
+            .env_remove("CARGO_CHANGESET_NO_TTY")
+            .env_remove("CI")
+            .current_dir(workspace.path())
+            .assert()
+            .failure()
+            .stderr(contains("$GITHUB_ACTIONS"))
+            .stderr(contains("--package"))
+            .stderr(contains("--bump"))
+            .stderr(contains("-m"));
+    }
+
+    #[test]
+    fn force_tty_overrides_ci_detection() {
+        let workspace = create_virtual_workspace();
+
+        assert_cmd::cargo::cargo_bin_cmd!("cargo-changeset")
+            .arg("add")
+            .env("CI", "true")
+            .env("CARGO_CHANGESET_FORCE_TTY", "1")
+            .env_remove("CARGO_CHANGESET_NO_TTY")
+            .current_dir(workspace.path())
+            .assert()
+            .failure()
+            .stderr(contains("terminal"));
+    }
+
+    #[test]
+    fn no_tty_takes_priority_over_ci_and_force_tty() {
+        let workspace = create_virtual_workspace();
+
+        assert_cmd::cargo::cargo_bin_cmd!("cargo-changeset")
+            .arg("add")
+            .env("CARGO_CHANGESET_NO_TTY", "1")
+            .env("CI", "true")
+            .env("CARGO_CHANGESET_FORCE_TTY", "1")
+            .current_dir(workspace.path())
+            .assert()
+            .failure()
+            .stderr(contains("CARGO_CHANGESET_NO_TTY"));
     }
 }
