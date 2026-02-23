@@ -109,6 +109,16 @@ mod non_interactive {
 
         assert_cmd::cargo::cargo_bin_cmd!("cargo-changeset")
             .arg("add")
+            .env_remove("CI")
+            .env_remove("GITHUB_ACTIONS")
+            .env_remove("GITLAB_CI")
+            .env_remove("CIRCLECI")
+            .env_remove("TRAVIS")
+            .env_remove("JENKINS_URL")
+            .env_remove("BUILDKITE")
+            .env_remove("TF_BUILD")
+            .env_remove("CARGO_CHANGESET_FORCE_TTY")
+            .env_remove("CARGO_CHANGESET_NO_TTY")
             .current_dir(workspace.path())
             .assert()
             .failure()
@@ -850,7 +860,7 @@ mod ci_detection {
     }
 
     #[test]
-    fn ci_detection_overrides_force_tty() {
+    fn force_tty_overrides_ci_detection() {
         let workspace = create_virtual_workspace();
 
         assert_cmd::cargo::cargo_bin_cmd!("cargo-changeset")
@@ -861,7 +871,7 @@ mod ci_detection {
             .current_dir(workspace.path())
             .assert()
             .failure()
-            .stderr(contains("CI environment"));
+            .stderr(contains("terminal"));
     }
 
     #[test]

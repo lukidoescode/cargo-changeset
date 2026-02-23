@@ -16,12 +16,12 @@ pub fn non_interactive_reason() -> Option<NonInteractiveReason> {
         return Some(NonInteractiveReason::ExplicitDisable);
     }
 
-    if let Some(env_var) = detect_ci_env_var() {
-        return Some(NonInteractiveReason::CiDetected { env_var });
-    }
-
     if std::env::var("CARGO_CHANGESET_FORCE_TTY").is_ok() {
         return None;
+    }
+
+    if let Some(env_var) = detect_ci_env_var() {
+        return Some(NonInteractiveReason::CiDetected { env_var });
     }
 
     if !std::io::stdin().is_terminal() {
@@ -200,17 +200,12 @@ mod tests {
         }
 
         #[test]
-        fn ci_detected_takes_priority_over_force_tty() {
+        fn force_tty_takes_priority_over_ci_detection() {
             with_env(
                 &[("CI", "true"), ("CARGO_CHANGESET_FORCE_TTY", "1")],
                 ALL_CI_VARS,
                 || {
-                    assert_eq!(
-                        non_interactive_reason(),
-                        Some(NonInteractiveReason::CiDetected {
-                            env_var: "CI".to_string()
-                        })
-                    );
+                    assert!(non_interactive_reason().is_none());
                 },
             );
         }
@@ -270,12 +265,12 @@ mod tests {
         }
 
         #[test]
-        fn returns_false_when_ci_overrides_force_tty() {
+        fn returns_true_when_force_tty_overrides_ci() {
             with_env(
                 &[("CI", "true"), ("CARGO_CHANGESET_FORCE_TTY", "1")],
                 ALL_CI_VARS,
                 || {
-                    assert!(!is_interactive());
+                    assert!(is_interactive());
                 },
             );
         }
