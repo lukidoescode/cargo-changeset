@@ -51,7 +51,128 @@ cargo changeset add \
   -m "Breaking change in crate-a, fix in crate-b"
 ```
 
-### GitHub Actions Example
+---
+
+## Integration
+
+### Git Hook (Manual)
+
+To enforce changeset coverage before every commit, add the following script to your repository:
+
+**`.git/hooks/pre-commit`** (or `scripts/pre-commit` to commit alongside your code):
+
+```bash
+#!/usr/bin/env bash
+set -euo pipefail
+
+BASE="${CHANGESET_BASE:-main}"
+
+if ! command -v cargo-changeset &>/dev/null; then
+  echo "error: cargo-changeset is not installed."
+  echo "Install it with: cargo install cargo-changeset"
+  exit 1
+fi
+
+cargo changeset verify --base "$BASE"
+```
+
+Then make it executable and install it:
+
+```bash
+cp scripts/pre-commit .git/hooks/pre-commit
+chmod +x .git/hooks/pre-commit
+```
+
+To override the default base branch, set the `CHANGESET_BASE` environment variable:
+
+```bash
+CHANGESET_BASE=develop git commit -m "my change"
+```
+
+### pre-commit Framework
+
+If your project uses the [pre-commit framework](https://pre-commit.com), add a local hook to your `.pre-commit-config.yaml`:
+
+```yaml
+repos:
+  - repo: local
+    hooks:
+      - id: cargo-changeset
+        name: Verify changeset coverage
+        language: system
+        entry: cargo changeset verify
+        pass_filenames: false
+        always_run: true
+```
+
+This calls the locally-installed `cargo-changeset` binary directly. Install or update the hook with:
+
+```bash
+pre-commit install
+```
+
+### GitHub Actions CI
+
+Add changeset verification to your pull request workflow to ensure every PR includes a changeset for any modified packages.
+
+**Install and verify in a workflow:**
+
+```yaml
+- name: Install cargo-changeset
+  run: cargo install cargo-changeset
+
+- name: Verify changeset coverage
+  run: cargo changeset verify --base ${{ github.event.pull_request.base.ref }}
+```
+
+**With caching to avoid reinstalling on every run:**
+
+```yaml
+- name: Cache cargo-changeset
+  uses: actions/cache@v4
+  with:
+    path: ~/.cargo/bin/cargo-changeset
+    key: cargo-changeset-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
+
+- name: Install cargo-changeset
+  run: cargo install cargo-changeset
+
+- name: Verify changeset coverage
+  run: cargo changeset verify --base ${{ github.event.pull_request.base.ref }}
+```
+
+**Complete workflow example (`.github/workflows/changeset.yml`):**
+
+```yaml
+name: Verify Changeset Coverage
+
+on:
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cache cargo-changeset
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/bin/cargo-changeset
+          key: cargo-changeset-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Install cargo-changeset
+        run: cargo install cargo-changeset
+
+      - name: Verify changeset coverage
+        run: cargo changeset verify --base ${{ github.event.pull_request.base.ref }}
+```
+
+---
+
+### GitHub Actions Example (Adding Changesets)
 
 ```yaml
 name: Add Changeset
