@@ -1,12 +1,16 @@
 [package]
 name = "changeset-version"
-version = "0.0.0"
+version = "0.0.1"
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
+homepage.workspace = true
 authors.workspace = true
 description = "Version bumping logic for cargo-changeset"
+readme = "README.md"
+keywords = ["cargo", "changeset", "semver", "versioning", "release"]
+categories = ["development-tools::cargo-plugins"]
 
 [dependencies]
 changeset-core = { workspace = true }

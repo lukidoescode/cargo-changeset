@@ -6,7 +6,8 @@ resolver = "2"
 edition = "2024"
 rust-version = "1.85.0"
 license = "MIT"
-repository = "https://github.com/lwagner/cargo-changeset"
+repository = "https://github.com/lukidoescode/cargo-changeset"
+homepage = "https://github.com/lukidoescode/cargo-changeset"
 authors = ["Lukas Wagner <appdev.lukaswagner@gmail.com>"]
 
 [workspace.lints.clippy]
@@ -18,15 +19,15 @@ unwrap_used = "deny"
 
 [workspace.dependencies]
 # Internal crates - versions managed independently in each crate
-changeset-core = { path = "crates/changeset-core" }
-changeset-parse = { path = "crates/changeset-parse" }
-changeset-git = { path = "crates/changeset-git" }
-changeset-version = { path = "crates/changeset-version" }
-changeset-project = { path = "crates/changeset-project" }
-changeset-changelog = { path = "crates/changeset-changelog" }
-changeset-operations = { path = "crates/changeset-operations" }
-changeset-manifest = { path = "crates/changeset-manifest" }
-changeset-saga = { path = "crates/changeset-saga" }
+changeset-core = { path = "crates/changeset-core", version = "0.0.1" }
+changeset-parse = { path = "crates/changeset-parse", version = "0.0.1" }
+changeset-git = { path = "crates/changeset-git", version = "0.0.1" }
+changeset-version = { path = "crates/changeset-version", version = "0.0.1" }
+changeset-project = { path = "crates/changeset-project", version = "0.0.1" }
+changeset-changelog = { path = "crates/changeset-changelog", version = "0.0.1" }
+changeset-operations = { path = "crates/changeset-operations", version = "0.0.1" }
+changeset-manifest = { path = "crates/changeset-manifest", version = "0.0.1" }
+changeset-saga = { path = "crates/changeset-saga", version = "0.0.1" }
 
 # External dependencies
 indexmap = { version = "2.7.1", features = ["serde"] }

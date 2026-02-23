@@ -1,12 +1,16 @@
 [package]
 name = "changeset-project"
-version = "0.0.0"
+version = "0.0.1"
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
+homepage.workspace = true
 authors.workspace = true
 description = "Cargo project discovery and management for changesets"
+readme = "README.md"
+keywords = ["cargo", "changeset", "workspace", "release"]
+categories = ["development-tools::cargo-plugins"]
 
 [features]
 testing = []
