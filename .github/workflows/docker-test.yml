@@ -1,0 +1,86 @@
+name: Docker Test
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "Dockerfile"
+      - "entrypoint.sh"
+      - ".dockerignore"
+      - ".github/workflows/docker-test.yml"
+      - ".github/test-fixtures/**"
+      - "crates/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+  pull_request:
+    branches: [main]
+    paths:
+      - "Dockerfile"
+      - "entrypoint.sh"
+      - ".dockerignore"
+      - ".github/workflows/docker-test.yml"
+      - ".github/test-fixtures/**"
+      - "crates/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+
+jobs:
+  test-docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build Docker image
+        run: docker build -t cargo-changeset-test .
+
+      - name: Smoke test — help
+        run: docker run --rm cargo-changeset-test --help
+
+      - name: Set up test fixture as git repo
+        run: |
+          cd .github/test-fixtures/workspace
+          git init --initial-branch=main
+          git config user.name "Test"
+          git config user.email "test@test.com"
+          git add -A
+          git commit -m "Initial commit"
+
+      - name: Test verify — success (changeset added on feature branch)
+        run: |
+          cd .github/test-fixtures/workspace
+          git checkout -b feature/covered-change
+          echo "// change" >> crates/crate-a/src/lib.rs
+          mkdir -p .changeset/changesets
+          printf -- '---\n"crate-a": patch\n---\n\nCovered change for crate-a.\n' > .changeset/changesets/cover-crate-a.md
+          git add -A && git commit -m "Change to crate-a with changeset"
+
+          docker run --rm \
+            -v "$(pwd):/workspace" -w /workspace \
+            cargo-changeset-test verify --base main --quiet
+
+      - name: Test verify — failure (no changeset for crate-b)
+        run: |
+          cd .github/test-fixtures/workspace
+          git checkout -b feature/uncovered-change main
+          echo "// uncovered" >> crates/crate-b/src/lib.rs
+          git add -A && git commit -m "Uncovered change to crate-b"
+
+          if docker run --rm \
+            -v "$(pwd):/workspace" -w /workspace \
+            cargo-changeset-test verify --base main --quiet; then
+            echo "ERROR: verify should have failed but succeeded"
+            exit 1
+          fi
+
+      - name: Test release — dry-run
+        run: |
+          cd .github/test-fixtures/workspace
+          git checkout main
+
+          docker run --rm \
+            -v "$(pwd):/workspace" -w /workspace \
+            -e GIT_AUTHOR_NAME="Test" -e GIT_AUTHOR_EMAIL="test@test.com" \
+            -e GIT_COMMITTER_NAME="Test" -e GIT_COMMITTER_EMAIL="test@test.com" \
+            cargo-changeset-test release --dry-run
+
+          test -z "$(git status --porcelain)"
