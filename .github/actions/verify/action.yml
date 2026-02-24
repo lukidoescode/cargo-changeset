@@ -1,0 +1,20 @@
+name: "Verify Changeset Coverage"
+description: "Verify that all changed crates have changeset coverage using cargo-changeset"
+branding:
+  icon: "check-circle"
+  color: "green"
+
+inputs:
+  base:
+    description: "Base branch to compare against"
+    required: false
+    default: "main"
+
+runs:
+  using: "docker"
+  image: "docker://ghcr.io/lukidoescode/cargo-changeset:latest"
+  args:
+    - "verify"
+    - "--base"
+    - ${{ inputs.base }}
+    - "--quiet"

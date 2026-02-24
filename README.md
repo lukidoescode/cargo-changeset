@@ -111,11 +111,90 @@ This calls the locally-installed `cargo-changeset` binary directly. Install or u
 pre-commit install
 ```
 
-### GitHub Actions CI
+### Docker Image
 
-Add changeset verification to your pull request workflow to ensure every PR includes a changeset for any modified packages.
+Pre-built Docker images are available for `linux/amd64` and `linux/arm64`:
 
-**Install and verify in a workflow:**
+| Registry | Image |
+|----------|-------|
+| GHCR | `ghcr.io/lukidoescode/cargo-changeset` |
+| Docker Hub | `lukidoescode/cargo-changeset` |
+
+**Tags:** `latest`, or a specific version like `0.1.0`.
+
+```bash
+docker run --rm -v "$(pwd):/workspace" -w /workspace \
+  ghcr.io/lukidoescode/cargo-changeset status
+```
+
+### GitHub Actions — Verify Action
+
+Use the verify action to check changeset coverage on pull requests. No Rust toolchain or compilation required.
+
+```yaml
+name: Verify Changeset Coverage
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: lukidoescode/cargo-changeset/.github/actions/verify@v1
+        with:
+          base: ${{ github.event.pull_request.base.ref }}
+```
+
+> **Note:** `fetch-depth: 0` is required so that `cargo-changeset` can compare against the base branch.
+
+**Inputs:**
+
+| Input | Default | Description |
+|-------|---------|-------------|
+| `base` | `main` | Base branch to compare against |
+
+### GitHub Actions — Release Workflow
+
+Use the reusable release workflow to automate version bumps, changelog generation, and git tagging.
+
+```yaml
+jobs:
+  release:
+    uses: lukidoescode/cargo-changeset/.github/workflows/release-workflow.yml@v1
+    permissions:
+      contents: write
+```
+
+**With dry-run preview:**
+
+```yaml
+jobs:
+  release:
+    uses: lukidoescode/cargo-changeset/.github/workflows/release-workflow.yml@v1
+    permissions:
+      contents: write
+    with:
+      dry-run: true
+```
+
+**Inputs:**
+
+| Input | Type | Default | Description |
+|-------|------|---------|-------------|
+| `dry-run` | boolean | `false` | Preview without modifying files |
+| `version` | string | `latest` | Docker image version tag |
+| `git-user-name` | string | `github-actions[bot]` | Git user for commits |
+| `git-user-email` | string | `github-actions[bot]@users.noreply.github.com` | Git email for commits |
+
+### GitHub Actions CI (Install from Source)
+
+If you prefer to install from source instead of using the Docker-based action:
 
 ```yaml
 - name: Install cargo-changeset
@@ -139,35 +218,6 @@ Add changeset verification to your pull request workflow to ensure every PR incl
 
 - name: Verify changeset coverage
   run: cargo changeset verify --base ${{ github.event.pull_request.base.ref }}
-```
-
-**Complete workflow example (`.github/workflows/changeset.yml`):**
-
-```yaml
-name: Verify Changeset Coverage
-
-on:
-  pull_request:
-    branches:
-      - main
-
-jobs:
-  verify:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Cache cargo-changeset
-        uses: actions/cache@v4
-        with:
-          path: ~/.cargo/bin/cargo-changeset
-          key: cargo-changeset-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
-
-      - name: Install cargo-changeset
-        run: cargo install cargo-changeset
-
-      - name: Verify changeset coverage
-        run: cargo changeset verify --base ${{ github.event.pull_request.base.ref }}
 ```
 
 ---
@@ -218,4 +268,34 @@ jobs:
           git add .changeset/
           git commit -m "Add changeset for ${{ inputs.package }}"
           git push
+```
+
+### GitLab CI
+
+Use the Docker image directly in GitLab CI pipelines.
+
+**Verify changeset coverage on merge requests:**
+
+```yaml
+verify-changesets:
+  image: ghcr.io/lukidoescode/cargo-changeset:latest
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+  script:
+    - cargo-changeset verify --base $CI_MERGE_REQUEST_TARGET_BRANCH_NAME --quiet
+```
+
+**Release workflow:**
+
+```yaml
+release:
+  image: ghcr.io/lukidoescode/cargo-changeset:latest
+  rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+      when: manual
+  script:
+    - git config user.name "gitlab-ci[bot]"
+    - git config user.email "gitlab-ci[bot]@users.noreply.gitlab.com"
+    - cargo-changeset release
+    - git push origin HEAD:$CI_COMMIT_BRANCH --tags
 ```

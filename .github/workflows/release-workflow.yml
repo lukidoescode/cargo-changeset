@@ -1,0 +1,59 @@
+name: Release
+
+on:
+  workflow_call:
+    inputs:
+      dry-run:
+        description: "Preview without modifying files"
+        type: boolean
+        default: false
+      version:
+        description: "Docker image version tag"
+        type: string
+        default: "latest"
+      git-user-name:
+        description: "Git user name for release commits"
+        type: string
+        default: "github-actions[bot]"
+      git-user-email:
+        description: "Git email for release commits"
+        type: string
+        default: "github-actions[bot]@users.noreply.github.com"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Configure git
+        run: |
+          git config user.name "${{ inputs.git-user-name }}"
+          git config user.email "${{ inputs.git-user-email }}"
+
+      - name: Run release
+        run: |
+          RELEASE_ARGS="release"
+          if [ "${{ inputs.dry-run }}" = "true" ]; then
+            RELEASE_ARGS="release --dry-run"
+          fi
+
+          docker run --rm \
+            -v "$(pwd):/workspace" -w /workspace \
+            -e GIT_AUTHOR_NAME="${{ inputs.git-user-name }}" \
+            -e GIT_AUTHOR_EMAIL="${{ inputs.git-user-email }}" \
+            -e GIT_COMMITTER_NAME="${{ inputs.git-user-name }}" \
+            -e GIT_COMMITTER_EMAIL="${{ inputs.git-user-email }}" \
+            ghcr.io/lukidoescode/cargo-changeset:${{ inputs.version }} \
+            $RELEASE_ARGS
+
+      - name: Push changes and tags
+        if: ${{ !inputs.dry-run }}
+        run: |
+          git push
+          git push --tags
