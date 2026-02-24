@@ -5,7 +5,7 @@ on:
     branches: [main]
     paths:
       - "Dockerfile"
-      - "entrypoint.sh"
+      - "docker/**"
       - ".dockerignore"
       - ".github/workflows/docker-test.yml"
       - ".github/test-fixtures/**"
@@ -16,7 +16,7 @@ on:
     branches: [main]
     paths:
       - "Dockerfile"
-      - "entrypoint.sh"
+      - "docker/**"
       - ".dockerignore"
       - ".github/workflows/docker-test.yml"
       - ".github/test-fixtures/**"

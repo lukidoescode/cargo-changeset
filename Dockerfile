@@ -29,7 +29,7 @@ FROM alpine:3.21
 RUN apk add --no-cache git
 
 COPY --from=builder /build/target/release/cargo-changeset /usr/local/bin/cargo-changeset
-COPY entrypoint.sh /entrypoint.sh
+COPY docker/entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 
 LABEL org.opencontainers.image.source="https://github.com/lukidoescode/cargo-changeset"
