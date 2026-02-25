@@ -237,7 +237,7 @@ fn release_saga_failure_multi_package_shows_proper_error_format() {
 
     create_tag(
         &workspace,
-        "crate-b-v2.0.1",
+        "crate-b@v2.0.1",
         "Pre-existing conflicting tag for crate-b",
     );
 

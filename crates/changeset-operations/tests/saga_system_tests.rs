@@ -296,8 +296,8 @@ fn system_test_successful_release_workspace() {
     assert_eq!(version_b, "2.0.1");
 
     let tags = git_tags(&dir);
-    assert!(tags.contains(&"crate-a-v1.1.0".to_string()));
-    assert!(tags.contains(&"crate-b-v2.0.1".to_string()));
+    assert!(tags.contains(&"crate-a@v1.1.0".to_string()));
+    assert!(tags.contains(&"crate-b@v2.0.1".to_string()));
 }
 
 // =============================================================================
@@ -356,7 +356,7 @@ fn system_test_multi_package_rollback_on_second_tag_conflict() {
     git_add_all(&dir);
     git_commit(&dir, "Add changesets");
 
-    create_tag(&dir, "crate-b-v2.0.1");
+    create_tag(&dir, "crate-b@v2.0.1");
 
     let initial_version_a = read_version(&dir.path().join("crates/crate-a/Cargo.toml"));
     let initial_version_b = read_version(&dir.path().join("crates/crate-b/Cargo.toml"));
@@ -389,7 +389,7 @@ fn system_test_multi_package_rollback_on_second_tag_conflict() {
     // The pre-existing conflicting tag should still exist
     let tags = git_tags(&dir);
     assert!(
-        tags.contains(&"crate-b-v2.0.1".to_string()),
+        tags.contains(&"crate-b@v2.0.1".to_string()),
         "pre-existing conflicting tag should still exist"
     );
 

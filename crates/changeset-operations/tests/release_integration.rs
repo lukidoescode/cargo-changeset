@@ -673,17 +673,17 @@ fn release_workspace_creates_prefixed_tags() {
 
     let tag_names: Vec<_> = git_result.tags_created.iter().map(|t| &t.name).collect();
     assert!(
-        tag_names.contains(&&"crate-a-v1.1.0".to_string()),
+        tag_names.contains(&&"crate-a@v1.1.0".to_string()),
         "should have crate-a tag"
     );
     assert!(
-        tag_names.contains(&&"crate-b-v2.0.1".to_string()),
+        tag_names.contains(&&"crate-b@v2.0.1".to_string()),
         "should have crate-b tag"
     );
 
     let tags = git_tags(&dir);
-    assert!(tags.contains(&"crate-a-v1.1.0".to_string()));
-    assert!(tags.contains(&"crate-b-v2.0.1".to_string()));
+    assert!(tags.contains(&"crate-a@v1.1.0".to_string()));
+    assert!(tags.contains(&"crate-b@v2.0.1".to_string()));
 }
 
 #[test]

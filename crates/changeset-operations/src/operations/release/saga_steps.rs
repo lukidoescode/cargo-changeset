@@ -522,7 +522,7 @@ impl<G, M, RW, S, C> CreateCommitStep<G, M, RW, S, C> {
     fn build_commit_message(&self, planned_releases: &[crate::types::PackageVersion]) -> String {
         let version_list: Vec<String> = planned_releases
             .iter()
-            .map(|r| format!("{}-v{}", r.name, r.new_version))
+            .map(|r| format!("{}@v{}", r.name, r.new_version))
             .collect();
         let new_version = version_list.join(", ");
 
@@ -642,7 +642,7 @@ where
 
         for release in &input.planned_releases {
             let tag_name = if use_prefix {
-                format!("{}-v{}", release.name, release.new_version)
+                format!("{}@v{}", release.name, release.new_version)
             } else {
                 format!("v{}", release.new_version)
             };
@@ -685,7 +685,7 @@ where
         let mut failed_tags = Vec::new();
         for release in &input.planned_releases {
             let tag_name = if use_prefix {
-                format!("{}-v{}", release.name, release.new_version)
+                format!("{}@v{}", release.name, release.new_version)
             } else {
                 format!("v{}", release.new_version)
             };
@@ -1210,7 +1210,7 @@ mod tests {
         );
         assert_eq!(
             git_provider.deleted_tags()[0],
-            "pkg-a-v1.0.1",
+            "pkg-a@v1.0.1",
             "deleted tag should be the first tag that was created"
         );
     }
@@ -1290,11 +1290,11 @@ mod tests {
 
         let deleted = git_provider.deleted_tags();
         assert!(
-            deleted.contains(&"pkg-a-v1.0.1".to_string()),
+            deleted.contains(&"pkg-a@v1.0.1".to_string()),
             "first tag should be in deleted list"
         );
         assert!(
-            deleted.contains(&"pkg-b-v2.0.1".to_string()),
+            deleted.contains(&"pkg-b@v2.0.1".to_string()),
             "second tag should be in deleted list"
         );
     }
