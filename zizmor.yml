@@ -1,0 +1,8 @@
+rules:
+  unpinned-uses:
+    config:
+      policies:
+        actions/*: any
+        docker/*: any
+        dtolnay/*: any
+        zizmorcore/*: any

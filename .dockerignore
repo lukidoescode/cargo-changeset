@@ -1,0 +1,10 @@
+target/
+.git/
+.github/
+.changeset/
+projects/
+scripts/
+CLAUDE.local.md
+DEVELOPMENT.md
+*.md
+!README.md
