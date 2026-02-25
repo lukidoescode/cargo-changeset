@@ -24,6 +24,9 @@ on:
       - "Cargo.toml"
       - "Cargo.lock"
 
+permissions:
+  contents: read
+
 jobs:
   test-docker:
     runs-on: ubuntu-latest
