@@ -84,3 +84,22 @@ fn cargo_dispatch_help_succeeds_with_changeset_prefix() {
         .assert()
         .success();
 }
+
+#[test]
+fn version_flag_succeeds() {
+    assert_cmd::cargo::cargo_bin_cmd!("cargo-changeset")
+        .arg("--version")
+        .assert()
+        .success()
+        .stdout(predicates::str::contains(env!("CARGO_PKG_VERSION")));
+}
+
+#[test]
+fn cargo_dispatch_version_succeeds_with_changeset_prefix() {
+    assert_cmd::cargo::cargo_bin_cmd!("cargo-changeset")
+        .arg("changeset")
+        .arg("--version")
+        .assert()
+        .success()
+        .stdout(predicates::str::contains(env!("CARGO_PKG_VERSION")));
+}

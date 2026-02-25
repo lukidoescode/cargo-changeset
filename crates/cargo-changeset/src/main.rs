@@ -21,6 +21,7 @@ enum CargoCli {
 
 #[derive(Parser)]
 #[command(name = "cargo-changeset")]
+#[command(version = env!("CARGO_CHANGESET_VERSION"))]
 #[command(about = "Manage changesets for Cargo projects", long_about = None)]
 struct ChangesetCli {
     #[arg(long = "path", short = 'C', global = true)]
