@@ -13,11 +13,16 @@ use crate::commands::Commands;
 use crate::error::CliError;
 
 #[derive(Parser)]
+#[command(name = "cargo")]
+#[command(bin_name = "cargo")]
+enum CargoCli {
+    Changeset(ChangesetCli),
+}
+
+#[derive(Parser)]
 #[command(name = "cargo-changeset")]
-#[command(bin_name = "cargo-changeset")]
 #[command(about = "Manage changesets for Cargo projects", long_about = None)]
-struct Cli {
-    /// Path to start project discovery from (default: current directory)
+struct ChangesetCli {
     #[arg(long = "path", short = 'C', global = true)]
     path: Option<PathBuf>,
 
@@ -26,7 +31,11 @@ struct Cli {
 }
 
 fn main() -> ExitCode {
-    let cli = Cli::parse();
+    let cli = match CargoCli::try_parse() {
+        Ok(CargoCli::Changeset(cli)) => cli,
+        Err(e) if !e.use_stderr() => e.exit(),
+        Err(_) => ChangesetCli::parse(),
+    };
 
     let start_path = match resolve_start_path(cli.path) {
         Ok(path) => path,
