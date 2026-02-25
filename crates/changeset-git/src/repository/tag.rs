@@ -64,11 +64,11 @@ mod tests {
     fn create_tag_with_crate_prefix() -> anyhow::Result<()> {
         let (_dir, repo) = setup_test_repo()?;
 
-        let tag_info = repo.create_tag("my-crate-v0.1.0", "Release my-crate version 0.1.0")?;
+        let tag_info = repo.create_tag("my-crate@v0.1.0", "Release my-crate version 0.1.0")?;
 
-        assert_eq!(tag_info.name, "my-crate-v0.1.0");
+        assert_eq!(tag_info.name, "my-crate@v0.1.0");
 
-        let tag = repo.inner.find_reference("refs/tags/my-crate-v0.1.0")?;
+        let tag = repo.inner.find_reference("refs/tags/my-crate@v0.1.0")?;
         assert!(tag.peel_to_tag().is_ok());
 
         Ok(())

@@ -1288,7 +1288,7 @@ mod tests {
 
         let git_result = output.git_result.expect("should have git result");
         let commit = git_result.commit.expect("should have commit");
-        assert!(commit.message.contains("my-crate-v1.1.0"));
+        assert!(commit.message.contains("my-crate@v1.1.0"));
         assert!(commit.message.contains("my-crate 1.0.0 -> 1.1.0"));
     }
 
@@ -1338,8 +1338,8 @@ mod tests {
         assert_eq!(git_result.tags_created.len(), 2);
 
         let tag_names: Vec<_> = git_result.tags_created.iter().map(|t| &t.name).collect();
-        assert!(tag_names.contains(&&"crate-a-v1.0.1".to_string()));
-        assert!(tag_names.contains(&&"crate-b-v2.0.1".to_string()));
+        assert!(tag_names.contains(&&"crate-a@v1.0.1".to_string()));
+        assert!(tag_names.contains(&&"crate-b@v2.0.1".to_string()));
     }
 
     #[test]
@@ -1621,7 +1621,7 @@ mod tests {
             commit.message
         );
         assert!(
-            commit.message.contains("my-crate-v1.1.0"),
+            commit.message.contains("my-crate@v1.1.0"),
             "commit message should contain version info"
         );
     }
