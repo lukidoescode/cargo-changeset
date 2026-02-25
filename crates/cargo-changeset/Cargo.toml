@@ -28,6 +28,9 @@ dialoguer = { workspace = true }
 tempfile = "3.25"
 thiserror = { workspace = true }
 
+[build-dependencies]
+chrono = { version = "0.4.44", features = ["clock"], default-features = false }
+
 [dev-dependencies]
 assert_cmd = "2.1"
 predicates = "3.1"
