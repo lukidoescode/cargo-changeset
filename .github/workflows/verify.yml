@@ -1,0 +1,27 @@
+---
+name: Verify Changesets
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: Verify Changeset Coverage
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Cache cargo-changeset binary
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/bin/cargo-changeset
+          key: cargo-changeset-${{ runner.os }}-0.0.2
+      - name: Install cargo-changeset
+        run: cargo install cargo-changeset --version 0.0.2
+      - name: Verify changeset coverage
+        run: cargo changeset verify --base ${{ github.base_ref }}

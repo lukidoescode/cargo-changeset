@@ -1,8 +1,10 @@
+---
 name: CI
 
 on:
   push:
     branches: [main]
+    tags: ['*@v*']
   pull_request:
     branches: [main]
 
@@ -42,7 +44,8 @@ jobs:
         uses: actions/cache@v4
         with:
           path: target
-          key: ${{ runner.os }}-cargo-build-target-${{ hashFiles('**/Cargo.lock') }}
+          key: ${{ runner.os }}-cargo-build-target-${{ hashFiles('**/Cargo.lock')
+            }}
 
       - name: Run tests
         run: cargo test --workspace --all-features
@@ -72,7 +75,8 @@ jobs:
         uses: actions/cache@v4
         with:
           path: target
-          key: ${{ runner.os }}-cargo-build-target-${{ hashFiles('**/Cargo.lock') }}
+          key: ${{ runner.os }}-cargo-build-target-${{ hashFiles('**/Cargo.lock')
+            }}
 
       - name: Run cargo check
         run: cargo check --workspace --all-features
@@ -104,7 +108,8 @@ jobs:
         uses: actions/cache@v4
         with:
           path: target
-          key: ${{ runner.os }}-cargo-build-target-${{ hashFiles('**/Cargo.lock') }}
+          key: ${{ runner.os }}-cargo-build-target-${{ hashFiles('**/Cargo.lock')
+            }}
 
       - name: Run clippy
         run: cargo clippy --workspace --all-features -- -D warnings
@@ -135,7 +140,7 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@master
         with:
-          toolchain: "1.85.0"
+          toolchain: 1.85.0
 
       - name: Cache cargo registry
         uses: actions/cache@v4
@@ -153,7 +158,8 @@ jobs:
         uses: actions/cache@v4
         with:
           path: target
-          key: ${{ runner.os }}-cargo-build-target-${{ hashFiles('**/Cargo.lock') }}
+          key: ${{ runner.os }}-cargo-build-target-${{ hashFiles('**/Cargo.lock')
+            }}
 
       - name: Check MSRV
         run: cargo check --workspace --all-features
