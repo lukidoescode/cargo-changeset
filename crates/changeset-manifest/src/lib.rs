@@ -12,6 +12,6 @@ pub use reader::{
     read_workspace_version,
 };
 pub use writer::{
-    remove_workspace_version, verify_version, write_metadata_section, write_version,
-    write_workspace_version,
+    remove_workspace_version, update_dependency_version, verify_version, write_metadata_section,
+    write_version, write_workspace_version,
 };

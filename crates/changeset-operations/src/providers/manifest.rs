@@ -70,4 +70,17 @@ impl ManifestWriter for FileSystemManifestWriter {
             config,
         )?)
     }
+
+    fn update_dependency_version(
+        &self,
+        manifest_path: &Path,
+        dependency_name: &str,
+        new_version: &Version,
+    ) -> Result<bool> {
+        Ok(changeset_manifest::update_dependency_version(
+            manifest_path,
+            dependency_name,
+            new_version,
+        )?)
+    }
 }

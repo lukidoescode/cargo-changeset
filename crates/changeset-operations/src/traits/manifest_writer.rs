@@ -47,4 +47,17 @@ pub trait ManifestWriter: InheritedVersionChecker + Send + Sync {
         section: MetadataSection,
         config: &InitConfig,
     ) -> Result<()>;
+
+    /// Updates the version constraint for a dependency in all relevant sections
+    /// of a Cargo.toml file.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the manifest cannot be read, parsed, or written.
+    fn update_dependency_version(
+        &self,
+        manifest_path: &Path,
+        dependency_name: &str,
+        new_version: &Version,
+    ) -> Result<bool>;
 }

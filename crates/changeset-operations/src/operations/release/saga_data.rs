@@ -10,15 +10,6 @@ use super::steps::{
 use super::{ChangelogUpdate, CommitResult, GitOperationResult, TagResult};
 use crate::types::PackageVersion;
 
-#[derive(Debug, Clone)]
-#[allow(dead_code)]
-pub struct ManifestUpdate {
-    pub manifest_path: PathBuf,
-    pub old_version: Version,
-    pub new_version: Version,
-    pub written: bool,
-}
-
 #[derive(Debug, Clone, Default)]
 pub struct SagaReleaseOptions {
     pub is_prerelease_release: bool,
@@ -52,6 +43,7 @@ pub struct ReleaseSagaData {
     pub changeset_files: Vec<ChangesetFileState>,
 
     pub manifest_updates: Vec<ManifestUpdate>,
+    pub dependency_updates: Vec<DependencyUpdate>,
     pub workspace_version_removed: bool,
     pub original_workspace_version: Option<Version>,
 
@@ -69,6 +61,22 @@ pub struct ReleaseSagaData {
 
     pub changelog_backups: Vec<ChangelogFileState>,
     pub changelogs_written: bool,
+}
+
+#[derive(Debug, Clone)]
+pub(super) struct ManifestUpdate {
+    pub(super) manifest_path: PathBuf,
+    pub(super) old_version: Version,
+    pub(super) new_version: Version,
+    pub(super) written: bool,
+}
+
+#[derive(Debug, Clone)]
+pub(super) struct DependencyUpdate {
+    pub(super) manifest_path: PathBuf,
+    pub(super) dependency_name: String,
+    pub(super) old_version: Version,
+    pub(super) new_version: Version,
 }
 
 impl ReleaseSagaData {

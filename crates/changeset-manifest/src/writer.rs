@@ -7,6 +7,8 @@ use crate::config::{InitConfig, MetadataSection};
 use crate::error::ManifestError;
 use crate::reader::{read_document, read_version};
 
+const DEPENDENCY_SECTIONS: [&str; 3] = ["dependencies", "dev-dependencies", "build-dependencies"];
+
 /// # Errors
 ///
 /// Returns an error if the manifest cannot be read, parsed, or written.
@@ -218,6 +220,72 @@ pub fn write_metadata_section(
         path: path.to_path_buf(),
         source,
     })
+}
+
+/// Updates the version of a dependency in all relevant sections of a Cargo.toml.
+///
+/// Checks `[workspace.dependencies]`, `[dependencies]`, `[dev-dependencies]`,
+/// and `[build-dependencies]`. Only updates table-form entries that have an
+/// explicit `version` key and do NOT have `workspace = true`.
+///
+/// # Errors
+///
+/// Returns an error if the manifest cannot be read, parsed, or written.
+pub fn update_dependency_version(
+    path: &Path,
+    dependency_name: &str,
+    new_version: &Version,
+) -> Result<bool, ManifestError> {
+    let mut doc = read_document(path)?;
+    let mut changed = false;
+
+    if let Some(workspace) = doc.get_mut("workspace") {
+        if let Some(deps) = workspace.get_mut("dependencies") {
+            if update_dep_entry(deps, dependency_name, new_version) {
+                changed = true;
+            }
+        }
+    }
+
+    for section in &DEPENDENCY_SECTIONS {
+        if let Some(deps) = doc.get_mut(section) {
+            if update_dep_entry(deps, dependency_name, new_version) {
+                changed = true;
+            }
+        }
+    }
+
+    if changed {
+        std::fs::write(path, doc.to_string()).map_err(|source| ManifestError::Write {
+            path: path.to_path_buf(),
+            source,
+        })?;
+    }
+
+    Ok(changed)
+}
+
+fn update_dep_entry(deps: &mut Item, dep_name: &str, new_version: &Version) -> bool {
+    let Some(entry) = deps.get_mut(dep_name) else {
+        return false;
+    };
+
+    if let Some(table) = entry.as_table_like_mut() {
+        let has_workspace_true = table
+            .get("workspace")
+            .and_then(toml_edit::Item::as_bool)
+            .unwrap_or(false);
+        if has_workspace_true {
+            return false;
+        }
+
+        if table.get("version").is_some() {
+            table.insert("version", value(new_version.to_string()));
+            return true;
+        }
+    }
+
+    false
 }
 
 #[cfg(test)]
@@ -624,5 +692,245 @@ members = ["crates/*"]
         let content = std::fs::read_to_string(&path).expect("read file");
         assert!(!content.contains("metadata"));
         assert!(!content.contains("changeset"));
+    }
+
+    #[test]
+    fn update_dep_version_updates_workspace_deps() {
+        let toml = r#"
+[workspace]
+members = ["crates/*"]
+
+[workspace.dependencies]
+my-crate = { path = "crates/my-crate", version = "1.0.0" }
+"#;
+        let dir = tempfile::tempdir().expect("create temp dir");
+        let path = dir.path().join("Cargo.toml");
+        std::fs::write(&path, toml).expect("write test file");
+
+        let result =
+            update_dependency_version(&path, "my-crate", &Version::new(2, 0, 0)).expect("update");
+        assert!(result);
+
+        let content = std::fs::read_to_string(&path).expect("read file");
+        assert!(content.contains(r#"version = "2.0.0""#));
+        assert!(!content.contains(r#"version = "1.0.0""#));
+    }
+
+    #[test]
+    fn update_dep_version_updates_regular_deps() {
+        let toml = r#"
+[package]
+name = "other-crate"
+version = "0.1.0"
+
+[dependencies]
+my-crate = { path = "../my-crate", version = "1.0.0" }
+"#;
+        let dir = tempfile::tempdir().expect("create temp dir");
+        let path = dir.path().join("Cargo.toml");
+        std::fs::write(&path, toml).expect("write test file");
+
+        let result =
+            update_dependency_version(&path, "my-crate", &Version::new(2, 0, 0)).expect("update");
+        assert!(result);
+
+        let content = std::fs::read_to_string(&path).expect("read file");
+        assert!(content.contains(r#"version = "2.0.0""#));
+    }
+
+    #[test]
+    fn update_dep_version_updates_dev_deps() {
+        let toml = r#"
+[package]
+name = "other-crate"
+version = "0.1.0"
+
+[dev-dependencies]
+my-crate = { path = "../my-crate", version = "1.0.0" }
+"#;
+        let dir = tempfile::tempdir().expect("create temp dir");
+        let path = dir.path().join("Cargo.toml");
+        std::fs::write(&path, toml).expect("write test file");
+
+        let result =
+            update_dependency_version(&path, "my-crate", &Version::new(2, 0, 0)).expect("update");
+        assert!(result);
+
+        let content = std::fs::read_to_string(&path).expect("read file");
+        assert!(content.contains(r#"version = "2.0.0""#));
+    }
+
+    #[test]
+    fn update_dep_version_updates_build_deps() {
+        let toml = r#"
+[package]
+name = "other-crate"
+version = "0.1.0"
+
+[build-dependencies]
+my-crate = { path = "../my-crate", version = "1.0.0" }
+"#;
+        let dir = tempfile::tempdir().expect("create temp dir");
+        let path = dir.path().join("Cargo.toml");
+        std::fs::write(&path, toml).expect("write test file");
+
+        let result =
+            update_dependency_version(&path, "my-crate", &Version::new(2, 0, 0)).expect("update");
+        assert!(result);
+
+        let content = std::fs::read_to_string(&path).expect("read file");
+        assert!(content.contains(r#"version = "2.0.0""#));
+    }
+
+    #[test]
+    fn update_dep_version_skips_workspace_true() {
+        let toml = r#"
+[package]
+name = "other-crate"
+version = "0.1.0"
+
+[dependencies]
+my-crate = { workspace = true }
+"#;
+        let dir = tempfile::tempdir().expect("create temp dir");
+        let path = dir.path().join("Cargo.toml");
+        std::fs::write(&path, toml).expect("write test file");
+
+        let result =
+            update_dependency_version(&path, "my-crate", &Version::new(2, 0, 0)).expect("update");
+        assert!(!result);
+
+        let content = std::fs::read_to_string(&path).expect("read file");
+        assert!(content.contains("workspace = true"));
+        assert!(!content.contains(r#"version = "2.0.0""#));
+    }
+
+    #[test]
+    fn update_dep_version_skips_no_version_key() {
+        let toml = r#"
+[package]
+name = "other-crate"
+version = "0.1.0"
+
+[dependencies]
+my-crate = { path = "../my-crate" }
+"#;
+        let dir = tempfile::tempdir().expect("create temp dir");
+        let path = dir.path().join("Cargo.toml");
+        std::fs::write(&path, toml).expect("write test file");
+
+        let result =
+            update_dependency_version(&path, "my-crate", &Version::new(2, 0, 0)).expect("update");
+        assert!(!result);
+
+        let content = std::fs::read_to_string(&path).expect("read file");
+        assert!(!content.contains(r#"version = "2.0.0""#));
+    }
+
+    #[test]
+    fn update_dep_version_skips_missing_dep() {
+        let toml = r#"
+[package]
+name = "other-crate"
+version = "0.1.0"
+
+[dependencies]
+some-other = "1.0.0"
+"#;
+        let dir = tempfile::tempdir().expect("create temp dir");
+        let path = dir.path().join("Cargo.toml");
+        std::fs::write(&path, toml).expect("write test file");
+
+        let result =
+            update_dependency_version(&path, "my-crate", &Version::new(2, 0, 0)).expect("update");
+        assert!(!result);
+    }
+
+    #[test]
+    fn update_dep_version_preserves_formatting() {
+        let toml = r#"# Root manifest
+[workspace]
+members = ["crates/*"]
+
+# Workspace deps
+[workspace.dependencies]
+my-crate = { path = "crates/my-crate", version = "1.0.0" }
+"#;
+        let dir = tempfile::tempdir().expect("create temp dir");
+        let path = dir.path().join("Cargo.toml");
+        std::fs::write(&path, toml).expect("write test file");
+
+        update_dependency_version(&path, "my-crate", &Version::new(2, 0, 0)).expect("update");
+
+        let content = std::fs::read_to_string(&path).expect("read file");
+        assert!(content.contains("# Root manifest"));
+        assert!(content.contains("# Workspace deps"));
+    }
+
+    #[test]
+    fn update_dep_version_skips_simple_string() {
+        let toml = r#"
+[package]
+name = "other-crate"
+version = "0.1.0"
+
+[dependencies]
+my-crate = "1.0.0"
+"#;
+        let dir = tempfile::tempdir().expect("create temp dir");
+        let path = dir.path().join("Cargo.toml");
+        std::fs::write(&path, toml).expect("write test file");
+
+        let result =
+            update_dependency_version(&path, "my-crate", &Version::new(2, 0, 0)).expect("update");
+        assert!(!result);
+
+        let content = std::fs::read_to_string(&path).expect("read file");
+        assert!(content.contains(r#"my-crate = "1.0.0""#));
+    }
+
+    #[test]
+    fn update_dep_version_updates_multiple_sections() {
+        let toml = r#"
+[package]
+name = "other-crate"
+version = "0.1.0"
+
+[dependencies]
+my-crate = { path = "../my-crate", version = "1.0.0" }
+
+[dev-dependencies]
+my-crate = { path = "../my-crate", version = "1.0.0" }
+"#;
+        let dir = tempfile::tempdir().expect("create temp dir");
+        let path = dir.path().join("Cargo.toml");
+        std::fs::write(&path, toml).expect("write test file");
+
+        let result =
+            update_dependency_version(&path, "my-crate", &Version::new(2, 0, 0)).expect("update");
+        assert!(result);
+
+        let content = std::fs::read_to_string(&path).expect("read file");
+        assert!(!content.contains(r#"version = "1.0.0""#));
+        assert_eq!(content.matches(r#"version = "2.0.0""#).count(), 2);
+    }
+
+    #[test]
+    fn update_dep_version_returns_true_on_change() {
+        let toml = r#"
+[workspace.dependencies]
+my-crate = { path = "crates/my-crate", version = "1.0.0" }
+"#;
+        let dir = tempfile::tempdir().expect("create temp dir");
+        let path = dir.path().join("Cargo.toml");
+        std::fs::write(&path, toml).expect("write test file");
+
+        let changed =
+            update_dependency_version(&path, "my-crate", &Version::new(2, 0, 0)).expect("update");
+        assert!(changed);
+
+        let not_changed = update_dependency_version(&path, "nonexistent", &Version::new(2, 0, 0))
+            .expect("update");
+        assert!(!not_changed);
     }
 }

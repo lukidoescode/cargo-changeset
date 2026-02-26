@@ -785,6 +785,8 @@ pub fn make_changeset(package_name: &str, bump: BumpType, summary: &str) -> Chan
 
 pub struct MockManifestWriter {
     written_versions: Mutex<Vec<(PathBuf, Version)>>,
+    dependency_version_updates: Mutex<Vec<(PathBuf, String, Version)>>,
+    dependency_update_returns_true: Mutex<bool>,
     inherited_paths: HashSet<PathBuf>,
     removed_workspace_version: Mutex<bool>,
     workspace_version: Mutex<Option<Version>>,
@@ -796,6 +798,8 @@ impl MockManifestWriter {
     pub fn new() -> Self {
         Self {
             written_versions: Mutex::new(Vec::new()),
+            dependency_version_updates: Mutex::new(Vec::new()),
+            dependency_update_returns_true: Mutex::new(false),
             inherited_paths: HashSet::new(),
             removed_workspace_version: Mutex::new(false),
             workspace_version: Mutex::new(None),
@@ -807,6 +811,29 @@ impl MockManifestWriter {
     pub fn with_inherited(mut self, paths: Vec<PathBuf>) -> Self {
         self.inherited_paths = paths.into_iter().collect();
         self
+    }
+
+    /// # Panics
+    ///
+    /// Panics if the internal mutex is poisoned.
+    #[must_use]
+    pub fn with_dependency_updates_returning_true(self) -> Self {
+        *self
+            .dependency_update_returns_true
+            .lock()
+            .expect("lock poisoned") = true;
+        self
+    }
+
+    /// # Panics
+    ///
+    /// Panics if the internal mutex is poisoned.
+    #[must_use]
+    pub fn dependency_version_updates(&self) -> Vec<(PathBuf, String, Version)> {
+        self.dependency_version_updates
+            .lock()
+            .expect("lock poisoned")
+            .clone()
     }
 
     /// # Panics
@@ -921,6 +948,29 @@ impl ManifestWriter for MockManifestWriter {
         ));
         Ok(())
     }
+
+    fn update_dependency_version(
+        &self,
+        manifest_path: &Path,
+        dependency_name: &str,
+        new_version: &Version,
+    ) -> Result<bool> {
+        let returns_true = *self
+            .dependency_update_returns_true
+            .lock()
+            .expect("lock poisoned");
+        if returns_true {
+            self.dependency_version_updates
+                .lock()
+                .expect("lock poisoned")
+                .push((
+                    manifest_path.to_path_buf(),
+                    dependency_name.to_string(),
+                    new_version.clone(),
+                ));
+        }
+        Ok(returns_true)
+    }
 }
 
 impl InheritedVersionChecker for Arc<MockManifestWriter> {
@@ -957,6 +1007,15 @@ impl ManifestWriter for Arc<MockManifestWriter> {
         config: &InitConfig,
     ) -> Result<()> {
         (**self).write_metadata(manifest_path, section, config)
+    }
+
+    fn update_dependency_version(
+        &self,
+        manifest_path: &Path,
+        dependency_name: &str,
+        new_version: &Version,
+    ) -> Result<bool> {
+        (**self).update_dependency_version(manifest_path, dependency_name, new_version)
     }
 }
 
