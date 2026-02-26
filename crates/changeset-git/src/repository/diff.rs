@@ -32,7 +32,12 @@ impl Repository {
                 git2::Delta::Modified => FileStatus::Modified,
                 git2::Delta::Renamed => FileStatus::Renamed,
                 git2::Delta::Copied => FileStatus::Copied,
-                _ => continue,
+                git2::Delta::Typechange => FileStatus::Typechange,
+                git2::Delta::Unmodified
+                | git2::Delta::Ignored
+                | git2::Delta::Untracked
+                | git2::Delta::Unreadable
+                | git2::Delta::Conflicted => continue,
             };
 
             let path = delta
@@ -45,9 +50,8 @@ impl Repository {
             let mut change = FileChange::new(path, status);
 
             if status == FileStatus::Renamed || status == FileStatus::Copied {
-                if let Some(old_path) = delta.old_file().path() {
-                    change = change.with_old_path(old_path.to_path_buf());
-                }
+                let old_path = delta.old_file().path().ok_or(GitError::MissingDeltaPath)?;
+                change = change.with_old_path(old_path.to_path_buf());
             }
 
             changes.push(change);
@@ -152,6 +156,7 @@ mod tests {
         let changes = repo.changed_files_from_head("HEAD~1")?;
         assert_eq!(changes.len(), 1);
         assert_eq!(changes[0].status, FileStatus::Modified);
+        assert_eq!(changes[0].path, PathBuf::from("file.txt"));
 
         Ok(())
     }
@@ -186,6 +191,7 @@ mod tests {
         let changes = repo.changed_files_from_head("HEAD~1")?;
         assert_eq!(changes.len(), 1);
         assert_eq!(changes[0].status, FileStatus::Deleted);
+        assert_eq!(changes[0].path, PathBuf::from("file.txt"));
 
         Ok(())
     }
@@ -195,7 +201,10 @@ mod tests {
         let (_dir, repo) = setup_test_repo()?;
 
         let result = repo.changed_files_from_head("nonexistent-ref");
-        assert!(matches!(result, Err(GitError::RefNotFound { .. })));
+        assert!(matches!(
+            result,
+            Err(GitError::RefNotFound { ref refspec, .. }) if refspec == "nonexistent-ref"
+        ));
 
         Ok(())
     }
@@ -235,7 +244,10 @@ mod tests {
         let (_dir, repo) = setup_test_repo()?;
 
         let result = repo.changed_files_from_head("origin/nonexistent");
-        assert!(matches!(result, Err(GitError::RefNotFound { .. })));
+        assert!(matches!(
+            result,
+            Err(GitError::RefNotFound { ref refspec, .. }) if refspec == "origin/nonexistent"
+        ));
 
         Ok(())
     }
@@ -284,7 +296,7 @@ mod tests {
     }
 
     #[test]
-    fn new_file_alongside_existing_is_detected_as_added() -> anyhow::Result<()> {
+    fn new_file_alongside_existing_is_detected_as_added_or_copied() -> anyhow::Result<()> {
         let (dir, repo) = setup_test_repo()?;
         let path = std::path::Path::new;
 
@@ -347,11 +359,7 @@ mod tests {
 
         let changes = repo.changed_files(None, "HEAD")?;
 
-        assert!(
-            changes.len() >= 2,
-            "expected at least 2 files, got {}",
-            changes.len()
-        );
+        assert_eq!(changes.len(), 2);
         assert!(
             changes.iter().all(|c| c.status == FileStatus::Added),
             "all files should be Added when diffing against empty tree"
@@ -373,7 +381,10 @@ mod tests {
             .reference("refs/heads/blob-ref", blob_oid, false, "")?;
 
         let result = repo.changed_files_from_head("refs/heads/blob-ref");
-        assert!(matches!(result, Err(GitError::NotATree { .. })));
+        assert!(matches!(
+            result,
+            Err(GitError::NotATree { ref refspec, .. }) if refspec == "refs/heads/blob-ref"
+        ));
 
         Ok(())
     }
