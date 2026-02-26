@@ -10,7 +10,18 @@ pub enum GitError {
     NotARepository { path: PathBuf },
 
     #[error("failed to resolve reference '{refspec}'")]
-    RefNotFound { refspec: String },
+    RefNotFound {
+        refspec: String,
+        #[source]
+        source: git2::Error,
+    },
+
+    #[error("reference '{refspec}' does not point to a tree")]
+    NotATree {
+        refspec: String,
+        #[source]
+        source: git2::Error,
+    },
 
     #[error("working tree has uncommitted changes")]
     DirtyWorkingTree,

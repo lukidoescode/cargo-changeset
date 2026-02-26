@@ -147,7 +147,10 @@ fn extract_active_changesets(changes: &[FileChange]) -> Vec<PathBuf> {
             is_markdown_file(&change.path)
                 && matches!(
                     change.status,
-                    FileStatus::Added | FileStatus::Modified | FileStatus::Renamed
+                    FileStatus::Added
+                        | FileStatus::Modified
+                        | FileStatus::Renamed
+                        | FileStatus::Typechange
                 )
         })
         .map(|change| change.path.clone())
