@@ -149,7 +149,7 @@ fn git_log_count(dir: &TempDir) -> usize {
     String::from_utf8_lossy(&output.stdout)
         .trim()
         .parse()
-        .unwrap_or(0)
+        .expect("parse commit count")
 }
 
 fn write_changeset(dir: &TempDir, filename: &str, package: &str, bump: &str, summary: &str) {
@@ -567,5 +567,490 @@ fn system_test_no_commit_mode_still_updates_files() {
     assert!(
         changeset_path.exists(),
         "changeset should be kept in keep-changesets mode"
+    );
+}
+
+// =============================================================================
+// Intra-Workspace Dependency Version Update Tests
+// =============================================================================
+
+fn create_workspace_with_intra_deps() -> TempDir {
+    let dir = TempDir::new().expect("create temp dir");
+
+    fs::write(
+        dir.path().join("Cargo.toml"),
+        r#"[workspace]
+members = ["crates/*"]
+resolver = "2"
+
+[workspace.dependencies]
+crate-a = { path = "crates/crate-a", version = "1.0.0" }
+"#,
+    )
+    .expect("write workspace Cargo.toml");
+
+    fs::create_dir_all(dir.path().join("crates/crate-a/src")).expect("create crate-a dir");
+    fs::write(
+        dir.path().join("crates/crate-a/Cargo.toml"),
+        r#"[package]
+name = "crate-a"
+version = "1.0.0"
+edition = "2021"
+"#,
+    )
+    .expect("write crate-a Cargo.toml");
+    fs::write(dir.path().join("crates/crate-a/src/lib.rs"), "").expect("write lib.rs");
+
+    fs::create_dir_all(dir.path().join("crates/crate-b/src")).expect("create crate-b dir");
+    fs::write(
+        dir.path().join("crates/crate-b/Cargo.toml"),
+        r#"[package]
+name = "crate-b"
+version = "2.0.0"
+edition = "2021"
+
+[dependencies]
+crate-a = { path = "../crate-a", version = "1.0.0" }
+"#,
+    )
+    .expect("write crate-b Cargo.toml");
+    fs::write(dir.path().join("crates/crate-b/src/lib.rs"), "").expect("write lib.rs");
+
+    fs::create_dir_all(dir.path().join(".changeset/changesets"))
+        .expect("create .changeset/changesets dir");
+
+    dir
+}
+
+fn read_dep_version(manifest_path: &Path, dep_name: &str, section: &str) -> Option<String> {
+    let content = fs::read_to_string(manifest_path).expect("read file");
+    let doc: toml_edit::DocumentMut = content.parse().expect("parse toml");
+
+    let deps = section
+        .split('.')
+        .try_fold(doc.as_item(), |item, key| item.get(key))?;
+    let dep = deps.get(dep_name)?;
+    let table = dep.as_table_like()?;
+    let version = table.get("version")?;
+    Some(version.as_str()?.to_string())
+}
+
+#[test]
+fn system_test_release_updates_workspace_dependency_versions() {
+    let dir = create_workspace_with_intra_deps();
+    init_git_repo(&dir);
+    git_add_all(&dir);
+    git_commit(&dir, "Initial commit");
+
+    write_changeset(&dir, "bump-a.md", "crate-a", "minor", "Bump crate-a");
+    git_add_all(&dir);
+    git_commit(&dir, "Add changeset");
+
+    let result = run_release_with_git(&dir, false, false, false).expect("release should succeed");
+
+    let ReleaseOutcome::Executed(output) = result else {
+        panic!("expected Executed outcome");
+    };
+
+    assert_eq!(output.planned_releases.len(), 1);
+    assert_eq!(output.planned_releases[0].new_version.to_string(), "1.1.0");
+
+    let crate_b_dep_version = read_dep_version(
+        &dir.path().join("crates/crate-b/Cargo.toml"),
+        "crate-a",
+        "dependencies",
+    );
+    assert_eq!(
+        crate_b_dep_version.as_deref(),
+        Some("1.1.0"),
+        "crate-b's dependency on crate-a should be updated"
+    );
+}
+
+#[test]
+fn system_test_release_updates_root_workspace_dependencies() {
+    let dir = create_workspace_with_intra_deps();
+    init_git_repo(&dir);
+    git_add_all(&dir);
+    git_commit(&dir, "Initial commit");
+
+    write_changeset(&dir, "bump-a.md", "crate-a", "patch", "Patch crate-a");
+    git_add_all(&dir);
+    git_commit(&dir, "Add changeset");
+
+    run_release_with_git(&dir, false, false, false).expect("release should succeed");
+
+    let ws_dep_version = read_dep_version(
+        &dir.path().join("Cargo.toml"),
+        "crate-a",
+        "workspace.dependencies",
+    );
+    assert_eq!(
+        ws_dep_version.as_deref(),
+        Some("1.0.1"),
+        "workspace.dependencies version for crate-a should be updated"
+    );
+}
+
+#[test]
+fn system_test_release_skips_deps_without_version() {
+    let dir = TempDir::new().expect("create temp dir");
+
+    fs::write(
+        dir.path().join("Cargo.toml"),
+        r#"[workspace]
+members = ["crates/*"]
+resolver = "2"
+"#,
+    )
+    .expect("write workspace Cargo.toml");
+
+    fs::create_dir_all(dir.path().join("crates/crate-a/src")).expect("create crate-a dir");
+    fs::write(
+        dir.path().join("crates/crate-a/Cargo.toml"),
+        r#"[package]
+name = "crate-a"
+version = "1.0.0"
+edition = "2021"
+"#,
+    )
+    .expect("write crate-a Cargo.toml");
+    fs::write(dir.path().join("crates/crate-a/src/lib.rs"), "").expect("write lib.rs");
+
+    fs::create_dir_all(dir.path().join("crates/crate-b/src")).expect("create crate-b dir");
+    fs::write(
+        dir.path().join("crates/crate-b/Cargo.toml"),
+        r#"[package]
+name = "crate-b"
+version = "2.0.0"
+edition = "2021"
+
+[dependencies]
+crate-a = { path = "../crate-a" }
+"#,
+    )
+    .expect("write crate-b Cargo.toml");
+    fs::write(dir.path().join("crates/crate-b/src/lib.rs"), "").expect("write lib.rs");
+
+    fs::create_dir_all(dir.path().join(".changeset/changesets"))
+        .expect("create .changeset/changesets dir");
+
+    init_git_repo(&dir);
+    git_add_all(&dir);
+    git_commit(&dir, "Initial commit");
+
+    write_changeset(&dir, "bump-a.md", "crate-a", "minor", "Bump crate-a");
+    git_add_all(&dir);
+    git_commit(&dir, "Add changeset");
+
+    run_release_with_git(&dir, false, false, false).expect("release should succeed");
+
+    let crate_b_dep_version = read_dep_version(
+        &dir.path().join("crates/crate-b/Cargo.toml"),
+        "crate-a",
+        "dependencies",
+    );
+    assert_eq!(
+        crate_b_dep_version, None,
+        "path-only dep should not gain a version field"
+    );
+}
+
+#[test]
+fn system_test_release_updates_dev_and_build_dependencies() {
+    let dir = TempDir::new().expect("create temp dir");
+
+    fs::write(
+        dir.path().join("Cargo.toml"),
+        r#"[workspace]
+members = ["crates/*"]
+resolver = "2"
+"#,
+    )
+    .expect("write workspace Cargo.toml");
+
+    fs::create_dir_all(dir.path().join("crates/crate-a/src")).expect("create crate-a dir");
+    fs::write(
+        dir.path().join("crates/crate-a/Cargo.toml"),
+        r#"[package]
+name = "crate-a"
+version = "1.0.0"
+edition = "2021"
+"#,
+    )
+    .expect("write crate-a Cargo.toml");
+    fs::write(dir.path().join("crates/crate-a/src/lib.rs"), "").expect("write lib.rs");
+
+    fs::create_dir_all(dir.path().join("crates/crate-b/src")).expect("create crate-b dir");
+    fs::write(
+        dir.path().join("crates/crate-b/Cargo.toml"),
+        r#"[package]
+name = "crate-b"
+version = "2.0.0"
+edition = "2021"
+
+[dev-dependencies]
+crate-a = { path = "../crate-a", version = "1.0.0" }
+
+[build-dependencies]
+crate-a = { path = "../crate-a", version = "1.0.0" }
+"#,
+    )
+    .expect("write crate-b Cargo.toml");
+    fs::write(dir.path().join("crates/crate-b/src/lib.rs"), "").expect("write lib.rs");
+
+    fs::create_dir_all(dir.path().join(".changeset/changesets"))
+        .expect("create .changeset/changesets dir");
+
+    init_git_repo(&dir);
+    git_add_all(&dir);
+    git_commit(&dir, "Initial commit");
+
+    write_changeset(&dir, "bump-a.md", "crate-a", "minor", "Bump crate-a");
+    git_add_all(&dir);
+    git_commit(&dir, "Add changeset");
+
+    run_release_with_git(&dir, false, false, false).expect("release should succeed");
+
+    let dev_dep_version = read_dep_version(
+        &dir.path().join("crates/crate-b/Cargo.toml"),
+        "crate-a",
+        "dev-dependencies",
+    );
+    assert_eq!(
+        dev_dep_version.as_deref(),
+        Some("1.1.0"),
+        "dev-dependency version should be updated"
+    );
+
+    let build_dep_version = read_dep_version(
+        &dir.path().join("crates/crate-b/Cargo.toml"),
+        "crate-a",
+        "build-dependencies",
+    );
+    assert_eq!(
+        build_dep_version.as_deref(),
+        Some("1.1.0"),
+        "build-dependency version should be updated"
+    );
+}
+
+#[test]
+fn system_test_release_skips_workspace_true_dependencies() {
+    let dir = TempDir::new().expect("create temp dir");
+
+    fs::write(
+        dir.path().join("Cargo.toml"),
+        r#"[workspace]
+members = ["crates/*"]
+resolver = "2"
+
+[workspace.dependencies]
+crate-a = { path = "crates/crate-a", version = "1.0.0" }
+"#,
+    )
+    .expect("write workspace Cargo.toml");
+
+    fs::create_dir_all(dir.path().join("crates/crate-a/src")).expect("create crate-a dir");
+    fs::write(
+        dir.path().join("crates/crate-a/Cargo.toml"),
+        r#"[package]
+name = "crate-a"
+version = "1.0.0"
+edition = "2021"
+"#,
+    )
+    .expect("write crate-a Cargo.toml");
+    fs::write(dir.path().join("crates/crate-a/src/lib.rs"), "").expect("write lib.rs");
+
+    fs::create_dir_all(dir.path().join("crates/crate-b/src")).expect("create crate-b dir");
+    fs::write(
+        dir.path().join("crates/crate-b/Cargo.toml"),
+        r#"[package]
+name = "crate-b"
+version = "2.0.0"
+edition = "2021"
+
+[dependencies]
+crate-a = { workspace = true }
+"#,
+    )
+    .expect("write crate-b Cargo.toml");
+    fs::write(dir.path().join("crates/crate-b/src/lib.rs"), "").expect("write lib.rs");
+
+    fs::create_dir_all(dir.path().join(".changeset/changesets"))
+        .expect("create .changeset/changesets dir");
+
+    init_git_repo(&dir);
+    git_add_all(&dir);
+    git_commit(&dir, "Initial commit");
+
+    write_changeset(&dir, "bump-a.md", "crate-a", "minor", "Bump crate-a");
+    git_add_all(&dir);
+    git_commit(&dir, "Add changeset");
+
+    run_release_with_git(&dir, false, false, false).expect("release should succeed");
+
+    let ws_dep_version = read_dep_version(
+        &dir.path().join("Cargo.toml"),
+        "crate-a",
+        "workspace.dependencies",
+    );
+    assert_eq!(
+        ws_dep_version.as_deref(),
+        Some("1.1.0"),
+        "workspace.dependencies should be updated"
+    );
+
+    let crate_b_content =
+        fs::read_to_string(dir.path().join("crates/crate-b/Cargo.toml")).expect("read crate-b");
+    assert!(
+        crate_b_content.contains("workspace = true"),
+        "workspace = true dependency should be preserved"
+    );
+    let crate_b_dep_version = read_dep_version(
+        &dir.path().join("crates/crate-b/Cargo.toml"),
+        "crate-a",
+        "dependencies",
+    );
+    assert_eq!(
+        crate_b_dep_version, None,
+        "workspace = true dep should not gain a version field"
+    );
+}
+
+#[test]
+fn system_test_release_updates_mutual_dependencies() {
+    let dir = TempDir::new().expect("create temp dir");
+
+    fs::write(
+        dir.path().join("Cargo.toml"),
+        r#"[workspace]
+members = ["crates/*"]
+resolver = "2"
+"#,
+    )
+    .expect("write workspace Cargo.toml");
+
+    fs::create_dir_all(dir.path().join("crates/crate-a/src")).expect("create crate-a dir");
+    fs::write(
+        dir.path().join("crates/crate-a/Cargo.toml"),
+        r#"[package]
+name = "crate-a"
+version = "1.0.0"
+edition = "2021"
+"#,
+    )
+    .expect("write crate-a Cargo.toml");
+    fs::write(dir.path().join("crates/crate-a/src/lib.rs"), "").expect("write lib.rs");
+
+    fs::create_dir_all(dir.path().join("crates/crate-b/src")).expect("create crate-b dir");
+    fs::write(
+        dir.path().join("crates/crate-b/Cargo.toml"),
+        r#"[package]
+name = "crate-b"
+version = "2.0.0"
+edition = "2021"
+
+[dependencies]
+crate-a = { path = "../crate-a", version = "1.0.0" }
+"#,
+    )
+    .expect("write crate-b Cargo.toml");
+    fs::write(dir.path().join("crates/crate-b/src/lib.rs"), "").expect("write lib.rs");
+
+    fs::create_dir_all(dir.path().join(".changeset/changesets"))
+        .expect("create .changeset/changesets dir");
+
+    init_git_repo(&dir);
+    git_add_all(&dir);
+    git_commit(&dir, "Initial commit");
+
+    write_changeset(&dir, "bump-a.md", "crate-a", "minor", "Bump crate-a");
+    write_changeset(&dir, "bump-b.md", "crate-b", "patch", "Bump crate-b");
+    git_add_all(&dir);
+    git_commit(&dir, "Add changesets");
+
+    let result = run_release_with_git(&dir, false, false, false).expect("release should succeed");
+
+    let ReleaseOutcome::Executed(output) = result else {
+        panic!("expected Executed outcome");
+    };
+
+    assert_eq!(output.planned_releases.len(), 2);
+
+    let version_a = read_version(&dir.path().join("crates/crate-a/Cargo.toml"));
+    assert_eq!(version_a, "1.1.0");
+
+    let version_b = read_version(&dir.path().join("crates/crate-b/Cargo.toml"));
+    assert_eq!(version_b, "2.0.1");
+
+    let crate_b_dep_version = read_dep_version(
+        &dir.path().join("crates/crate-b/Cargo.toml"),
+        "crate-a",
+        "dependencies",
+    );
+    assert_eq!(
+        crate_b_dep_version.as_deref(),
+        Some("1.1.0"),
+        "crate-b's dep on crate-a should reflect crate-a's new version"
+    );
+}
+
+// =============================================================================
+// Intra-Workspace Dependency Rollback Tests
+// =============================================================================
+
+#[test]
+fn system_test_dependency_versions_rolled_back_on_tag_conflict() {
+    let dir = create_workspace_with_intra_deps();
+    init_git_repo(&dir);
+    git_add_all(&dir);
+    git_commit(&dir, "Initial commit");
+
+    write_changeset(&dir, "bump-a.md", "crate-a", "minor", "Bump crate-a");
+    git_add_all(&dir);
+    git_commit(&dir, "Add changeset");
+
+    create_tag(&dir, "crate-a@v1.1.0");
+
+    let initial_dep_version = read_dep_version(
+        &dir.path().join("crates/crate-b/Cargo.toml"),
+        "crate-a",
+        "dependencies",
+    );
+    let initial_ws_dep_version = read_dep_version(
+        &dir.path().join("Cargo.toml"),
+        "crate-a",
+        "workspace.dependencies",
+    );
+
+    let result = run_release_with_git(&dir, false, false, false);
+    assert!(result.is_err(), "release should fail due to tag conflict");
+
+    let final_dep_version = read_dep_version(
+        &dir.path().join("crates/crate-b/Cargo.toml"),
+        "crate-a",
+        "dependencies",
+    );
+    assert_eq!(
+        final_dep_version, initial_dep_version,
+        "crate-b's dependency version on crate-a should be restored"
+    );
+
+    let final_ws_dep_version = read_dep_version(
+        &dir.path().join("Cargo.toml"),
+        "crate-a",
+        "workspace.dependencies",
+    );
+    assert_eq!(
+        final_ws_dep_version, initial_ws_dep_version,
+        "workspace.dependencies version for crate-a should be restored"
+    );
+
+    let final_version_a = read_version(&dir.path().join("crates/crate-a/Cargo.toml"));
+    assert_eq!(
+        final_version_a, "1.0.0",
+        "crate-a's own version should be restored"
     );
 }

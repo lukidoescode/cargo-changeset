@@ -28,11 +28,13 @@ serde = { workspace = true }
 thiserror = { workspace = true }
 petname = { workspace = true }
 toml = { workspace = true }
+tracing = { workspace = true }
 
 [dev-dependencies]
 anyhow = "1.0.101"
 changeset-project = { workspace = true, features = ["testing"] }
 tempfile = "3.25"
+toml_edit = { workspace = true }
 
 [lints]
 workspace = true

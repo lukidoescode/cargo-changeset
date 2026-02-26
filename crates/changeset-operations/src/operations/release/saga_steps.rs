@@ -3,9 +3,10 @@ use std::path::Path;
 
 use changeset_project::TagFormat;
 use changeset_saga::SagaStep;
+use tracing::debug;
 
 use super::context::ReleaseSagaContext;
-use super::saga_data::{ManifestUpdate, ReleaseSagaData};
+use super::saga_data::{DependencyUpdate, ManifestUpdate, ReleaseSagaData};
 use super::{CommitResult, TagResult};
 use crate::OperationError;
 use crate::traits::{
@@ -63,12 +64,20 @@ where
                 ctx.manifest_writer()
                     .verify_version(&manifest_path, &release.new_version)?;
 
-                manifest_updates.push(ManifestUpdate {
+                let update = ManifestUpdate {
                     manifest_path,
                     old_version: release.current_version.clone(),
                     new_version: release.new_version.clone(),
                     written: true,
-                });
+                };
+                debug!(
+                    manifest = %update.manifest_path.display(),
+                    old = %update.old_version,
+                    new = %update.new_version,
+                    written = update.written,
+                    "updated manifest version"
+                );
+                manifest_updates.push(update);
             }
         }
 
@@ -77,6 +86,10 @@ where
     }
 
     fn compensate(&self, ctx: &Self::Context, input: Self::Input) -> Result<(), Self::Error> {
+        debug!(
+            count = input.manifest_updates.len(),
+            "rolling back manifest version updates"
+        );
         for release in &input.planned_releases {
             if let Some(pkg_path) = input.package_paths.get(&release.name) {
                 let manifest_path = pkg_path.join("Cargo.toml");
@@ -89,6 +102,116 @@ where
 
     fn compensation_description(&self) -> String {
         "restore original package versions in Cargo.toml files".to_string()
+    }
+}
+
+pub struct UpdateDependencyVersionsStep<G, M, RW, S, C> {
+    _marker: PhantomData<(G, M, RW, S, C)>,
+}
+
+impl<G, M, RW, S, C> UpdateDependencyVersionsStep<G, M, RW, S, C> {
+    #[must_use]
+    pub fn new() -> Self {
+        Self {
+            _marker: PhantomData,
+        }
+    }
+}
+
+impl<G, M, RW, S, C> Default for UpdateDependencyVersionsStep<G, M, RW, S, C> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl<G, M, RW, S, C> SagaStep for UpdateDependencyVersionsStep<G, M, RW, S, C>
+where
+    G: GitProvider + Send + Sync,
+    M: ManifestWriter + Send + Sync,
+    RW: ChangesetReader + ChangesetWriter + Send + Sync,
+    S: ReleaseStateIO + Send + Sync,
+    C: ChangelogWriter + Send + Sync,
+{
+    type Input = ReleaseSagaData;
+    type Output = ReleaseSagaData;
+    type Context = ReleaseSagaContext<G, M, RW, S, C>;
+    type Error = OperationError;
+
+    fn name(&self) -> &'static str {
+        "update_dependency_versions"
+    }
+
+    fn execute(
+        &self,
+        ctx: &Self::Context,
+        mut input: Self::Input,
+    ) -> Result<Self::Output, Self::Error> {
+        let mut dependency_updates = Vec::new();
+
+        let mut manifest_paths: Vec<_> = input
+            .package_paths
+            .values()
+            .map(|p| p.join("Cargo.toml"))
+            .collect();
+        manifest_paths.push(input.root_manifest_path.clone());
+
+        for release in &input.planned_releases {
+            for manifest_path in &manifest_paths {
+                let updated = ctx.manifest_writer().update_dependency_version(
+                    manifest_path,
+                    &release.name,
+                    &release.new_version,
+                )?;
+
+                if updated {
+                    let update = DependencyUpdate {
+                        manifest_path: manifest_path.clone(),
+                        dependency_name: release.name.clone(),
+                        old_version: release.current_version.clone(),
+                        new_version: release.new_version.clone(),
+                    };
+                    debug!(
+                        manifest = %update.manifest_path.display(),
+                        dependency = %update.dependency_name,
+                        old = %update.old_version,
+                        new = %update.new_version,
+                        "updated dependency version"
+                    );
+                    dependency_updates.push(update);
+                }
+            }
+        }
+
+        input.dependency_updates = dependency_updates;
+        Ok(input)
+    }
+
+    fn compensate(&self, ctx: &Self::Context, input: Self::Input) -> Result<(), Self::Error> {
+        debug!(
+            count = input.dependency_updates.len(),
+            "rolling back dependency version updates"
+        );
+        let mut manifest_paths: Vec<_> = input
+            .package_paths
+            .values()
+            .map(|p| p.join("Cargo.toml"))
+            .collect();
+        manifest_paths.push(input.root_manifest_path.clone());
+
+        for release in &input.planned_releases {
+            for manifest_path in &manifest_paths {
+                ctx.manifest_writer().update_dependency_version(
+                    manifest_path,
+                    &release.name,
+                    &release.current_version,
+                )?;
+            }
+        }
+        Ok(())
+    }
+
+    fn compensation_description(&self) -> String {
+        "restore original dependency versions in Cargo.toml files".to_string()
     }
 }
 
@@ -479,9 +602,16 @@ where
             files.push(update.path.clone());
         }
 
+        for update in &input.dependency_updates {
+            files.push(update.manifest_path.clone());
+        }
+
         if !input.changesets_deleted.is_empty() {
             files.extend(input.changesets_deleted.iter().cloned());
         }
+
+        files.sort();
+        files.dedup();
 
         if !files.is_empty() {
             let paths_refs: Vec<&Path> = files.iter().map(AsRef::as_ref).collect();
@@ -983,6 +1113,164 @@ mod tests {
         let written = manifest_writer.written_versions();
         assert_eq!(written.len(), 1);
         assert_eq!(written[0].1.to_string(), "1.0.0");
+
+        Ok(())
+    }
+
+    #[test]
+    fn update_dependency_versions_records_updates() -> anyhow::Result<()> {
+        let manifest_writer =
+            Arc::new(MockManifestWriter::new().with_dependency_updates_returning_true());
+        let ctx = make_test_context(
+            Arc::new(MockGitProvider::new()),
+            Arc::clone(&manifest_writer),
+            Arc::new(MockChangesetReader::new()),
+            Arc::new(MockReleaseStateIO::new()),
+        );
+
+        let step: UpdateDependencyVersionsStep<
+            MockGitProvider,
+            MockManifestWriter,
+            MockChangesetReader,
+            MockReleaseStateIO,
+            MockChangelogWriter,
+        > = UpdateDependencyVersionsStep::new();
+        let input = make_test_data();
+
+        let result = SagaStep::execute(&step, &ctx, input)?;
+
+        assert!(
+            !result.dependency_updates.is_empty(),
+            "dependency updates should be recorded"
+        );
+        let updates = manifest_writer.dependency_version_updates();
+        assert!(
+            !updates.is_empty(),
+            "mock should record update_dependency_version calls"
+        );
+        let (_, dep_name, version) = &updates[0];
+        assert_eq!(dep_name, "pkg-a");
+        assert_eq!(version.to_string(), "1.0.1");
+
+        Ok(())
+    }
+
+    #[test]
+    fn update_dependency_versions_compensate_restores_versions() -> anyhow::Result<()> {
+        let manifest_writer =
+            Arc::new(MockManifestWriter::new().with_dependency_updates_returning_true());
+        let ctx = make_test_context(
+            Arc::new(MockGitProvider::new()),
+            Arc::clone(&manifest_writer),
+            Arc::new(MockChangesetReader::new()),
+            Arc::new(MockReleaseStateIO::new()),
+        );
+
+        let step: UpdateDependencyVersionsStep<
+            MockGitProvider,
+            MockManifestWriter,
+            MockChangesetReader,
+            MockReleaseStateIO,
+            MockChangelogWriter,
+        > = UpdateDependencyVersionsStep::new();
+        let input = make_test_data();
+
+        SagaStep::compensate(&step, &ctx, input)?;
+
+        let updates = manifest_writer.dependency_version_updates();
+        assert!(
+            !updates.is_empty(),
+            "compensate should call update_dependency_version"
+        );
+        let (_, dep_name, version) = &updates[0];
+        assert_eq!(dep_name, "pkg-a");
+        assert_eq!(
+            version.to_string(),
+            "1.0.0",
+            "compensate should restore the current (old) version"
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn stage_files_includes_dependency_update_files() -> anyhow::Result<()> {
+        let git_provider = Arc::new(MockGitProvider::new());
+        let ctx = make_test_context(
+            Arc::clone(&git_provider),
+            Arc::new(MockManifestWriter::new()),
+            Arc::new(MockChangesetReader::new()),
+            Arc::new(MockReleaseStateIO::new()),
+        );
+
+        let step: StageFilesStep<
+            MockGitProvider,
+            MockManifestWriter,
+            MockChangesetReader,
+            MockReleaseStateIO,
+            MockChangelogWriter,
+        > = StageFilesStep::new();
+        let mut input = make_test_data();
+        input.dependency_updates.push(DependencyUpdate {
+            manifest_path: PathBuf::from("/mock/project/crates/pkg-b/Cargo.toml"),
+            dependency_name: "pkg-a".to_string(),
+            old_version: "1.0.0".parse()?,
+            new_version: "1.0.1".parse()?,
+        });
+
+        let result = SagaStep::execute(&step, &ctx, input)?;
+
+        assert!(result.files_were_staged);
+        assert!(
+            result
+                .staged_files
+                .contains(&PathBuf::from("/mock/project/crates/pkg-b/Cargo.toml")),
+            "dependency update manifest should be staged"
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn stage_files_deduplicates_manifest_and_dependency_updates() -> anyhow::Result<()> {
+        let git_provider = Arc::new(MockGitProvider::new());
+        let ctx = make_test_context(
+            Arc::clone(&git_provider),
+            Arc::new(MockManifestWriter::new()),
+            Arc::new(MockChangesetReader::new()),
+            Arc::new(MockReleaseStateIO::new()),
+        );
+
+        let step: StageFilesStep<
+            MockGitProvider,
+            MockManifestWriter,
+            MockChangesetReader,
+            MockReleaseStateIO,
+            MockChangelogWriter,
+        > = StageFilesStep::new();
+        let mut input = make_test_data();
+        let shared_path = PathBuf::from("/mock/project/crates/pkg-a/Cargo.toml");
+        input.manifest_updates.push(ManifestUpdate {
+            manifest_path: shared_path.clone(),
+            old_version: "1.0.0".parse()?,
+            new_version: "1.0.1".parse()?,
+            written: true,
+        });
+        input.dependency_updates.push(DependencyUpdate {
+            manifest_path: shared_path.clone(),
+            dependency_name: "pkg-a".to_string(),
+            old_version: "1.0.0".parse()?,
+            new_version: "1.0.1".parse()?,
+        });
+
+        let result = SagaStep::execute(&step, &ctx, input)?;
+
+        let count = result
+            .staged_files
+            .iter()
+            .filter(|p| **p == shared_path)
+            .count();
+        assert_eq!(count, 1, "duplicate paths should be deduplicated");
 
         Ok(())
     }
