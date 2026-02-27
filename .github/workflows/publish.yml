@@ -1,0 +1,51 @@
+---
+name: Publish Crate
+
+on:
+  push:
+    tags: ['*@v*']
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    name: Publish ${{ github.ref_name }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Parse crate name from tag
+        id: crate
+        run: echo "name=$(echo "$GITHUB_REF_NAME" | sed 's/@v.*//')" >> "$GITHUB_OUTPUT"
+
+      - name: Publish with retry
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+        run: |-
+          attempt=1
+          max_attempts=20
+          while [ $attempt -le $max_attempts ]; do
+            output=$(cargo publish -p "${{ steps.crate.outputs.name }}" 2>&1)
+            exit_code=$?
+            echo "$output"
+            if [ $exit_code -eq 0 ]; then
+              exit 0
+            fi
+            if echo "$output" | grep -q "already uploaded"; then
+              echo "Version already published, treating as success"
+              exit 0
+            fi
+            if [ $attempt -eq $max_attempts ]; then
+              echo "Failed after $max_attempts attempts"
+              exit 1
+            fi
+            delay=$(( 15 * (2 ** (attempt - 1)) ))
+            delay=$(( delay > 600 ? 600 : delay ))
+            echo "Attempt $attempt failed, retrying in ${delay}s..."
+            sleep $delay
+            attempt=$(( attempt + 1 ))
+          done

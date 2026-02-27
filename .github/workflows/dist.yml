@@ -1,0 +1,125 @@
+---
+name: Distribute Binaries
+
+on:
+  push:
+    tags: [cargo-changeset@v*]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build ${{ matrix.target }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-musl
+            runner: ubuntu-latest
+            use_cross: true
+            archive_ext: tar.gz
+          - target: aarch64-unknown-linux-musl
+            runner: ubuntu-latest
+            use_cross: true
+            archive_ext: tar.gz
+          - target: x86_64-apple-darwin
+            runner: macos-latest
+            use_cross: false
+            archive_ext: tar.gz
+          - target: aarch64-apple-darwin
+            runner: macos-latest
+            use_cross: false
+            archive_ext: tar.gz
+          - target: x86_64-pc-windows-msvc
+            runner: windows-latest
+            use_cross: false
+            archive_ext: zip
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Install cross
+        if: ${{ matrix.use_cross }}
+        run: cargo install cross
+
+      - name: Build binary (cross)
+        if: ${{ matrix.use_cross }}
+        run: cross build --release --package cargo-changeset --target ${{ matrix.target }}
+
+      - name: Build binary (native)
+        if: ${{ !matrix.use_cross }}
+        run: cargo build --release --package cargo-changeset --target ${{ matrix.target }}
+
+      - name: Extract version from tag
+        id: version
+        shell: bash
+        run: echo "version=$(echo "$GITHUB_REF_NAME" | sed 's/cargo-changeset@v//')"
+          >> "$GITHUB_OUTPUT"
+
+      - name: Package binary (Unix)
+        if: ${{ matrix.archive_ext == 'tar.gz' }}
+        shell: bash
+        run: |
+          ARCHIVE="cargo-changeset-${{ steps.version.outputs.version }}-${{ matrix.target }}.tar.gz"
+          tar -czf "$ARCHIVE" -C "target/${{ matrix.target }}/release" cargo-changeset
+          echo "archive=$ARCHIVE" >> "$GITHUB_OUTPUT"
+        id: package_unix
+
+      - name: Package binary (Windows)
+        if: ${{ matrix.archive_ext == 'zip' }}
+        shell: pwsh
+        run: |
+          $version = "${{ steps.version.outputs.version }}"
+          $archive = "cargo-changeset-$version-${{ matrix.target }}.zip"
+          Compress-Archive -Path "target/${{ matrix.target }}/release/cargo-changeset.exe" -DestinationPath $archive
+          echo "archive=$archive" >> $env:GITHUB_OUTPUT
+        id: package_windows
+
+      - name: Upload artifact (Unix)
+        if: ${{ matrix.archive_ext == 'tar.gz' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: binary-${{ matrix.target }}
+          path: cargo-changeset-${{ steps.version.outputs.version }}-${{ matrix.target
+            }}.tar.gz
+
+      - name: Upload artifact (Windows)
+        if: ${{ matrix.archive_ext == 'zip' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: binary-${{ matrix.target }}
+          path: cargo-changeset-${{ steps.version.outputs.version }}-${{ matrix.target
+            }}.zip
+
+  release:
+    name: Create GitHub Release
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Extract version from tag
+        id: version
+        run: echo "version=$(echo "$GITHUB_REF_NAME" | sed 's/cargo-changeset@v//')"
+          >> "$GITHUB_OUTPUT"
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: binary-*
+          merge-multiple: true
+
+      - name: Create GitHub Release
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            --title "cargo-changeset v${{ steps.version.outputs.version }}" \
+            --generate-notes \
+            cargo-changeset-${{ steps.version.outputs.version }}-*.tar.gz \
+            cargo-changeset-${{ steps.version.outputs.version }}-*.zip
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
