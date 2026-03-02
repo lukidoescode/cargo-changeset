@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use changeset_changelog::{ChangelogLocation, ComparisonLinksSetting, RepositoryInfo};
+use changeset_changelog::{ComparisonLinksSetting, RepositoryInfo};
 use changeset_core::{PackageInfo, PrereleaseSpec};
 use changeset_project::{GraduationState, ProjectKind, TagFormat};
 use changeset_saga::SagaBuilder;
@@ -39,7 +39,6 @@ pub struct ReleaseInput {
     pub force: bool,
     /// Per-package release configuration from CLI (merged with TOML state at execution).
     pub per_package_config: HashMap<String, PackageReleaseConfig>,
-    /// Global prerelease tag (applies to all packages without specific config).
     pub global_prerelease: Option<PrereleaseSpec>,
     /// Whether `--graduate` was passed without specific crates (single-package mode).
     pub graduate_all: bool,
@@ -115,12 +114,6 @@ struct ReleasePlan {
     planned_releases: Vec<PackageVersion>,
     package_lookup: IndexMap<String, PackageInfo>,
     changelog_backups: Vec<super::steps::ChangelogFileState>,
-}
-
-fn find_previous_tag(planned_releases: &[PackageVersion]) -> Option<String> {
-    let first_release = planned_releases.first()?;
-    let previous_version = &first_release.current_version;
-    Some(previous_version.to_string())
 }
 
 fn is_any_prerelease_configured(
@@ -232,154 +225,40 @@ where
     fn capture_changelog_state(
         &self,
         project_root: &Path,
-        changelog_config: &changeset_changelog::ChangelogConfig,
+        strategy: &dyn super::changelog_strategy::ChangelogHandler,
         planned_releases: &[PackageVersion],
         package_lookup: &IndexMap<String, PackageInfo>,
     ) -> Result<Vec<super::steps::ChangelogFileState>> {
-        use super::steps::ChangelogFileState;
-        let mut backups = Vec::new();
-
-        match changelog_config.changelog() {
-            ChangelogLocation::Root => {
-                let changelog_path = project_root.join("CHANGELOG.md");
-                let max_version = planned_releases
-                    .iter()
-                    .map(|r| &r.new_version)
-                    .max()
-                    .cloned();
-
-                if let Some(version) = max_version {
-                    let file_existed = self.changelog_writer.changelog_exists(&changelog_path);
-                    let original_content = if file_existed {
-                        Some(std::fs::read_to_string(&changelog_path).map_err(|e| {
-                            OperationError::ChangesetFileRead {
-                                path: changelog_path.clone(),
-                                source: e,
-                            }
-                        })?)
-                    } else {
-                        None
-                    };
-
-                    backups.push(ChangelogFileState {
-                        path: changelog_path,
-                        version,
-                        package: None,
-                        original_content,
-                        file_existed,
-                    });
-                }
-            }
-            ChangelogLocation::PerPackage => {
-                for release in planned_releases {
-                    if let Some(pkg) = package_lookup.get(&release.name) {
-                        let changelog_path = pkg.path.join("CHANGELOG.md");
-                        let file_existed = self.changelog_writer.changelog_exists(&changelog_path);
-                        let original_content = if file_existed {
-                            Some(std::fs::read_to_string(&changelog_path).map_err(|e| {
-                                OperationError::ChangesetFileRead {
-                                    path: changelog_path.clone(),
-                                    source: e,
-                                }
-                            })?)
-                        } else {
-                            None
-                        };
-
-                        backups.push(ChangelogFileState {
-                            path: changelog_path,
-                            version: release.new_version.clone(),
-                            package: Some(release.name.clone()),
-                            original_content,
-                            file_existed,
-                        });
-                    }
-                }
-            }
-        }
-
-        Ok(backups)
+        let ctx = super::changelog_strategy::ChangelogCaptureContext {
+            project_root,
+            planned_releases,
+            package_lookup,
+            changelog_writer: &self.changelog_writer,
+        };
+        strategy.capture_state(&ctx)
     }
 
     fn generate_changelog_updates(
         &self,
         project_root: &Path,
         changelog_config: &changeset_changelog::ChangelogConfig,
+        strategy: &dyn super::changelog_strategy::ChangelogHandler,
         aggregator: &ChangesetAggregator,
         planned_releases: &[PackageVersion],
         package_lookup: &IndexMap<String, PackageInfo>,
     ) -> Result<Vec<ChangelogUpdate>> {
         let today = Local::now().date_naive();
         let repo_info = self.resolve_repo_info(project_root, changelog_config)?;
-        let mut changelog_updates = Vec::new();
-
-        match changelog_config.changelog() {
-            ChangelogLocation::Root => {
-                let changelog_path = project_root.join("CHANGELOG.md");
-                let max_version = planned_releases
-                    .iter()
-                    .map(|r| &r.new_version)
-                    .max()
-                    .cloned();
-
-                if let Some(version) = max_version {
-                    let packages: Vec<_> = planned_releases
-                        .iter()
-                        .map(|r| (r.name.clone(), r.new_version.clone()))
-                        .collect();
-
-                    if let Some(release) = aggregator.build_root_release(&version, today, &packages)
-                    {
-                        let previous_tag = find_previous_tag(planned_releases);
-
-                        let result = self.changelog_writer.write_release(
-                            &changelog_path,
-                            &release,
-                            repo_info.as_ref(),
-                            previous_tag.as_deref(),
-                        )?;
-
-                        changelog_updates.push(ChangelogUpdate {
-                            path: result.path,
-                            package: None,
-                            version,
-                            created: result.created,
-                        });
-                    }
-                }
-            }
-            ChangelogLocation::PerPackage => {
-                for release in planned_releases {
-                    if let Some(pkg) = package_lookup.get(&release.name) {
-                        let changelog_path = pkg.path.join("CHANGELOG.md");
-
-                        if let Some(version_release) = aggregator.build_package_release(
-                            &release.name,
-                            &release.new_version,
-                            today,
-                        ) {
-                            let previous_version = release.current_version.to_string();
-
-                            let result = self.changelog_writer.write_release(
-                                &changelog_path,
-                                &version_release,
-                                repo_info.as_ref(),
-                                Some(&previous_version),
-                            )?;
-
-                            changelog_updates.push(ChangelogUpdate {
-                                path: result.path,
-                                package: Some(release.name.clone()),
-                                version: release.new_version.clone(),
-                                created: result.created,
-                            });
-                        }
-                    }
-                }
-            }
-        }
-
-        Ok(changelog_updates)
+        let ctx = super::changelog_strategy::ChangelogGenerateContext {
+            project_root,
+            aggregator,
+            planned_releases,
+            package_lookup,
+            repo_info: repo_info.as_ref(),
+            today,
+            changelog_writer: &self.changelog_writer,
+        };
+        strategy.generate_updates(&ctx)
     }
 
     fn resolve_repo_info(
@@ -400,12 +279,6 @@ where
         }
     }
 
-    /// Validates that the working tree is clean when committing is enabled.
-    ///
-    /// # Errors
-    ///
-    /// Returns `OperationError::DirtyWorkingTree` if the working tree has uncommitted
-    /// changes and committing is enabled.
     fn validate_working_tree(
         &self,
         project_root: &Path,
@@ -421,12 +294,6 @@ where
         Ok(())
     }
 
-    /// Checks for packages with inherited versions and validates the convert flag.
-    ///
-    /// # Errors
-    ///
-    /// Returns `OperationError::InheritedVersionsRequireConvert` if packages use
-    /// inherited versions and the convert flag is not set.
     fn check_inherited_versions(
         &self,
         packages: &[PackageInfo],
@@ -441,11 +308,6 @@ where
         Ok(inherited_packages)
     }
 
-    /// Loads changesets from the changeset directory and populates the aggregator.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if changeset files cannot be read or parsed.
     fn load_changesets(
         &self,
         changeset_dir: &Path,
@@ -485,8 +347,8 @@ where
 
     /// # Errors
     ///
-    /// Returns an error if the project cannot be discovered, changeset files
-    /// cannot be read, or manifest updates fail.
+    /// Propagates errors from project discovery, changeset parsing, version
+    /// planning, changelog generation, and git operations.
     pub fn execute(&self, start_path: &Path, input: &ReleaseInput) -> Result<ReleaseOutcome> {
         let context = self.prepare_release_context(start_path, input)?;
 
@@ -528,8 +390,7 @@ where
             graduation_state.as_ref(),
             &project.packages,
             &project.kind,
-        )
-        .map_err(OperationError::ValidationFailed)?;
+        )?;
 
         let per_package_config = validated_config.per_package;
 
@@ -614,15 +475,19 @@ where
         let (changelog_updates, changelog_backups) = if dry_run {
             (Vec::new(), Vec::new())
         } else {
+            let strategy = super::changelog_strategy::strategy_for(
+                context.root_config.changelog_config().changelog(),
+            );
             let backups = self.capture_changelog_state(
                 &context.project.root,
-                context.root_config.changelog_config(),
+                strategy.as_ref(),
                 &planned_releases,
                 &package_lookup,
             )?;
             let updates = self.generate_changelog_updates(
                 &context.project.root,
                 context.root_config.changelog_config(),
+                strategy.as_ref(),
                 &aggregator,
                 &planned_releases,
                 &package_lookup,

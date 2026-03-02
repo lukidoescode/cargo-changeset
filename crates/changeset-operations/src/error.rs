@@ -44,6 +44,13 @@ pub enum OperationError {
         source: std::io::Error,
     },
 
+    #[error("failed to read changelog file '{path}'")]
+    ChangelogFileRead {
+        path: PathBuf,
+        #[source]
+        source: std::io::Error,
+    },
+
     #[error("failed to parse changeset file '{path}'")]
     ChangesetParse {
         path: PathBuf,

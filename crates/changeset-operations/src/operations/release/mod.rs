@@ -1,3 +1,4 @@
+mod changelog_strategy;
 mod context;
 mod operation;
 mod saga_data;
