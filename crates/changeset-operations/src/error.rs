@@ -61,6 +61,9 @@ pub enum OperationError {
         source: std::io::Error,
     },
 
+    #[error("project root mismatch: provider configured for '{}' but called with '{}'", expected.display(), actual.display())]
+    ProjectRootMismatch { expected: PathBuf, actual: PathBuf },
+
     #[error("operation cancelled")]
     Cancelled,
 

@@ -11,7 +11,9 @@ use super::saga_data::{DependencyUpdate, ManifestUpdate, ReleaseSagaData};
 use super::{CommitResult, TagResult};
 use crate::OperationError;
 use crate::traits::{
-    ChangelogWriter, ChangesetReader, ChangesetWriter, GitProvider, ManifestWriter, ReleaseStateIO,
+    ChangelogWriter, ChangesetReader, ChangesetWriter, GitCommitProvider, GitStagingProvider,
+    GitTagProvider, ManifestDependencyWriter, ManifestVersionWriter, ReleaseStateIO,
+    WorkspaceVersionManager,
 };
 
 pub struct WriteManifestVersionsStep<G, M, RW, S, C> {
@@ -35,11 +37,11 @@ impl<G, M, RW, S, C> Default for WriteManifestVersionsStep<G, M, RW, S, C> {
 
 impl<G, M, RW, S, C> SagaStep for WriteManifestVersionsStep<G, M, RW, S, C>
 where
-    G: GitProvider + Send + Sync,
-    M: ManifestWriter + Send + Sync,
-    RW: ChangesetReader + ChangesetWriter + Send + Sync,
-    S: ReleaseStateIO + Send + Sync,
-    C: ChangelogWriter + Send + Sync,
+    G: Send + Sync,
+    M: ManifestVersionWriter,
+    RW: Send + Sync,
+    S: Send + Sync,
+    C: Send + Sync,
 {
     type Input = ReleaseSagaData;
     type Output = ReleaseSagaData;
@@ -127,11 +129,11 @@ impl<G, M, RW, S, C> Default for UpdateDependencyVersionsStep<G, M, RW, S, C> {
 
 impl<G, M, RW, S, C> SagaStep for UpdateDependencyVersionsStep<G, M, RW, S, C>
 where
-    G: GitProvider + Send + Sync,
-    M: ManifestWriter + Send + Sync,
-    RW: ChangesetReader + ChangesetWriter + Send + Sync,
-    S: ReleaseStateIO + Send + Sync,
-    C: ChangelogWriter + Send + Sync,
+    G: Send + Sync,
+    M: ManifestDependencyWriter,
+    RW: Send + Sync,
+    S: Send + Sync,
+    C: Send + Sync,
 {
     type Input = ReleaseSagaData;
     type Output = ReleaseSagaData;
@@ -237,11 +239,11 @@ impl<G, M, RW, S, C> Default for RemoveWorkspaceVersionStep<G, M, RW, S, C> {
 
 impl<G, M, RW, S, C> SagaStep for RemoveWorkspaceVersionStep<G, M, RW, S, C>
 where
-    G: GitProvider + Send + Sync,
-    M: ManifestWriter + Send + Sync,
-    RW: ChangesetReader + ChangesetWriter + Send + Sync,
-    S: ReleaseStateIO + Send + Sync,
-    C: ChangelogWriter + Send + Sync,
+    G: Send + Sync,
+    M: WorkspaceVersionManager,
+    RW: Send + Sync,
+    S: Send + Sync,
+    C: Send + Sync,
 {
     type Input = ReleaseSagaData;
     type Output = ReleaseSagaData;
@@ -307,11 +309,11 @@ impl<G, M, RW, S, C> Default for MarkChangesetsConsumedStep<G, M, RW, S, C> {
 
 impl<G, M, RW, S, C> SagaStep for MarkChangesetsConsumedStep<G, M, RW, S, C>
 where
-    G: GitProvider + Send + Sync,
-    M: ManifestWriter + Send + Sync,
-    RW: ChangesetReader + ChangesetWriter + Send + Sync,
-    S: ReleaseStateIO + Send + Sync,
-    C: ChangelogWriter + Send + Sync,
+    G: Send + Sync,
+    M: Send + Sync,
+    RW: ChangesetWriter + Send + Sync,
+    S: Send + Sync,
+    C: Send + Sync,
 {
     type Input = ReleaseSagaData;
     type Output = ReleaseSagaData;
@@ -391,11 +393,11 @@ impl<G, M, RW, S, C> Default for ClearChangesetsConsumedStep<G, M, RW, S, C> {
 
 impl<G, M, RW, S, C> SagaStep for ClearChangesetsConsumedStep<G, M, RW, S, C>
 where
-    G: GitProvider + Send + Sync,
-    M: ManifestWriter + Send + Sync,
-    RW: ChangesetReader + ChangesetWriter + Send + Sync,
-    S: ReleaseStateIO + Send + Sync,
-    C: ChangelogWriter + Send + Sync,
+    G: Send + Sync,
+    M: Send + Sync,
+    RW: ChangesetReader + ChangesetWriter,
+    S: Send + Sync,
+    C: Send + Sync,
 {
     type Input = ReleaseSagaData;
     type Output = ReleaseSagaData;
@@ -484,11 +486,11 @@ impl<G, M, RW, S, C> Default for DeleteChangesetFilesStep<G, M, RW, S, C> {
 
 impl<G, M, RW, S, C> SagaStep for DeleteChangesetFilesStep<G, M, RW, S, C>
 where
-    G: GitProvider + Send + Sync,
-    M: ManifestWriter + Send + Sync,
-    RW: ChangesetReader + ChangesetWriter + Send + Sync,
-    S: ReleaseStateIO + Send + Sync,
-    C: ChangelogWriter + Send + Sync,
+    G: GitStagingProvider,
+    M: Send + Sync,
+    RW: ChangesetReader + ChangesetWriter,
+    S: Send + Sync,
+    C: Send + Sync,
 {
     type Input = ReleaseSagaData;
     type Output = ReleaseSagaData;
@@ -565,11 +567,11 @@ impl<G, M, RW, S, C> Default for StageFilesStep<G, M, RW, S, C> {
 
 impl<G, M, RW, S, C> SagaStep for StageFilesStep<G, M, RW, S, C>
 where
-    G: GitProvider + Send + Sync,
-    M: ManifestWriter + Send + Sync,
-    RW: ChangesetReader + ChangesetWriter + Send + Sync,
-    S: ReleaseStateIO + Send + Sync,
-    C: ChangelogWriter + Send + Sync,
+    G: GitStagingProvider,
+    M: Send + Sync,
+    RW: Send + Sync,
+    S: Send + Sync,
+    C: Send + Sync,
 {
     type Input = ReleaseSagaData;
     type Output = ReleaseSagaData;
@@ -676,11 +678,11 @@ impl<G, M, RW, S, C> CreateCommitStep<G, M, RW, S, C> {
 
 impl<G, M, RW, S, C> SagaStep for CreateCommitStep<G, M, RW, S, C>
 where
-    G: GitProvider + Send + Sync,
-    M: ManifestWriter + Send + Sync,
-    RW: ChangesetReader + ChangesetWriter + Send + Sync,
-    S: ReleaseStateIO + Send + Sync,
-    C: ChangelogWriter + Send + Sync,
+    G: GitCommitProvider,
+    M: Send + Sync,
+    RW: Send + Sync,
+    S: Send + Sync,
+    C: Send + Sync,
 {
     type Input = ReleaseSagaData;
     type Output = ReleaseSagaData;
@@ -751,11 +753,11 @@ impl<G, M, RW, S, C> CreateTagsStep<G, M, RW, S, C> {
 
 impl<G, M, RW, S, C> SagaStep for CreateTagsStep<G, M, RW, S, C>
 where
-    G: GitProvider + Send + Sync,
-    M: ManifestWriter + Send + Sync,
-    RW: ChangesetReader + ChangesetWriter + Send + Sync,
-    S: ReleaseStateIO + Send + Sync,
-    C: ChangelogWriter + Send + Sync,
+    G: GitTagProvider,
+    M: Send + Sync,
+    RW: Send + Sync,
+    S: Send + Sync,
+    C: Send + Sync,
 {
     type Input = ReleaseSagaData;
     type Output = ReleaseSagaData;
@@ -859,11 +861,11 @@ impl<G, M, RW, S, C> Default for UpdateReleaseStateStep<G, M, RW, S, C> {
 
 impl<G, M, RW, S, C> SagaStep for UpdateReleaseStateStep<G, M, RW, S, C>
 where
-    G: GitProvider + Send + Sync,
-    M: ManifestWriter + Send + Sync,
-    RW: ChangesetReader + ChangesetWriter + Send + Sync,
-    S: ReleaseStateIO + Send + Sync,
-    C: ChangelogWriter + Send + Sync,
+    G: Send + Sync,
+    M: Send + Sync,
+    RW: Send + Sync,
+    S: ReleaseStateIO,
+    C: Send + Sync,
 {
     type Input = ReleaseSagaData;
     type Output = ReleaseSagaData;
@@ -936,11 +938,11 @@ impl<G, M, RW, S, C> Default for RestoreChangelogsStep<G, M, RW, S, C> {
 
 impl<G, M, RW, S, C> SagaStep for RestoreChangelogsStep<G, M, RW, S, C>
 where
-    G: GitProvider + Send + Sync,
-    M: ManifestWriter + Send + Sync,
-    RW: ChangesetReader + ChangesetWriter + Send + Sync,
-    S: ReleaseStateIO + Send + Sync,
-    C: ChangelogWriter + Send + Sync,
+    G: Send + Sync,
+    M: Send + Sync,
+    RW: Send + Sync,
+    S: Send + Sync,
+    C: ChangelogWriter,
 {
     type Input = ReleaseSagaData;
     type Output = ReleaseSagaData;

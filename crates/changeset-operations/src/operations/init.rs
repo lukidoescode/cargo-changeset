@@ -6,7 +6,7 @@ use changeset_project::{CargoProject, ProjectKind, RootChangesetConfig};
 
 use crate::Result;
 use crate::traits::{
-    ChangelogSettingsInput, GitSettingsInput, InitInteractionProvider, ManifestWriter,
+    ChangelogSettingsInput, GitSettingsInput, InitInteractionProvider, ManifestMetadataWriter,
     ProjectContext, ProjectProvider, VersionSettingsInput,
 };
 
@@ -89,7 +89,7 @@ where
 impl<P, M, I> InitOperation<P, M, I>
 where
     P: ProjectProvider,
-    M: ManifestWriter,
+    M: ManifestMetadataWriter,
     I: InitInteractionProvider,
 {
     /// Prepares an initialization plan by collecting all configuration without

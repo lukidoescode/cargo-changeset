@@ -4,7 +4,10 @@ use changeset_manifest::{InitConfig, MetadataSection};
 use semver::Version;
 
 use crate::Result;
-use crate::traits::{InheritedVersionChecker, ManifestWriter};
+use crate::traits::{
+    InheritedVersionChecker, ManifestDependencyWriter, ManifestMetadataWriter,
+    ManifestVersionWriter, WorkspaceVersionManager,
+};
 
 pub struct FileSystemManifestWriter;
 
@@ -27,7 +30,7 @@ impl InheritedVersionChecker for FileSystemManifestWriter {
     }
 }
 
-impl ManifestWriter for FileSystemManifestWriter {
+impl ManifestVersionWriter for FileSystemManifestWriter {
     fn write_version(&self, manifest_path: &Path, new_version: &Version) -> Result<()> {
         Ok(changeset_manifest::write_version(
             manifest_path,
@@ -35,42 +38,12 @@ impl ManifestWriter for FileSystemManifestWriter {
         )?)
     }
 
-    fn remove_workspace_version(&self, manifest_path: &Path) -> Result<()> {
-        Ok(changeset_manifest::remove_workspace_version(manifest_path)?)
-    }
-
-    fn read_workspace_version(&self, manifest_path: &Path) -> Result<Option<Version>> {
-        match changeset_manifest::read_workspace_version(manifest_path) {
-            Ok(version) => Ok(Some(version)),
-            Err(changeset_manifest::ManifestError::MissingField { .. }) => Ok(None),
-            Err(e) => Err(e.into()),
-        }
-    }
-
-    fn write_workspace_version(&self, manifest_path: &Path, version: &Version) -> Result<()> {
-        Ok(changeset_manifest::write_workspace_version(
-            manifest_path,
-            version,
-        )?)
-    }
-
     fn verify_version(&self, manifest_path: &Path, expected: &Version) -> Result<()> {
         Ok(changeset_manifest::verify_version(manifest_path, expected)?)
     }
+}
 
-    fn write_metadata(
-        &self,
-        manifest_path: &Path,
-        section: MetadataSection,
-        config: &InitConfig,
-    ) -> Result<()> {
-        Ok(changeset_manifest::write_metadata_section(
-            manifest_path,
-            section,
-            config,
-        )?)
-    }
-
+impl ManifestDependencyWriter for FileSystemManifestWriter {
     fn update_dependency_version(
         &self,
         manifest_path: &Path,
@@ -81,6 +54,42 @@ impl ManifestWriter for FileSystemManifestWriter {
             manifest_path,
             dependency_name,
             new_version,
+        )?)
+    }
+}
+
+impl WorkspaceVersionManager for FileSystemManifestWriter {
+    fn read_workspace_version(&self, manifest_path: &Path) -> Result<Option<Version>> {
+        match changeset_manifest::read_workspace_version(manifest_path) {
+            Ok(version) => Ok(Some(version)),
+            Err(changeset_manifest::ManifestError::MissingField { .. }) => Ok(None),
+            Err(e) => Err(e.into()),
+        }
+    }
+
+    fn remove_workspace_version(&self, manifest_path: &Path) -> Result<()> {
+        Ok(changeset_manifest::remove_workspace_version(manifest_path)?)
+    }
+
+    fn write_workspace_version(&self, manifest_path: &Path, version: &Version) -> Result<()> {
+        Ok(changeset_manifest::write_workspace_version(
+            manifest_path,
+            version,
+        )?)
+    }
+}
+
+impl ManifestMetadataWriter for FileSystemManifestWriter {
+    fn write_metadata(
+        &self,
+        manifest_path: &Path,
+        section: MetadataSection,
+        config: &InitConfig,
+    ) -> Result<()> {
+        Ok(changeset_manifest::write_metadata_section(
+            manifest_path,
+            section,
+            config,
         )?)
     }
 }

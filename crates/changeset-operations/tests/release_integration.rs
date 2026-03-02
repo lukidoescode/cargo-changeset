@@ -165,7 +165,7 @@ fn run_release(
     let changeset_io = FileSystemChangesetIO::new(dir.path());
     let manifest_writer = FileSystemManifestWriter::new();
     let changelog_writer = FileSystemChangelogWriter::new();
-    let git_provider = Git2Provider::new();
+    let git_provider = Git2Provider::new(dir.path());
     let release_state_io = FileSystemReleaseStateIO::new();
 
     let operation = ReleaseOperation::new(
@@ -570,7 +570,7 @@ fn run_release_with_git(
     let changeset_reader = FileSystemChangesetIO::new(dir.path());
     let manifest_writer = FileSystemManifestWriter::new();
     let changelog_writer = FileSystemChangelogWriter::new();
-    let git_provider = Git2Provider::new();
+    let git_provider = Git2Provider::new(dir.path());
     let release_state_io = FileSystemReleaseStateIO::new();
 
     let operation = ReleaseOperation::new(
@@ -861,7 +861,7 @@ fn run_release_with_prerelease(
     let changeset_io = FileSystemChangesetIO::new(dir.path());
     let manifest_writer = FileSystemManifestWriter::new();
     let changelog_writer = FileSystemChangelogWriter::new();
-    let git_provider = Git2Provider::new();
+    let git_provider = Git2Provider::new(dir.path());
     let release_state_io = FileSystemReleaseStateIO::new();
 
     let operation = ReleaseOperation::new(
@@ -1349,7 +1349,7 @@ fn run_release_with_config(
     let changeset_io = FileSystemChangesetIO::new(dir.path());
     let manifest_writer = FileSystemManifestWriter::new();
     let changelog_writer = FileSystemChangelogWriter::new();
-    let git_provider = Git2Provider::new();
+    let git_provider = Git2Provider::new(dir.path());
     let release_state_io = FileSystemReleaseStateIO::new();
 
     let operation = ReleaseOperation::new(

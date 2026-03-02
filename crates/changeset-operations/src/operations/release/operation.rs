@@ -23,8 +23,10 @@ use crate::error::OperationError;
 use crate::operations::changelog_aggregation::ChangesetAggregator;
 use crate::planner::VersionPlanner;
 use crate::traits::{
-    ChangelogWriter, ChangesetReader, ChangesetWriter, GitProvider, ManifestWriter,
-    ProjectProvider, ReleaseStateIO,
+    ChangelogWriter, ChangesetReader, ChangesetWriter, GitCommitProvider, GitDiffProvider,
+    GitStagingProvider, GitStatusProvider, GitTagProvider, InheritedVersionChecker,
+    ManifestDependencyWriter, ManifestVersionWriter, ProjectProvider, ReleaseStateIO,
+    WorkspaceVersionManager,
 };
 use crate::types::{PackageReleaseConfig, PackageVersion};
 
@@ -178,9 +180,22 @@ impl<P, RW, M, C, G, S> ReleaseOperation<P, RW, M, C, G, S>
 where
     P: ProjectProvider,
     RW: ChangesetReader + ChangesetWriter + Send + Sync + 'static,
-    M: ManifestWriter + Send + Sync + 'static,
+    M: ManifestVersionWriter
+        + ManifestDependencyWriter
+        + WorkspaceVersionManager
+        + InheritedVersionChecker
+        + Send
+        + Sync
+        + 'static,
     C: ChangelogWriter + Clone + Send + Sync + 'static,
-    G: GitProvider + Send + Sync + 'static,
+    G: GitDiffProvider
+        + GitStatusProvider
+        + GitStagingProvider
+        + GitCommitProvider
+        + GitTagProvider
+        + Send
+        + Sync
+        + 'static,
     S: ReleaseStateIO + Send + Sync + 'static,
 {
     pub fn new(
@@ -671,18 +686,11 @@ where
         }))
     }
 
-    #[allow(clippy::items_after_statements)]
     fn execute_release_saga(
         &self,
         context: &ReleaseContext,
         saga_data: ReleaseSagaData,
     ) -> Result<ReleaseSagaData> {
-        let git_config = context.root_config.git_config();
-        let use_crate_prefix = match &context.project.kind {
-            ProjectKind::SinglePackage => git_config.tag_format() == TagFormat::CratePrefixed,
-            ProjectKind::VirtualWorkspace | ProjectKind::WorkspaceWithRoot => true,
-        };
-
         type RestoreChangelogs<G, M, RW, S, CW> = RestoreChangelogsStep<G, M, RW, S, CW>;
         type WriteManifests<G, M, RW, S, CW> = WriteManifestVersionsStep<G, M, RW, S, CW>;
         type UpdateDeps<G, M, RW, S, CW> = UpdateDependencyVersionsStep<G, M, RW, S, CW>;
@@ -694,6 +702,12 @@ where
         type Commit<G, M, RW, S, CW> = CreateCommitStep<G, M, RW, S, CW>;
         type Tags<G, M, RW, S, CW> = CreateTagsStep<G, M, RW, S, CW>;
         type UpdateState<G, M, RW, S, CW> = UpdateReleaseStateStep<G, M, RW, S, CW>;
+
+        let git_config = context.root_config.git_config();
+        let use_crate_prefix = match &context.project.kind {
+            ProjectKind::SinglePackage => git_config.tag_format() == TagFormat::CratePrefixed,
+            ProjectKind::VirtualWorkspace | ProjectKind::WorkspaceWithRoot => true,
+        };
 
         let saga = SagaBuilder::new()
             .first_step(RestoreChangelogs::<G, M, RW, S, C>::new())
@@ -785,7 +799,13 @@ mod tests {
     where
         P: ProjectProvider,
         RW: ChangesetReader + ChangesetWriter + Send + Sync + 'static,
-        M: ManifestWriter + Send + Sync + 'static,
+        M: ManifestVersionWriter
+            + ManifestDependencyWriter
+            + WorkspaceVersionManager
+            + InheritedVersionChecker
+            + Send
+            + Sync
+            + 'static,
     {
         ReleaseOperation::new(
             project_provider,

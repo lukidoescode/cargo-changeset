@@ -1,10 +1,6 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use crate::traits::{
-    ChangelogWriter, ChangesetReader, ChangesetWriter, GitProvider, ManifestWriter, ReleaseStateIO,
-};
-
 pub struct ReleaseSagaContext<G, M, RW, S, C> {
     project_root: PathBuf,
     git_provider: Arc<G>,
@@ -27,15 +23,8 @@ impl<G, M, RW, S, C> Clone for ReleaseSagaContext<G, M, RW, S, C> {
     }
 }
 
-impl<G, M, RW, S, C> ReleaseSagaContext<G, M, RW, S, C>
-where
-    G: GitProvider,
-    M: ManifestWriter,
-    RW: ChangesetReader + ChangesetWriter,
-    S: ReleaseStateIO,
-    C: ChangelogWriter,
-{
-    pub fn new(
+impl<G, M, RW, S, C> ReleaseSagaContext<G, M, RW, S, C> {
+    pub(crate) fn new(
         project_root: PathBuf,
         git_provider: Arc<G>,
         manifest_writer: Arc<M>,
@@ -54,32 +43,32 @@ where
     }
 
     #[must_use]
-    pub fn project_root(&self) -> &Path {
+    pub(crate) fn project_root(&self) -> &Path {
         &self.project_root
     }
 
     #[must_use]
-    pub fn git_provider(&self) -> &G {
+    pub(crate) fn git_provider(&self) -> &G {
         &self.git_provider
     }
 
     #[must_use]
-    pub fn manifest_writer(&self) -> &M {
+    pub(crate) fn manifest_writer(&self) -> &M {
         &self.manifest_writer
     }
 
     #[must_use]
-    pub fn changeset_rw(&self) -> &RW {
+    pub(crate) fn changeset_rw(&self) -> &RW {
         &self.changeset_rw
     }
 
     #[must_use]
-    pub fn release_state_io(&self) -> &S {
+    pub(crate) fn release_state_io(&self) -> &S {
         &self.release_state_io
     }
 
     #[must_use]
-    pub fn changelog_writer(&self) -> &C {
+    pub(crate) fn changelog_writer(&self) -> &C {
         &self.changelog_writer
     }
 }

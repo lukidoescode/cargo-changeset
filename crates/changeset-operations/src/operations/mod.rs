@@ -12,7 +12,7 @@ pub use init::{
 };
 pub use release::{
     ChangelogUpdate, CommitResult, GitOperationResult, PackageVersion, ReleaseInput,
-    ReleaseOperation, ReleaseOutcome, ReleaseOutput, ReleaseSagaContext, TagResult,
+    ReleaseOperation, ReleaseOutcome, ReleaseOutput, TagResult,
 };
 pub use release::{
     PackageReleaseConfig, ReleaseCliInput, ReleaseValidator, ValidatedReleaseConfig,

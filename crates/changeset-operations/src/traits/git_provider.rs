@@ -4,13 +4,15 @@ use changeset_git::{CommitInfo, FileChange, TagInfo};
 
 use crate::Result;
 
-pub trait GitProvider: Send + Sync {
+pub trait GitDiffProvider: Send + Sync {
     /// # Errors
     ///
     /// Returns an error if the repository cannot be opened or diff fails.
     fn changed_files(&self, project_root: &Path, base: &str, head: &str)
     -> Result<Vec<FileChange>>;
+}
 
+pub trait GitStatusProvider: Send + Sync {
     /// # Errors
     ///
     /// Returns an error if the repository cannot be opened or status check fails.
@@ -23,23 +25,15 @@ pub trait GitProvider: Send + Sync {
 
     /// # Errors
     ///
-    /// Returns an error if staging any of the files fails.
-    fn stage_files(&self, project_root: &Path, paths: &[&Path]) -> Result<()>;
-
-    /// # Errors
-    ///
-    /// Returns an error if the commit cannot be created.
-    fn commit(&self, project_root: &Path, message: &str) -> Result<CommitInfo>;
-
-    /// # Errors
-    ///
-    /// Returns an error if the tag cannot be created or already exists.
-    fn create_tag(&self, project_root: &Path, tag_name: &str, message: &str) -> Result<TagInfo>;
-
-    /// # Errors
-    ///
     /// Returns an error if the repository cannot be opened.
     fn remote_url(&self, project_root: &Path) -> Result<Option<String>>;
+}
+
+pub trait GitStagingProvider: Send + Sync {
+    /// # Errors
+    ///
+    /// Returns an error if staging any of the files fails.
+    fn stage_files(&self, project_root: &Path, paths: &[&Path]) -> Result<()>;
 
     /// Deletes files from the filesystem and stages the deletions in git.
     ///
@@ -53,15 +47,13 @@ pub trait GitProvider: Send + Sync {
     /// - Any file cannot be deleted (permissions, in use, etc.)
     /// - The git index cannot be updated to stage the deletion
     fn delete_files(&self, project_root: &Path, paths: &[&Path]) -> Result<()>;
+}
 
-    /// Deletes a tag by name.
-    ///
-    /// Returns `Ok(true)` if the tag was deleted, `Ok(false)` if the tag was not found.
-    ///
+pub trait GitCommitProvider: Send + Sync {
     /// # Errors
     ///
-    /// Returns an error if the delete operation fails for reasons other than "not found".
-    fn delete_tag(&self, project_root: &Path, tag_name: &str) -> Result<bool>;
+    /// Returns an error if the commit cannot be created.
+    fn commit(&self, project_root: &Path, message: &str) -> Result<CommitInfo>;
 
     /// Performs a soft reset to the parent of HEAD (HEAD~1).
     ///
@@ -74,4 +66,20 @@ pub trait GitProvider: Send + Sync {
     /// - HEAD has no parent (initial commit)
     /// - The reset operation fails
     fn reset_to_parent(&self, project_root: &Path) -> Result<()>;
+}
+
+pub trait GitTagProvider: Send + Sync {
+    /// # Errors
+    ///
+    /// Returns an error if the tag cannot be created or already exists.
+    fn create_tag(&self, project_root: &Path, tag_name: &str, message: &str) -> Result<TagInfo>;
+
+    /// Deletes a tag by name.
+    ///
+    /// Returns `Ok(true)` if the tag was deleted, `Ok(false)` if the tag was not found.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the delete operation fails for reasons other than "not found".
+    fn delete_tag(&self, project_root: &Path, tag_name: &str) -> Result<bool>;
 }

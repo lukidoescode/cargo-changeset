@@ -6,7 +6,6 @@ pub mod steps;
 mod validator;
 
 pub use crate::types::{PackageReleaseConfig, PackageVersion};
-pub use context::ReleaseSagaContext;
 pub use operation::{
     ChangelogUpdate, CommitResult, GitOperationResult, ReleaseInput, ReleaseOperation,
     ReleaseOutcome, ReleaseOutput, TagResult,
