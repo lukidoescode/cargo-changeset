@@ -36,32 +36,21 @@ pub fn format_entries(entries: &[ChangelogEntry]) -> String {
 
     let mut output = String::new();
 
-    let category_order = [
-        ChangeCategory::Added,
-        ChangeCategory::Changed,
-        ChangeCategory::Deprecated,
-        ChangeCategory::Removed,
-        ChangeCategory::Fixed,
-        ChangeCategory::Security,
-    ];
+    for (category, category_entries) in &by_category {
+        output.push_str("\n### ");
+        output.push_str(&category.to_string());
+        output.push('\n');
 
-    for category in category_order {
-        if let Some(category_entries) = by_category.get(&category) {
-            output.push_str("\n### ");
-            output.push_str(&category.to_string());
-            output.push('\n');
-
-            for entry in category_entries {
-                output.push_str("\n- ");
-                if let Some(ref package) = entry.package {
-                    output.push_str("**");
-                    output.push_str(package);
-                    output.push_str("**: ");
-                }
-                output.push_str(&entry.description);
+        for entry in category_entries {
+            output.push_str("\n- ");
+            if let Some(ref package) = entry.package {
+                output.push_str("**");
+                output.push_str(package);
+                output.push_str("**: ");
             }
-            output.push('\n');
+            output.push_str(&entry.description);
         }
+        output.push('\n');
     }
 
     output

@@ -194,6 +194,20 @@ impl ValueEnum for PrereleaseSpec {
 }
 
 #[cfg(test)]
+mod change_category_tests {
+    use super::*;
+
+    #[test]
+    fn ordering_matches_keep_a_changelog_convention() {
+        assert!(ChangeCategory::Added < ChangeCategory::Changed);
+        assert!(ChangeCategory::Changed < ChangeCategory::Deprecated);
+        assert!(ChangeCategory::Deprecated < ChangeCategory::Removed);
+        assert!(ChangeCategory::Removed < ChangeCategory::Fixed);
+        assert!(ChangeCategory::Fixed < ChangeCategory::Security);
+    }
+}
+
+#[cfg(test)]
 mod prerelease_spec_tests {
     use super::*;
 

@@ -3,6 +3,7 @@ use std::path::Path;
 
 use changeset_project::TagFormat;
 use changeset_saga::SagaStep;
+use semver::Version;
 use tracing::debug;
 
 use super::context::ReleaseSagaContext;
@@ -440,7 +441,7 @@ where
     fn compensate(&self, ctx: &Self::Context, input: Self::Input) -> Result<(), Self::Error> {
         for file_state in &input.consumed_files_cleared {
             if let Some(original_version) = &file_state.original_consumed_status {
-                let version: semver::Version =
+                let version: Version =
                     original_version
                         .parse()
                         .map_err(|_| OperationError::VersionParse {
@@ -737,6 +738,15 @@ impl<G, M, RW, S, C> CreateTagsStep<G, M, RW, S, C> {
             _marker: PhantomData,
         }
     }
+
+    fn format_tag_name(&self, release_name: &str, version: &Version) -> String {
+        let use_prefix = self.use_crate_prefix || self.tag_format == TagFormat::CratePrefixed;
+        if use_prefix {
+            format!("{release_name}@v{version}")
+        } else {
+            format!("v{version}")
+        }
+    }
 }
 
 impl<G, M, RW, S, C> SagaStep for CreateTagsStep<G, M, RW, S, C>
@@ -765,17 +775,11 @@ where
             return Ok(input);
         }
 
-        let use_prefix = self.use_crate_prefix || self.tag_format == TagFormat::CratePrefixed;
-
         let mut tags = Vec::new();
         let mut created_tag_names: Vec<String> = Vec::new();
 
         for release in &input.planned_releases {
-            let tag_name = if use_prefix {
-                format!("{}@v{}", release.name, release.new_version)
-            } else {
-                format!("v{}", release.new_version)
-            };
+            let tag_name = self.format_tag_name(&release.name, &release.new_version);
 
             let tag_message = format!("Release {} v{}", release.name, release.new_version);
 
@@ -810,15 +814,9 @@ where
             return Ok(());
         }
 
-        let use_prefix = self.use_crate_prefix || self.tag_format == TagFormat::CratePrefixed;
-
         let mut failed_tags = Vec::new();
         for release in &input.planned_releases {
-            let tag_name = if use_prefix {
-                format!("{}@v{}", release.name, release.new_version)
-            } else {
-                format!("v{}", release.new_version)
-            };
+            let tag_name = self.format_tag_name(&release.name, &release.new_version);
             if ctx
                 .git_provider()
                 .delete_tag(ctx.project_root(), &tag_name)

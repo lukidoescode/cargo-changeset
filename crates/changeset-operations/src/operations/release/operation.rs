@@ -224,7 +224,7 @@ where
         use super::steps::ChangelogFileState;
         let mut backups = Vec::new();
 
-        match changelog_config.changelog {
+        match changelog_config.changelog() {
             ChangelogLocation::Root => {
                 let changelog_path = project_root.join("CHANGELOG.md");
                 let max_version = planned_releases
@@ -298,7 +298,7 @@ where
         let repo_info = self.resolve_repo_info(project_root, changelog_config)?;
         let mut changelog_updates = Vec::new();
 
-        match changelog_config.changelog {
+        match changelog_config.changelog() {
             ChangelogLocation::Root => {
                 let changelog_path = project_root.join("CHANGELOG.md");
                 let max_version = planned_releases
@@ -372,7 +372,7 @@ where
         project_root: &Path,
         changelog_config: &changeset_changelog::ChangelogConfig,
     ) -> Result<Option<RepositoryInfo>> {
-        match changelog_config.comparison_links {
+        match changelog_config.comparison_links() {
             ComparisonLinksSetting::Disabled => Ok(None),
             ComparisonLinksSetting::Auto => Ok(self.detect_repository_info(project_root)),
             ComparisonLinksSetting::Enabled => {
