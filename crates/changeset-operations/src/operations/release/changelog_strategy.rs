@@ -6,32 +6,32 @@ use chrono::NaiveDate;
 use indexmap::IndexMap;
 use semver::Version;
 
-use super::operation::ChangelogUpdate;
 use super::steps::ChangelogFileState;
+use super::types::ChangelogUpdate;
 use crate::Result;
 use crate::error::OperationError;
 use crate::operations::changelog_aggregation::ChangesetAggregator;
 use crate::traits::{ChangelogWriteResult, ChangelogWriter};
 use crate::types::PackageVersion;
 
-pub(crate) struct ChangelogCaptureContext<'a> {
-    pub(crate) project_root: &'a Path,
-    pub(crate) planned_releases: &'a [PackageVersion],
-    pub(crate) package_lookup: &'a IndexMap<String, PackageInfo>,
-    pub(crate) changelog_writer: &'a dyn ChangelogWriter,
+pub(super) struct ChangelogCaptureContext<'a> {
+    pub(super) project_root: &'a Path,
+    pub(super) planned_releases: &'a [PackageVersion],
+    pub(super) package_lookup: &'a IndexMap<String, PackageInfo>,
+    pub(super) changelog_writer: &'a dyn ChangelogWriter,
 }
 
-pub(crate) struct ChangelogGenerateContext<'a> {
-    pub(crate) project_root: &'a Path,
-    pub(crate) aggregator: &'a ChangesetAggregator,
-    pub(crate) planned_releases: &'a [PackageVersion],
-    pub(crate) package_lookup: &'a IndexMap<String, PackageInfo>,
-    pub(crate) repo_info: Option<&'a RepositoryInfo>,
-    pub(crate) today: NaiveDate,
-    pub(crate) changelog_writer: &'a dyn ChangelogWriter,
+pub(super) struct ChangelogGenerateContext<'a> {
+    pub(super) project_root: &'a Path,
+    pub(super) aggregator: &'a ChangesetAggregator,
+    pub(super) planned_releases: &'a [PackageVersion],
+    pub(super) package_lookup: &'a IndexMap<String, PackageInfo>,
+    pub(super) repo_info: Option<&'a RepositoryInfo>,
+    pub(super) today: NaiveDate,
+    pub(super) changelog_writer: &'a dyn ChangelogWriter,
 }
 
-pub(crate) trait ChangelogHandler {
+pub(super) trait ChangelogHandler {
     fn capture_state(&self, ctx: &ChangelogCaptureContext<'_>) -> Result<Vec<ChangelogFileState>>;
 
     fn generate_updates(&self, ctx: &ChangelogGenerateContext<'_>) -> Result<Vec<ChangelogUpdate>>;
@@ -40,7 +40,7 @@ pub(crate) trait ChangelogHandler {
 struct RootChangelogStrategy;
 struct PerPackageChangelogStrategy;
 
-pub(crate) fn strategy_for(location: ChangelogLocation) -> Box<dyn ChangelogHandler> {
+pub(super) fn strategy_for(location: ChangelogLocation) -> Box<dyn ChangelogHandler> {
     match location {
         ChangelogLocation::Root => Box::new(RootChangelogStrategy),
         ChangelogLocation::PerPackage => Box::new(PerPackageChangelogStrategy),
@@ -75,12 +75,12 @@ fn max_planned_version(planned_releases: &[PackageVersion]) -> Option<Version> {
         .cloned()
 }
 
-fn max_current_version(planned_releases: &[PackageVersion]) -> Option<String> {
+fn max_current_version(planned_releases: &[PackageVersion]) -> Option<Version> {
     planned_releases
         .iter()
         .map(|r| &r.current_version)
         .max()
-        .map(ToString::to_string)
+        .cloned()
 }
 
 impl ChangelogHandler for RootChangelogStrategy {
@@ -88,7 +88,7 @@ impl ChangelogHandler for RootChangelogStrategy {
         let mut backups = Vec::new();
         let changelog_path = ctx.project_root.join("CHANGELOG.md");
 
-        if let Some(version) = max_planned_version(ctx.planned_releases) {
+        if max_planned_version(ctx.planned_releases).is_some() {
             let file_existed = ctx.changelog_writer.changelog_exists(&changelog_path);
             let original_content = if file_existed {
                 Some(read_changelog_content(&changelog_path)?)
@@ -98,8 +98,6 @@ impl ChangelogHandler for RootChangelogStrategy {
 
             backups.push(ChangelogFileState {
                 path: changelog_path,
-                version,
-                package: None,
                 original_content,
                 file_existed,
             });
@@ -123,7 +121,7 @@ impl ChangelogHandler for RootChangelogStrategy {
                 .aggregator
                 .build_root_release(&version, ctx.today, &packages)
             {
-                let previous_tag = max_current_version(ctx.planned_releases);
+                let previous_tag = max_current_version(ctx.planned_releases).map(|v| v.to_string());
 
                 let result = ctx.changelog_writer.write_release(
                     &changelog_path,
@@ -156,8 +154,6 @@ impl ChangelogHandler for PerPackageChangelogStrategy {
 
                 backups.push(ChangelogFileState {
                     path: changelog_path,
-                    version: release.new_version.clone(),
-                    package: Some(release.name.clone()),
                     original_content,
                     file_existed,
                 });

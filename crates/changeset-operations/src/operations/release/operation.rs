@@ -1,15 +1,13 @@
-use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use changeset_changelog::{ComparisonLinksSetting, RepositoryInfo};
-use changeset_core::{PackageInfo, PrereleaseSpec};
-use changeset_project::{GraduationState, ProjectKind, TagFormat};
+use changeset_core::PackageInfo;
+use changeset_project::{ProjectKind, TagFormat};
 use changeset_saga::SagaBuilder;
 use chrono::Local;
 use indexmap::IndexMap;
-use semver::Version;
 
+use super::classifiers::{self, EarlyReturnDecision};
 use super::context::ReleaseSagaContext;
 use super::saga_data::{ReleaseSagaData, SagaReleaseOptions};
 use super::saga_steps::{
@@ -17,137 +15,20 @@ use super::saga_steps::{
     MarkChangesetsConsumedStep, RemoveWorkspaceVersionStep, RestoreChangelogsStep, StageFilesStep,
     UpdateDependencyVersionsStep, UpdateReleaseStateStep, WriteManifestVersionsStep,
 };
+use super::types::{
+    ChangelogUpdate, GitOptions, PrepareResult, ReleaseContext, ReleaseInput, ReleaseOutcome,
+    ReleaseOutput, ReleasePlan,
+};
 use super::validator::{ReleaseCliInput, ReleaseValidator};
 use crate::Result;
 use crate::error::OperationError;
 use crate::operations::changelog_aggregation::ChangesetAggregator;
 use crate::planner::VersionPlanner;
 use crate::traits::{
-    ChangelogWriter, ChangesetReader, ChangesetWriter, GitCommitProvider, GitDiffProvider,
-    GitStagingProvider, GitStatusProvider, GitTagProvider, InheritedVersionChecker,
-    ManifestDependencyWriter, ManifestVersionWriter, ProjectProvider, ReleaseStateIO,
-    WorkspaceVersionManager,
+    ChangelogWriter, ChangesetReader, ChangesetWriter, FullGitProvider, FullManifestWriter,
+    ProjectProvider, ReleaseStateIO,
 };
-use crate::types::{PackageReleaseConfig, PackageVersion};
-
-pub struct ReleaseInput {
-    pub dry_run: bool,
-    pub convert_inherited: bool,
-    pub no_commit: bool,
-    pub no_tags: bool,
-    pub keep_changesets: bool,
-    pub force: bool,
-    /// Per-package release configuration from CLI (merged with TOML state at execution).
-    pub per_package_config: HashMap<String, PackageReleaseConfig>,
-    pub global_prerelease: Option<PrereleaseSpec>,
-    /// Whether `--graduate` was passed without specific crates (single-package mode).
-    pub graduate_all: bool,
-}
-
-#[derive(Debug, Clone)]
-pub struct ChangelogUpdate {
-    pub path: PathBuf,
-    pub package: Option<String>,
-    pub version: Version,
-    pub created: bool,
-}
-
-#[derive(Debug, Clone)]
-pub struct CommitResult {
-    pub sha: String,
-    pub message: String,
-}
-
-#[derive(Debug, Clone)]
-pub struct TagResult {
-    pub name: String,
-    pub target_sha: String,
-}
-
-#[derive(Debug, Clone, Default)]
-pub struct GitOperationResult {
-    pub commit: Option<CommitResult>,
-    pub tags_created: Vec<TagResult>,
-    pub changesets_deleted: Vec<PathBuf>,
-}
-
-#[derive(Debug, Clone)]
-pub struct ReleaseOutput {
-    pub planned_releases: Vec<PackageVersion>,
-    pub unchanged_packages: Vec<String>,
-    pub changesets_consumed: Vec<PathBuf>,
-    pub changelog_updates: Vec<ChangelogUpdate>,
-    pub git_result: Option<GitOperationResult>,
-}
-
-#[derive(Debug)]
-pub enum ReleaseOutcome {
-    DryRun(ReleaseOutput),
-    Executed(ReleaseOutput),
-    NoChangesets,
-}
-
-struct GitOptions {
-    should_commit: bool,
-    should_create_tags: bool,
-    should_delete_changesets: bool,
-}
-
-struct ReleaseContext {
-    project: changeset_project::CargoProject,
-    root_config: changeset_project::RootChangesetConfig,
-    changeset_dir: PathBuf,
-    changeset_files: Vec<PathBuf>,
-    prerelease_state: Option<changeset_project::PrereleaseState>,
-    graduation_state: Option<GraduationState>,
-    per_package_config: HashMap<String, PackageReleaseConfig>,
-    is_prerelease_graduation: bool,
-    is_graduating: bool,
-    is_prerelease_release: bool,
-    git_options: GitOptions,
-    inherited_packages: Vec<String>,
-    early_return: Option<Result<ReleaseOutcome>>,
-}
-
-struct ReleasePlan {
-    output: ReleaseOutput,
-    planned_releases: Vec<PackageVersion>,
-    package_lookup: IndexMap<String, PackageInfo>,
-    changelog_backups: Vec<super::steps::ChangelogFileState>,
-}
-
-fn is_any_prerelease_configured(
-    input: &ReleaseInput,
-    per_package_config: &HashMap<String, PackageReleaseConfig>,
-) -> bool {
-    input.global_prerelease.is_some() || per_package_config.values().any(|c| c.prerelease.is_some())
-}
-
-fn is_prerelease_graduation(
-    packages: &[PackageInfo],
-    per_package_config: &HashMap<String, PackageReleaseConfig>,
-) -> bool {
-    if per_package_config.values().any(|c| c.prerelease.is_some()) {
-        return false;
-    }
-    packages
-        .iter()
-        .any(|p| changeset_version::is_prerelease(&p.version))
-}
-
-fn is_zero_graduation(
-    packages: &[PackageInfo],
-    input: &ReleaseInput,
-    per_package_config: &HashMap<String, PackageReleaseConfig>,
-) -> bool {
-    let has_graduation = input.graduate_all || per_package_config.values().any(|c| c.graduate_zero);
-    if !has_graduation {
-        return false;
-    }
-    packages
-        .iter()
-        .any(|p| changeset_version::is_zero_version(&p.version))
-}
+use crate::types::PackageVersion;
 
 pub struct ReleaseOperation<P, RW, M, C, G, S> {
     project_provider: P,
@@ -173,22 +54,9 @@ impl<P, RW, M, C, G, S> ReleaseOperation<P, RW, M, C, G, S>
 where
     P: ProjectProvider,
     RW: ChangesetReader + ChangesetWriter + Send + Sync + 'static,
-    M: ManifestVersionWriter
-        + ManifestDependencyWriter
-        + WorkspaceVersionManager
-        + InheritedVersionChecker
-        + Send
-        + Sync
-        + 'static,
+    M: FullManifestWriter + Send + Sync + 'static,
     C: ChangelogWriter + Clone + Send + Sync + 'static,
-    G: GitDiffProvider
-        + GitStatusProvider
-        + GitStagingProvider
-        + GitCommitProvider
-        + GitTagProvider
-        + Send
-        + Sync
-        + 'static,
+    G: FullGitProvider + Send + Sync + 'static,
     S: ReleaseStateIO + Send + Sync + 'static,
 {
     pub fn new(
@@ -207,19 +75,6 @@ where
             git_provider: Arc::new(git_provider),
             release_state_io: Arc::new(release_state_io),
         }
-    }
-
-    fn find_packages_with_inherited_versions(
-        &self,
-        packages: &[PackageInfo],
-    ) -> Result<Vec<String>> {
-        self.manifest_writer
-            .find_packages_with_inherited_versions(packages)
-    }
-
-    fn detect_repository_info(&self, project_root: &Path) -> Option<RepositoryInfo> {
-        let url = self.git_provider.remote_url(project_root).ok()??;
-        RepositoryInfo::from_url(&url).ok()
     }
 
     fn capture_changelog_state(
@@ -248,7 +103,11 @@ where
         package_lookup: &IndexMap<String, PackageInfo>,
     ) -> Result<Vec<ChangelogUpdate>> {
         let today = Local::now().date_naive();
-        let repo_info = self.resolve_repo_info(project_root, changelog_config)?;
+        let repo_info = super::loading::resolve_repo_info(
+            self.git_provider.as_ref(),
+            project_root,
+            changelog_config,
+        )?;
         let ctx = super::changelog_strategy::ChangelogGenerateContext {
             project_root,
             aggregator,
@@ -259,24 +118,6 @@ where
             changelog_writer: &self.changelog_writer,
         };
         strategy.generate_updates(&ctx)
-    }
-
-    fn resolve_repo_info(
-        &self,
-        project_root: &Path,
-        changelog_config: &changeset_changelog::ChangelogConfig,
-    ) -> Result<Option<RepositoryInfo>> {
-        match changelog_config.comparison_links() {
-            ComparisonLinksSetting::Disabled => Ok(None),
-            ComparisonLinksSetting::Auto => Ok(self.detect_repository_info(project_root)),
-            ComparisonLinksSetting::Enabled => {
-                let repo_info = self.detect_repository_info(project_root);
-                if repo_info.is_none() {
-                    return Err(OperationError::ComparisonLinksRequired);
-                }
-                Ok(repo_info)
-            }
-        }
     }
 
     fn validate_working_tree(
@@ -299,7 +140,9 @@ where
         packages: &[PackageInfo],
         convert_inherited: bool,
     ) -> Result<Vec<String>> {
-        let inherited_packages = self.find_packages_with_inherited_versions(packages)?;
+        let inherited_packages = self
+            .manifest_writer
+            .find_packages_with_inherited_versions(packages)?;
         if !inherited_packages.is_empty() && !convert_inherited {
             return Err(OperationError::InheritedVersionsRequireConvert {
                 packages: inherited_packages,
@@ -308,53 +151,15 @@ where
         Ok(inherited_packages)
     }
 
-    fn load_changesets(
-        &self,
-        changeset_dir: &Path,
-        changeset_files: &[PathBuf],
-    ) -> Result<(Vec<changeset_core::Changeset>, ChangesetAggregator)> {
-        let mut changesets = Vec::new();
-        let mut aggregator = ChangesetAggregator::new();
-
-        for path in changeset_files {
-            let changeset = self.changeset_io.read_changeset(path)?;
-            aggregator.add_changeset(&changeset);
-            changesets.push(changeset);
-        }
-
-        let consumed_paths = self.changeset_io.list_consumed_changesets(changeset_dir)?;
-        for path in &consumed_paths {
-            let changeset = self.changeset_io.read_changeset(path)?;
-            aggregator.add_changeset(&changeset);
-        }
-
-        Ok((changesets, aggregator))
-    }
-
-    fn collect_unchanged_packages(
-        packages: &[PackageInfo],
-        planned_releases: &[PackageVersion],
-    ) -> Vec<String> {
-        let packages_with_releases: std::collections::HashSet<_> =
-            planned_releases.iter().map(|r| r.name.clone()).collect();
-
-        packages
-            .iter()
-            .filter(|p| !packages_with_releases.contains(&p.name))
-            .map(|p| p.name.clone())
-            .collect()
-    }
-
     /// # Errors
     ///
     /// Propagates errors from project discovery, changeset parsing, version
     /// planning, changelog generation, and git operations.
     pub fn execute(&self, start_path: &Path, input: &ReleaseInput) -> Result<ReleaseOutcome> {
-        let context = self.prepare_release_context(start_path, input)?;
-
-        if let Some(early_return) = context.early_return {
-            return early_return;
-        }
+        let context = match self.prepare_release_context(start_path, input)? {
+            PrepareResult::Ready(ctx) => ctx,
+            PrepareResult::EarlyReturn(outcome) => return Ok(outcome),
+        };
 
         let plan = self.plan_release(&context, input.dry_run)?;
 
@@ -369,7 +174,7 @@ where
         &self,
         start_path: &Path,
         input: &ReleaseInput,
-    ) -> Result<ReleaseContext> {
+    ) -> Result<PrepareResult> {
         let project = self.project_provider.discover_project(start_path)?;
         let (root_config, _) = self.project_provider.load_configs(&project)?;
 
@@ -383,7 +188,7 @@ where
             .release_state_io
             .load_graduation_state(&changeset_dir)?;
 
-        let cli_input = Self::build_cli_input(input);
+        let cli_input = ReleaseCliInput::from(input);
         let validated_config = ReleaseValidator::validate(
             &cli_input,
             prerelease_state.as_ref(),
@@ -395,12 +200,20 @@ where
         let per_package_config = validated_config.per_package;
 
         let is_prerelease_graduation =
-            is_prerelease_graduation(&project.packages, &per_package_config);
-        let is_zero_graduation = is_zero_graduation(&project.packages, input, &per_package_config);
+            classifiers::is_prerelease_graduation(&project.packages, &per_package_config);
+        let is_zero_graduation =
+            classifiers::is_zero_graduation(&project.packages, input, &per_package_config);
         let is_graduating = is_prerelease_graduation || is_zero_graduation;
 
-        let early_return =
-            Self::check_early_return(&changeset_files, is_graduating, input, &per_package_config);
+        match classifiers::check_early_return(&changeset_files, is_graduating, input, &per_package_config) {
+            EarlyReturnDecision::NoChangesets => {
+                return Ok(PrepareResult::EarlyReturn(ReleaseOutcome::NoChangesets));
+            }
+            EarlyReturnDecision::NeedsForce => {
+                return Err(OperationError::NoChangesetsWithoutForce);
+            }
+            EarlyReturnDecision::Continue => {}
+        }
 
         let git_config = root_config.git_config();
         let git_options = GitOptions {
@@ -408,13 +221,13 @@ where
             should_create_tags: !input.no_tags && git_config.tags(),
             should_delete_changesets: !input.keep_changesets && !git_config.keep_changesets(),
         };
-        let is_prerelease_release = is_any_prerelease_configured(input, &per_package_config);
+        let is_prerelease_release = classifiers::is_any_prerelease_configured(input, &per_package_config);
 
         self.validate_working_tree(&project.root, git_options.should_commit, input.dry_run)?;
         let inherited_packages =
             self.check_inherited_versions(&project.packages, input.convert_inherited)?;
 
-        Ok(ReleaseContext {
+        Ok(PrepareResult::Ready(ReleaseContext {
             project,
             root_config,
             changeset_dir,
@@ -427,28 +240,15 @@ where
             is_prerelease_release,
             git_options,
             inherited_packages,
-            early_return,
-        })
-    }
-
-    fn check_early_return(
-        changeset_files: &[PathBuf],
-        is_graduating: bool,
-        input: &ReleaseInput,
-        per_package_config: &HashMap<String, PackageReleaseConfig>,
-    ) -> Option<Result<ReleaseOutcome>> {
-        if changeset_files.is_empty() && !is_graduating {
-            if is_any_prerelease_configured(input, per_package_config) && !input.force {
-                return Some(Err(OperationError::NoChangesetsWithoutForce));
-            }
-            return Some(Ok(ReleaseOutcome::NoChangesets));
-        }
-        None
+        }))
     }
 
     fn plan_release(&self, context: &ReleaseContext, dry_run: bool) -> Result<ReleasePlan> {
-        let (changesets, aggregator) =
-            self.load_changesets(&context.changeset_dir, &context.changeset_files)?;
+        let (changesets, aggregator) = super::loading::load_changesets(
+            self.changeset_io.as_ref(),
+            &context.changeset_dir,
+            &context.changeset_files,
+        )?;
 
         let planned_releases = if context.is_prerelease_graduation {
             VersionPlanner::plan_graduation(&context.project.packages)?.releases
@@ -470,7 +270,7 @@ where
             .collect();
 
         let unchanged_packages =
-            Self::collect_unchanged_packages(&context.project.packages, &planned_releases);
+            classifiers::collect_unchanged_packages(&context.project.packages, &planned_releases);
 
         let (changelog_updates, changelog_backups) = if dry_run {
             (Vec::new(), Vec::new())
@@ -496,7 +296,7 @@ where
         };
 
         let output = ReleaseOutput {
-            planned_releases: planned_releases.clone(),
+            planned_releases,
             unchanged_packages,
             changesets_consumed: context.changeset_files.clone(),
             changelog_updates,
@@ -505,7 +305,6 @@ where
 
         Ok(ReleasePlan {
             output,
-            planned_releases,
             package_lookup,
             changelog_backups,
         })
@@ -525,7 +324,7 @@ where
         let saga_data = ReleaseSagaData::new(
             context.changeset_dir.clone(),
             context.project.root.join("Cargo.toml"),
-            plan.planned_releases.clone(),
+            plan.output.planned_releases.clone(),
             package_paths,
             plan.output.changelog_updates.clone(),
             context.changeset_files.clone(),
@@ -608,39 +407,18 @@ where
             Arc::new(self.changelog_writer.clone()),
         )
     }
-
-    fn build_cli_input(input: &ReleaseInput) -> ReleaseCliInput {
-        ReleaseCliInput {
-            cli_prerelease: input
-                .per_package_config
-                .iter()
-                .filter_map(|(name, config)| {
-                    config
-                        .prerelease
-                        .as_ref()
-                        .map(|spec| (name.clone(), spec.clone()))
-                })
-                .collect(),
-            global_prerelease: input.global_prerelease.clone(),
-            cli_graduate: input
-                .per_package_config
-                .iter()
-                .filter(|(_, config)| config.graduate_zero)
-                .map(|(name, _)| name.clone())
-                .collect(),
-            graduate_all: input.graduate_all,
-        }
-    }
 }
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashMap;
+
     use super::*;
     use crate::mocks::{
         MockChangelogWriter, MockChangesetReader, MockGitProvider, MockManifestWriter,
         MockProjectProvider, MockReleaseStateIO, make_changeset,
     };
-    use changeset_core::BumpType;
+    use changeset_core::{BumpType, PrereleaseSpec};
 
     fn default_input() -> ReleaseInput {
         ReleaseInput {
@@ -664,13 +442,7 @@ mod tests {
     where
         P: ProjectProvider,
         RW: ChangesetReader + ChangesetWriter + Send + Sync + 'static,
-        M: ManifestVersionWriter
-            + ManifestDependencyWriter
-            + WorkspaceVersionManager
-            + InheritedVersionChecker
-            + Send
-            + Sync
-            + 'static,
+        M: FullManifestWriter + Send + Sync + 'static,
     {
         ReleaseOperation::new(
             project_provider,

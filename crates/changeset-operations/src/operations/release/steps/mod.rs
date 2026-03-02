@@ -2,7 +2,6 @@ use std::path::PathBuf;
 
 use changeset_core::Changeset;
 use changeset_project::{GraduationState, PrereleaseState};
-use semver::Version;
 
 #[derive(Debug, Clone)]
 pub struct ChangesetFileState {
@@ -14,8 +13,6 @@ pub struct ChangesetFileState {
 #[derive(Debug, Clone)]
 pub struct ChangelogFileState {
     pub path: PathBuf,
-    pub version: Version,
-    pub package: Option<String>,
     pub original_content: Option<String>,
     pub file_existed: bool,
 }

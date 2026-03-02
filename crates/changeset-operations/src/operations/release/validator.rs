@@ -4,19 +4,41 @@ use changeset_core::{PackageInfo, PrereleaseSpec};
 use changeset_project::{GraduationState, PrereleaseState, ProjectKind};
 use changeset_version::{is_prerelease, is_zero_version};
 
+use super::types::ReleaseInput;
 use crate::types::PackageReleaseConfig;
 
 /// Input from CLI for validation.
 #[derive(Debug, Clone, Default)]
 pub struct ReleaseCliInput {
-    /// Per-package prerelease from --prerelease crate:tag
     pub cli_prerelease: HashMap<String, PrereleaseSpec>,
-    /// Global prerelease tag (applies to all packages)
     pub global_prerelease: Option<PrereleaseSpec>,
-    /// Packages to graduate from --graduate crate
     pub cli_graduate: HashSet<String>,
-    /// Whether --graduate was passed without specific crates
     pub graduate_all: bool,
+}
+
+impl From<&ReleaseInput> for ReleaseCliInput {
+    fn from(input: &ReleaseInput) -> Self {
+        Self {
+            cli_prerelease: input
+                .per_package_config
+                .iter()
+                .filter_map(|(name, config)| {
+                    config
+                        .prerelease
+                        .as_ref()
+                        .map(|spec| (name.clone(), spec.clone()))
+                })
+                .collect(),
+            global_prerelease: input.global_prerelease.clone(),
+            cli_graduate: input
+                .per_package_config
+                .iter()
+                .filter(|(_, config)| config.graduate_zero)
+                .map(|(name, _)| name.clone())
+                .collect(),
+            graduate_all: input.graduate_all,
+        }
+    }
 }
 
 /// A single validation error with actionable tip.

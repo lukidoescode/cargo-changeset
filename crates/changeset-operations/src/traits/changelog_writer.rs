@@ -13,7 +13,7 @@ pub struct ChangelogWriteResult {
 pub trait ChangelogWriter: Send + Sync {
     /// # Errors
     ///
-    /// Returns an error if the changelog cannot be read or written.
+    /// Propagates changelog read/write errors.
     fn write_release(
         &self,
         changelog_path: &Path,
@@ -26,11 +26,11 @@ pub trait ChangelogWriter: Send + Sync {
 
     /// # Errors
     ///
-    /// Returns an error if the changelog cannot be restored.
+    /// Propagates write errors.
     fn restore_changelog(&self, path: &Path, content: &str) -> Result<()>;
 
     /// # Errors
     ///
-    /// Returns an error if the changelog cannot be deleted.
+    /// Propagates deletion errors.
     fn delete_changelog(&self, path: &Path) -> Result<()>;
 }

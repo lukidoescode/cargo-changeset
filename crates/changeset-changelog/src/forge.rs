@@ -4,7 +4,6 @@ use crate::error::ChangelogError;
 
 pub(crate) trait ForgeStrategy: Send + Sync + std::fmt::Debug {
     fn name(&self) -> &'static str;
-    /// Caller must pass a lowercase host string.
     fn matches_host(&self, host: &str) -> bool;
     fn comparison_url(
         &self,
@@ -25,6 +24,7 @@ impl ForgeStrategy for GitHub {
     }
 
     fn matches_host(&self, host: &str) -> bool {
+        let host = host.to_ascii_lowercase();
         host == "github.com" || host.ends_with(".github.com")
     }
 
@@ -49,6 +49,7 @@ impl ForgeStrategy for GitLab {
     }
 
     fn matches_host(&self, host: &str) -> bool {
+        let host = host.to_ascii_lowercase();
         host == "gitlab.com" || host.starts_with("gitlab.") || host.contains(".gitlab.")
     }
 
@@ -73,6 +74,7 @@ impl ForgeStrategy for Bitbucket {
     }
 
     fn matches_host(&self, host: &str) -> bool {
+        let host = host.to_ascii_lowercase();
         host == "bitbucket.org" || host.ends_with(".bitbucket.org")
     }
 
@@ -97,6 +99,7 @@ impl ForgeStrategy for Gitea {
     }
 
     fn matches_host(&self, host: &str) -> bool {
+        let host = host.to_ascii_lowercase();
         host == "codeberg.org" || host.starts_with("gitea.")
     }
 
@@ -121,6 +124,7 @@ impl ForgeStrategy for SourceHut {
     }
 
     fn matches_host(&self, host: &str) -> bool {
+        let host = host.to_ascii_lowercase();
         host == "git.sr.ht" || host.ends_with(".sr.ht")
     }
 
@@ -138,13 +142,8 @@ impl ForgeStrategy for SourceHut {
 
 static FORGES: &[&dyn ForgeStrategy] = &[&GitHub, &GitLab, &Bitbucket, &Gitea, &SourceHut];
 
-fn detect_forge(host: &str) -> &'static dyn ForgeStrategy {
-    let host_lower = host.to_lowercase();
-    FORGES
-        .iter()
-        .find(|f| f.matches_host(&host_lower))
-        .copied()
-        .unwrap_or(&GitHub)
+fn detect_forge(host: &str) -> Option<&'static dyn ForgeStrategy> {
+    FORGES.iter().find(|f| f.matches_host(host)).copied()
 }
 
 pub struct RepositoryInfo {
@@ -188,8 +187,6 @@ impl PartialEq for RepositoryInfo {
 impl Eq for RepositoryInfo {}
 
 impl RepositoryInfo {
-    /// Parses a remote repository URL to detect the hosting platform and extract owner/repo segments.
-    ///
     /// # Errors
     ///
     /// Fails if the URL cannot be parsed or is missing required path segments.
@@ -199,12 +196,11 @@ impl RepositoryInfo {
             source,
         })?;
 
-        let host = url.host_str().ok_or_else(|| ChangelogError::UrlParse {
+        let host = url.host_str().ok_or_else(|| ChangelogError::MissingHost {
             url: url_str.to_string(),
-            source: url::ParseError::EmptyHost,
         })?;
 
-        let forge = detect_forge(host);
+        let forge = detect_forge(host).unwrap_or(&GitHub);
         let (owner, repo) = extract_owner_repo(&url)?;
 
         let base_url = Url::parse(&format!("{}://{}", url.scheme(), host)).map_err(|source| {

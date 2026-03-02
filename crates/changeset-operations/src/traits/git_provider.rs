@@ -4,10 +4,20 @@ use changeset_git::{CommitInfo, FileChange, TagInfo};
 
 use crate::Result;
 
+pub trait FullGitProvider:
+    GitDiffProvider + GitStatusProvider + GitStagingProvider + GitCommitProvider + GitTagProvider
+{
+}
+impl<
+    T: GitDiffProvider + GitStatusProvider + GitStagingProvider + GitCommitProvider + GitTagProvider,
+> FullGitProvider for T
+{
+}
+
 pub trait GitDiffProvider: Send + Sync {
     /// # Errors
     ///
-    /// Returns an error if the repository cannot be opened or diff fails.
+    /// Propagates repository or diff errors.
     fn changed_files(&self, project_root: &Path, base: &str, head: &str)
     -> Result<Vec<FileChange>>;
 }
@@ -15,24 +25,24 @@ pub trait GitDiffProvider: Send + Sync {
 pub trait GitStatusProvider: Send + Sync {
     /// # Errors
     ///
-    /// Returns an error if the repository cannot be opened or status check fails.
+    /// Propagates repository errors.
     fn is_working_tree_clean(&self, project_root: &Path) -> Result<bool>;
 
     /// # Errors
     ///
-    /// Returns an error if the repository cannot be opened or HEAD is detached.
+    /// Propagates repository errors.
     fn current_branch(&self, project_root: &Path) -> Result<String>;
 
     /// # Errors
     ///
-    /// Returns an error if the repository cannot be opened.
+    /// Propagates repository errors.
     fn remote_url(&self, project_root: &Path) -> Result<Option<String>>;
 }
 
 pub trait GitStagingProvider: Send + Sync {
     /// # Errors
     ///
-    /// Returns an error if staging any of the files fails.
+    /// Propagates staging errors.
     fn stage_files(&self, project_root: &Path, paths: &[&Path]) -> Result<()>;
 
     /// Deletes files from the filesystem and stages the deletions in git.
@@ -42,17 +52,14 @@ pub trait GitStagingProvider: Send + Sync {
     ///
     /// # Errors
     ///
-    /// Returns an error if:
-    /// - Any file in `paths` does not exist
-    /// - Any file cannot be deleted (permissions, in use, etc.)
-    /// - The git index cannot be updated to stage the deletion
+    /// Propagates filesystem or staging errors.
     fn delete_files(&self, project_root: &Path, paths: &[&Path]) -> Result<()>;
 }
 
 pub trait GitCommitProvider: Send + Sync {
     /// # Errors
     ///
-    /// Returns an error if the commit cannot be created.
+    /// Propagates commit errors.
     fn commit(&self, project_root: &Path, message: &str) -> Result<CommitInfo>;
 
     /// Performs a soft reset to the parent of HEAD (HEAD~1).
@@ -61,25 +68,20 @@ pub trait GitCommitProvider: Send + Sync {
     ///
     /// # Errors
     ///
-    /// Returns an error if:
-    /// - HEAD cannot be resolved
-    /// - HEAD has no parent (initial commit)
-    /// - The reset operation fails
+    /// Propagates reset errors, including when HEAD has no parent.
     fn reset_to_parent(&self, project_root: &Path) -> Result<()>;
 }
 
 pub trait GitTagProvider: Send + Sync {
     /// # Errors
     ///
-    /// Returns an error if the tag cannot be created or already exists.
+    /// Propagates tag creation errors, including when the tag already exists.
     fn create_tag(&self, project_root: &Path, tag_name: &str, message: &str) -> Result<TagInfo>;
 
-    /// Deletes a tag by name.
-    ///
     /// Returns `Ok(true)` if the tag was deleted, `Ok(false)` if the tag was not found.
     ///
     /// # Errors
     ///
-    /// Returns an error if the delete operation fails for reasons other than "not found".
+    /// Propagates errors other than "tag not found".
     fn delete_tag(&self, project_root: &Path, tag_name: &str) -> Result<bool>;
 }
