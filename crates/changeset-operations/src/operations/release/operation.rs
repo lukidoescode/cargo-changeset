@@ -16,8 +16,8 @@ use super::saga_steps::{
     UpdateDependencyVersionsStep, UpdateReleaseStateStep, WriteManifestVersionsStep,
 };
 use super::types::{
-    ChangelogUpdate, GitOptions, PrepareResult, ReleaseContext, ReleaseInput, ReleaseOutcome,
-    ReleaseOutput, ReleasePlan,
+    ChangelogUpdate, GitOptions, PrepareResult, ReleaseClassification, ReleaseContext,
+    ReleaseInput, ReleaseOutcome, ReleaseOutput, ReleasePlan,
 };
 use super::validator::{ReleaseCliInput, ReleaseValidator};
 use crate::Result;
@@ -34,7 +34,7 @@ pub struct ReleaseOperation<P, RW, M, C, G, S> {
     project_provider: P,
     changeset_io: Arc<RW>,
     manifest_writer: Arc<M>,
-    changelog_writer: C,
+    changelog_writer: Arc<C>,
     git_provider: Arc<G>,
     release_state_io: Arc<S>,
 }
@@ -55,7 +55,7 @@ where
     P: ProjectProvider,
     RW: ChangesetReader + ChangesetWriter + Send + Sync + 'static,
     M: FullManifestWriter + Send + Sync + 'static,
-    C: ChangelogWriter + Clone + Send + Sync + 'static,
+    C: ChangelogWriter + Send + Sync + 'static,
     G: FullGitProvider + Send + Sync + 'static,
     S: ReleaseStateIO + Send + Sync + 'static,
 {
@@ -71,7 +71,7 @@ where
             project_provider,
             changeset_io: Arc::new(changeset_io),
             manifest_writer: Arc::new(manifest_writer),
-            changelog_writer,
+            changelog_writer: Arc::new(changelog_writer),
             git_provider: Arc::new(git_provider),
             release_state_io: Arc::new(release_state_io),
         }
@@ -83,12 +83,12 @@ where
         strategy: &dyn super::changelog_strategy::ChangelogHandler,
         planned_releases: &[PackageVersion],
         package_lookup: &IndexMap<String, PackageInfo>,
-    ) -> Result<Vec<super::steps::ChangelogFileState>> {
+    ) -> Result<Vec<super::types::ChangelogFileState>> {
         let ctx = super::changelog_strategy::ChangelogCaptureContext {
             project_root,
             planned_releases,
             package_lookup,
-            changelog_writer: &self.changelog_writer,
+            changelog_writer: self.changelog_writer.as_ref(),
         };
         strategy.capture_state(&ctx)
     }
@@ -115,7 +115,7 @@ where
             package_lookup,
             repo_info: repo_info.as_ref(),
             today,
-            changelog_writer: &self.changelog_writer,
+            changelog_writer: self.changelog_writer.as_ref(),
         };
         strategy.generate_updates(&ctx)
     }
@@ -197,7 +197,7 @@ where
             &project.kind,
         )?;
 
-        let per_package_config = validated_config.per_package;
+        let per_package_config = validated_config.into_per_package();
 
         let is_prerelease_graduation =
             classifiers::is_prerelease_graduation(&project.packages, &per_package_config);
@@ -205,11 +205,16 @@ where
             classifiers::is_zero_graduation(&project.packages, input, &per_package_config);
         let is_graduating = is_prerelease_graduation || is_zero_graduation;
 
-        match classifiers::check_early_return(&changeset_files, is_graduating, input, &per_package_config) {
+        match classifiers::check_early_return(
+            &changeset_files,
+            is_graduating,
+            input,
+            &per_package_config,
+        ) {
             EarlyReturnDecision::NoChangesets => {
                 return Ok(PrepareResult::EarlyReturn(ReleaseOutcome::NoChangesets));
             }
-            EarlyReturnDecision::NeedsForce => {
+            EarlyReturnDecision::ForceRequired => {
                 return Err(OperationError::NoChangesetsWithoutForce);
             }
             EarlyReturnDecision::Continue => {}
@@ -221,7 +226,8 @@ where
             should_create_tags: !input.no_tags && git_config.tags(),
             should_delete_changesets: !input.keep_changesets && !git_config.keep_changesets(),
         };
-        let is_prerelease_release = classifiers::is_any_prerelease_configured(input, &per_package_config);
+        let is_prerelease_release =
+            classifiers::is_any_prerelease_configured(input, &per_package_config);
 
         self.validate_working_tree(&project.root, git_options.should_commit, input.dry_run)?;
         let inherited_packages =
@@ -235,9 +241,11 @@ where
             prerelease_state,
             graduation_state,
             per_package_config,
-            is_prerelease_graduation,
-            is_graduating,
-            is_prerelease_release,
+            classification: ReleaseClassification {
+                is_prerelease_graduation,
+                is_graduating,
+                is_prerelease_release,
+            },
             git_options,
             inherited_packages,
         }))
@@ -250,7 +258,7 @@ where
             &context.changeset_files,
         )?;
 
-        let planned_releases = if context.is_prerelease_graduation {
+        let planned_releases = if context.classification.is_prerelease_graduation {
             VersionPlanner::plan_graduation(&context.project.packages)?.releases
         } else {
             VersionPlanner::plan_releases_per_package(
@@ -330,9 +338,9 @@ where
             context.changeset_files.clone(),
         )
         .with_options(SagaReleaseOptions {
-            is_prerelease_release: context.is_prerelease_release,
-            is_graduating: context.is_graduating,
-            is_prerelease_graduation: context.is_prerelease_graduation,
+            is_prerelease_release: context.classification.is_prerelease_release,
+            is_graduating: context.classification.is_graduating,
+            is_prerelease_graduation: context.classification.is_prerelease_graduation,
             should_commit: context.git_options.should_commit,
             should_create_tags: context.git_options.should_create_tags,
             should_delete_changesets: context.git_options.should_delete_changesets,
@@ -404,7 +412,7 @@ where
             Arc::clone(&self.manifest_writer),
             Arc::clone(&self.changeset_io),
             Arc::clone(&self.release_state_io),
-            Arc::new(self.changelog_writer.clone()),
+            Arc::clone(&self.changelog_writer),
         )
     }
 }

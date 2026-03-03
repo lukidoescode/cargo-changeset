@@ -13,15 +13,20 @@ pub struct Git2Provider {
 }
 
 impl Git2Provider {
-    #[must_use]
-    pub fn new(project_root: &Path) -> Self {
-        let canonical = project_root
-            .canonicalize()
-            .unwrap_or_else(|_| project_root.to_path_buf());
-        Self {
+    /// # Errors
+    ///
+    /// Fails if the project root path cannot be canonicalized.
+    pub fn new(project_root: &Path) -> crate::Result<Self> {
+        let canonical = project_root.canonicalize().map_err(|source| {
+            crate::OperationError::ProjectRootCanonicalize {
+                path: project_root.to_path_buf(),
+                source,
+            }
+        })?;
+        Ok(Self {
             project_root: canonical,
             repo: Mutex::new(None),
-        }
+        })
     }
 
     fn with_repo<T>(
@@ -29,9 +34,12 @@ impl Git2Provider {
         project_root: &Path,
         f: impl FnOnce(&Repository) -> changeset_git::Result<T>,
     ) -> crate::Result<T> {
-        let canonical = project_root
-            .canonicalize()
-            .unwrap_or_else(|_| project_root.to_path_buf());
+        let canonical = project_root.canonicalize().map_err(|source| {
+            crate::OperationError::ProjectRootCanonicalize {
+                path: project_root.to_path_buf(),
+                source,
+            }
+        })?;
         if canonical != self.project_root {
             return Err(crate::OperationError::ProjectRootMismatch {
                 expected: self.project_root.clone(),

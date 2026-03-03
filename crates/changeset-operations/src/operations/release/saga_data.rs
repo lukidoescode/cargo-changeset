@@ -4,9 +4,8 @@ use changeset_project::{GraduationState, PrereleaseState};
 use indexmap::IndexMap;
 use semver::Version;
 
-use super::steps::{
-    ChangelogFileState, ChangesetFileState, GraduationStateUpdate, PrereleaseStateUpdate,
-};
+use super::steps::{GraduationStateUpdate, PrereleaseStateUpdate};
+use super::types::{ChangelogFileState, ChangesetFileState};
 use super::{ChangelogUpdate, CommitResult, GitOperationResult, TagResult};
 use crate::types::PackageVersion;
 

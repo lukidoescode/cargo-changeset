@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 
-use changeset_core::{PackageInfo, PrereleaseSpec};
+use changeset_core::{Changeset, PackageInfo, PrereleaseSpec};
 use changeset_project::GraduationState;
 use indexmap::IndexMap;
 use semver::Version;
@@ -74,6 +74,13 @@ pub(super) enum PrepareResult {
     EarlyReturn(ReleaseOutcome),
 }
 
+#[derive(Debug, Clone, Copy)]
+pub(super) struct ReleaseClassification {
+    pub(super) is_prerelease_graduation: bool,
+    pub(super) is_graduating: bool,
+    pub(super) is_prerelease_release: bool,
+}
+
 pub(super) struct ReleaseContext {
     pub(super) project: changeset_project::CargoProject,
     pub(super) root_config: changeset_project::RootChangesetConfig,
@@ -82,15 +89,27 @@ pub(super) struct ReleaseContext {
     pub(super) prerelease_state: Option<changeset_project::PrereleaseState>,
     pub(super) graduation_state: Option<GraduationState>,
     pub(super) per_package_config: HashMap<String, PackageReleaseConfig>,
-    pub(super) is_prerelease_graduation: bool,
-    pub(super) is_graduating: bool,
-    pub(super) is_prerelease_release: bool,
+    pub(super) classification: ReleaseClassification,
     pub(super) git_options: GitOptions,
     pub(super) inherited_packages: Vec<String>,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct ChangelogFileState {
+    pub(crate) path: PathBuf,
+    pub(crate) original_content: Option<String>,
+    pub(crate) file_existed: bool,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct ChangesetFileState {
+    pub(crate) path: PathBuf,
+    pub(crate) original_consumed_status: Option<String>,
+    pub(crate) backup: Option<Changeset>,
 }
 
 pub(super) struct ReleasePlan {
     pub(super) output: ReleaseOutput,
     pub(super) package_lookup: IndexMap<String, PackageInfo>,
-    pub(super) changelog_backups: Vec<super::steps::ChangelogFileState>,
+    pub(super) changelog_backups: Vec<ChangelogFileState>,
 }

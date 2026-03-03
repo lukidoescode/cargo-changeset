@@ -10,8 +10,6 @@ use crate::traits::{
     ProjectContext, ProjectProvider, VersionSettingsInput,
 };
 
-/// Input for the init operation.
-///
 /// Configuration sources have the following precedence (highest to lowest):
 /// 1. `defaults: true` - Uses all default values, ignores other fields
 /// 2. Explicit `git_config`, `changelog_config`, `version_config` fields
@@ -24,7 +22,6 @@ pub struct InitInput {
     pub version_config: Option<VersionSettingsInput>,
 }
 
-/// A preview of what the init operation will do, without performing any changes.
 #[derive(Debug)]
 pub struct InitPlan {
     pub changeset_dir: PathBuf,
@@ -167,27 +164,7 @@ where
     }
 
     fn build_config(&self, input: &InitInput, context: ProjectContext) -> Result<InitConfig> {
-        if input.defaults {
-            return Ok(build_default_config(context));
-        }
-
-        let mut config = InitConfig::default();
-
-        if let Some(ref git) = input.git_config {
-            config.commit = Some(git.commit);
-            config.tags = Some(git.tags);
-            config.keep_changesets = Some(git.keep_changesets);
-            config.tag_format = Some(git.tag_format);
-        }
-
-        if let Some(ref changelog) = input.changelog_config {
-            config.changelog = Some(changelog.changelog);
-            config.comparison_links = Some(changelog.comparison_links);
-        }
-
-        if let Some(ref version) = input.version_config {
-            config.zero_version_behavior = Some(version.zero_version_behavior);
-        }
+        let mut config = build_config_from_input(input, context);
 
         if config.is_empty() {
             if let Some(ref provider) = self.interaction_provider {
@@ -213,7 +190,6 @@ where
     }
 }
 
-/// Builds an `InitPlan` from project information and configuration.
 fn build_init_plan(
     project: &CargoProject,
     root_config: &RootChangesetConfig,
@@ -246,7 +222,7 @@ fn build_init_plan(
 /// - Single package: `version-only` (e.g., `v1.0.0`)
 /// - Workspace: `crate-prefixed` (e.g., `crate-name@1.0.0`)
 #[must_use]
-pub fn build_default_config(context: ProjectContext) -> InitConfig {
+pub(crate) fn build_default_config(context: ProjectContext) -> InitConfig {
     let tag_format = if context.is_single_package {
         changeset_manifest::TagFormat::VersionOnly
     } else {
@@ -264,7 +240,6 @@ pub fn build_default_config(context: ProjectContext) -> InitConfig {
     }
 }
 
-/// Builds an `InitConfig` from the provided input settings.
 #[must_use]
 pub fn build_config_from_input(input: &InitInput, context: ProjectContext) -> InitConfig {
     if input.defaults {

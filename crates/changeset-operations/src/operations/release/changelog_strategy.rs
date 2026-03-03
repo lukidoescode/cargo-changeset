@@ -6,8 +6,7 @@ use chrono::NaiveDate;
 use indexmap::IndexMap;
 use semver::Version;
 
-use super::steps::ChangelogFileState;
-use super::types::ChangelogUpdate;
+use super::types::{ChangelogFileState, ChangelogUpdate};
 use crate::Result;
 use crate::error::OperationError;
 use crate::operations::changelog_aggregation::ChangesetAggregator;

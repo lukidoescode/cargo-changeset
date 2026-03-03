@@ -1,8 +1,10 @@
+use std::fmt::Debug;
+
 use url::Url;
 
 use crate::error::ChangelogError;
 
-pub(crate) trait ForgeStrategy: Send + Sync + std::fmt::Debug {
+pub(crate) trait ForgeStrategy: Send + Sync + Debug {
     fn name(&self) -> &'static str;
     fn matches_host(&self, host: &str) -> bool;
     fn comparison_url(

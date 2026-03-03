@@ -7,9 +7,7 @@ mod verify;
 
 pub use crate::planner::{ReleasePlan, VersionPlanner};
 pub use add::{AddInput, AddOperation, AddResult};
-pub use init::{
-    InitInput, InitOperation, InitOutput, InitPlan, build_config_from_input, build_default_config,
-};
+pub use init::{InitInput, InitOperation, InitOutput, InitPlan, build_config_from_input};
 pub use release::{
     ChangelogUpdate, CommitResult, GitOperationResult, PackageVersion, ReleaseInput,
     ReleaseOperation, ReleaseOutcome, ReleaseOutput, TagResult,

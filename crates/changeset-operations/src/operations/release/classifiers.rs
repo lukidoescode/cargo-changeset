@@ -42,7 +42,7 @@ pub(super) fn is_zero_graduation(
 pub(super) enum EarlyReturnDecision {
     Continue,
     NoChangesets,
-    NeedsForce,
+    ForceRequired,
 }
 
 pub(super) fn check_early_return(
@@ -53,7 +53,7 @@ pub(super) fn check_early_return(
 ) -> EarlyReturnDecision {
     if changeset_files.is_empty() && !is_graduating {
         if is_any_prerelease_configured(input, per_package_config) && !input.force {
-            return EarlyReturnDecision::NeedsForce;
+            return EarlyReturnDecision::ForceRequired;
         }
         return EarlyReturnDecision::NoChangesets;
     }
@@ -64,12 +64,11 @@ pub(super) fn collect_unchanged_packages(
     packages: &[PackageInfo],
     planned_releases: &[PackageVersion],
 ) -> Vec<String> {
-    let packages_with_releases: HashSet<_> =
-        planned_releases.iter().map(|r| r.name.clone()).collect();
+    let released: HashSet<&str> = planned_releases.iter().map(|r| r.name.as_str()).collect();
 
     packages
         .iter()
-        .filter(|p| !packages_with_releases.contains(&p.name))
+        .filter(|p| !released.contains(p.name.as_str()))
         .map(|p| p.name.clone())
         .collect()
 }

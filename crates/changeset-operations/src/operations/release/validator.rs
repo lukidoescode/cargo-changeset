@@ -1,13 +1,13 @@
 use std::collections::{HashMap, HashSet};
 
-use changeset_core::{PackageInfo, PrereleaseSpec};
+use changeset_core::{PackageInfo, PrereleaseSpec, PrereleaseSpecParseError};
 use changeset_project::{GraduationState, PrereleaseState, ProjectKind};
 use changeset_version::{is_prerelease, is_zero_version};
+use semver::Version;
 
+use super::config_builder::{ParsedPrereleaseCache, ReleaseConfigBuilder, ValidatedReleaseConfig};
 use super::types::ReleaseInput;
-use crate::types::PackageReleaseConfig;
 
-/// Input from CLI for validation.
 #[derive(Debug, Clone, Default)]
 pub struct ReleaseCliInput {
     pub cli_prerelease: HashMap<String, PrereleaseSpec>,
@@ -41,34 +41,30 @@ impl From<&ReleaseInput> for ReleaseCliInput {
     }
 }
 
-/// A single validation error with actionable tip.
 #[derive(Debug, Clone)]
 pub enum ValidationError {
-    /// CLI tag differs from pre-release.toml tag
     ConflictingPrereleaseTag {
         package: String,
         cli_tag: String,
         toml_tag: String,
     },
-    /// Package in prerelease version cannot be graduated to 1.0.0
     CannotGraduateFromPrerelease {
         package: String,
-        current_version: String,
+        current_version: Version,
     },
-    /// --graduate without crate names in workspace
     GraduateRequiresCratesInWorkspace,
-    /// Package not found in workspace
     PackageNotFound {
         name: String,
         available: Vec<String>,
     },
-    /// Cannot graduate package >= 1.0.0
-    CannotGraduateStableVersion { package: String, version: String },
-    /// Invalid prerelease tag in pre-release.toml (failed to parse)
+    CannotGraduateStableVersion {
+        package: String,
+        version: Version,
+    },
     InvalidPrereleaseTag {
         package: String,
         tag: String,
-        reason: String,
+        source: PrereleaseSpecParseError,
     },
 }
 
@@ -148,36 +144,25 @@ impl std::fmt::Display for ValidationError {
             Self::InvalidPrereleaseTag {
                 package,
                 tag,
-                reason,
+                source,
             } => {
                 write!(
                     f,
                     "invalid prerelease tag '{tag}' in pre-release.toml for package '{package}': \
-                     {reason}"
+                     {source}"
                 )
             }
         }
     }
 }
 
-/// Collection of validation errors (guaranteed non-empty when constructed).
-///
-/// This type is only constructed when validation fails, so it always contains at least
-/// one error. Use `ValidationErrorCollector` during validation, then convert to this
-/// type only when errors are present.
-///
-/// The `is_empty` method is intentionally omitted because this type is guaranteed
-/// to be non-empty by construction.
 #[derive(Debug)]
-#[allow(clippy::len_without_is_empty)]
 pub struct ValidationErrors {
     first: ValidationError,
     rest: Vec<ValidationError>,
 }
 
 impl ValidationErrors {
-    /// Creates a new `ValidationErrors` from a non-empty vector.
-    ///
     /// # Panics
     ///
     /// Panics if the vector is empty. Use `try_from_vec` for a fallible version.
@@ -194,7 +179,6 @@ impl ValidationErrors {
         }
     }
 
-    /// Creates a new `ValidationErrors` from a vector, returning `None` if empty.
     #[must_use]
     pub fn try_from_vec(mut errors: Vec<ValidationError>) -> Option<Self> {
         if errors.is_empty() {
@@ -213,6 +197,11 @@ impl ValidationErrors {
     }
 
     #[must_use]
+    pub fn is_empty(&self) -> bool {
+        false
+    }
+
+    #[must_use]
     pub fn into_vec(self) -> Vec<ValidationError> {
         let mut errors = vec![self.first];
         errors.extend(self.rest);
@@ -224,27 +213,21 @@ impl ValidationErrors {
     }
 }
 
-/// Collector for validation errors during validation phase.
-///
-/// This is a builder type used internally by `ReleaseValidator`. It allows
-/// accumulating errors and then converting to `ValidationErrors` only when
-/// there are actual errors to report.
 #[derive(Debug, Default)]
-pub(crate) struct ValidationErrorCollector {
+struct ValidationErrorCollector {
     errors: Vec<ValidationError>,
 }
 
 impl ValidationErrorCollector {
-    pub fn new() -> Self {
+    fn new() -> Self {
         Self::default()
     }
 
-    pub fn push(&mut self, error: ValidationError) {
+    fn push(&mut self, error: ValidationError) {
         self.errors.push(error);
     }
 
-    /// Converts to `ValidationErrors` if there are any errors.
-    pub fn into_errors(self) -> Option<ValidationErrors> {
+    fn into_errors(self) -> Option<ValidationErrors> {
         ValidationErrors::try_from_vec(self.errors)
     }
 }
@@ -280,38 +263,14 @@ impl<'a> IntoIterator for &'a ValidationErrors {
     }
 }
 
-/// Result of successful validation: per-package configuration.
-#[derive(Debug, Clone)]
-pub struct ValidatedReleaseConfig {
-    /// Per-package configuration (package name -> config)
-    pub per_package: HashMap<String, PackageReleaseConfig>,
-}
-
-/// Intermediate cache for validated and parsed prerelease specs from TOML.
-struct ParsedPrereleaseCache {
-    specs: HashMap<String, PrereleaseSpec>,
-}
-
-/// Validates release configuration before execution.
-///
-/// This validator ensures:
-/// 1. CLI and TOML prerelease tags are consistent
-/// 2. Graduation targets are valid (0.x, not prerelease)
-/// 3. All referenced packages exist
-/// 4. No conflicting configurations
 pub struct ReleaseValidator;
 
 impl ReleaseValidator {
-    /// Validates the release configuration, collecting ALL errors.
-    ///
-    /// Returns `Ok(ValidatedReleaseConfig)` if all validations pass,
-    /// or `Err(ValidationErrors)` containing ALL validation errors.
-    ///
     /// # Errors
     ///
-    /// Returns `ValidationErrors` if any validation rule fails. All errors are
-    /// collected before returning, so the caller receives a complete list of
-    /// issues rather than just the first one.
+    /// Returns `ValidationErrors` if any validation rule fails. All errors
+    /// are collected before returning, so the caller receives a complete
+    /// list of issues rather than just the first one.
     pub fn validate(
         cli_input: &ReleaseCliInput,
         prerelease_state: Option<&PrereleaseState>,
@@ -421,7 +380,7 @@ impl ReleaseValidator {
                 if is_prerelease(&pkg.version) {
                     collector.push(ValidationError::CannotGraduateFromPrerelease {
                         package: pkg_name.clone(),
-                        current_version: pkg.version.to_string(),
+                        current_version: pkg.version.clone(),
                     });
                 }
             }
@@ -433,7 +392,7 @@ impl ReleaseValidator {
                     if is_prerelease(&pkg.version) {
                         collector.push(ValidationError::CannotGraduateFromPrerelease {
                             package: pkg_name.to_string(),
-                            current_version: pkg.version.to_string(),
+                            current_version: pkg.version.clone(),
                         });
                     }
                 }
@@ -452,7 +411,7 @@ impl ReleaseValidator {
                 if !is_zero_version(&pkg.version) && !is_prerelease(&pkg.version) {
                     collector.push(ValidationError::CannotGraduateStableVersion {
                         package: pkg_name.clone(),
-                        version: pkg.version.to_string(),
+                        version: pkg.version.clone(),
                     });
                 }
             }
@@ -464,7 +423,7 @@ impl ReleaseValidator {
                     if !is_zero_version(&pkg.version) && !is_prerelease(&pkg.version) {
                         collector.push(ValidationError::CannotGraduateStableVersion {
                             package: pkg_name.to_string(),
-                            version: pkg.version.to_string(),
+                            version: pkg.version.clone(),
                         });
                     }
                 }
@@ -486,105 +445,41 @@ impl ReleaseValidator {
         }
     }
 
-    /// Validates and parses TOML prerelease tags, caching successfully parsed specs.
-    ///
-    /// This method performs two validations:
-    /// 1. Basic identifier validation (non-empty, valid characters)
-    /// 2. Full parsing into `PrereleaseSpec`
-    ///
-    /// Successfully parsed specs are cached for use in `build_config`.
     fn validate_and_parse_toml_prerelease(
         prerelease_state: Option<&PrereleaseState>,
         collector: &mut ValidationErrorCollector,
     ) -> ParsedPrereleaseCache {
-        let mut specs = HashMap::new();
+        let mut cache = ParsedPrereleaseCache::default();
 
         let Some(state) = prerelease_state else {
-            return ParsedPrereleaseCache { specs };
+            return cache;
         };
 
         for (pkg, tag) in state.iter() {
             match tag.parse::<PrereleaseSpec>() {
                 Ok(spec) => {
-                    specs.insert(pkg.to_string(), spec);
+                    cache.specs.insert(pkg.to_string(), spec);
                 }
                 Err(e) => {
                     collector.push(ValidationError::InvalidPrereleaseTag {
                         package: pkg.to_string(),
                         tag: tag.to_string(),
-                        reason: e.to_string(),
+                        source: e,
                     });
                 }
             }
         }
 
-        ParsedPrereleaseCache { specs }
+        cache
     }
 
-    /// Builds the final configuration from validated inputs.
-    ///
-    /// This method is infallible because all validation has already occurred
-    /// in the validation phase. It uses the pre-parsed `PrereleaseSpec` values
-    /// from the cache rather than re-parsing.
     fn build_config(
         cli_input: &ReleaseCliInput,
         parsed_cache: &ParsedPrereleaseCache,
         graduation_state: Option<&GraduationState>,
         packages: &[PackageInfo],
     ) -> ValidatedReleaseConfig {
-        let mut per_package = HashMap::new();
-
-        for (pkg, spec) in &parsed_cache.specs {
-            per_package
-                .entry(pkg.clone())
-                .or_insert_with(PackageReleaseConfig::default)
-                .prerelease = Some(spec.clone());
-        }
-
-        for (pkg, spec) in &cli_input.cli_prerelease {
-            per_package
-                .entry(pkg.clone())
-                .or_insert_with(PackageReleaseConfig::default)
-                .prerelease = Some(spec.clone());
-        }
-
-        if let Some(global) = &cli_input.global_prerelease {
-            for pkg in packages {
-                per_package
-                    .entry(pkg.name.clone())
-                    .or_insert_with(PackageReleaseConfig::default)
-                    .prerelease = Some(global.clone());
-            }
-        }
-
-        if let Some(state) = graduation_state {
-            for pkg in state.iter() {
-                per_package
-                    .entry(pkg.to_string())
-                    .or_insert_with(PackageReleaseConfig::default)
-                    .graduate_zero = true;
-            }
-        }
-
-        for pkg in &cli_input.cli_graduate {
-            per_package
-                .entry(pkg.clone())
-                .or_insert_with(PackageReleaseConfig::default)
-                .graduate_zero = true;
-        }
-
-        if cli_input.graduate_all {
-            for pkg in packages {
-                if is_zero_version(&pkg.version) {
-                    per_package
-                        .entry(pkg.name.clone())
-                        .or_insert_with(PackageReleaseConfig::default)
-                        .graduate_zero = true;
-                }
-            }
-        }
-
-        ValidatedReleaseConfig { per_package }
+        ReleaseConfigBuilder::build(cli_input, parsed_cache, graduation_state, packages)
     }
 }
 
@@ -820,7 +715,7 @@ mod tests {
             );
             let config = result.expect("validation should pass");
             let pkg_config = config
-                .per_package
+                .per_package()
                 .get("crate-a")
                 .expect("crate-a should have config");
             assert!(pkg_config.graduate_zero, "should be marked for graduation");
@@ -939,14 +834,14 @@ mod tests {
             let config = result.expect("validation should pass");
 
             let config_a = config
-                .per_package
+                .per_package()
                 .get("crate-a")
                 .expect("crate-a should have config");
             assert!(matches!(config_a.prerelease, Some(PrereleaseSpec::Beta)));
             assert!(config_a.graduate_zero);
 
             let config_b = config
-                .per_package
+                .per_package()
                 .get("crate-b")
                 .expect("crate-b should have config");
             assert!(matches!(config_b.prerelease, Some(PrereleaseSpec::Alpha)));
@@ -1055,7 +950,7 @@ mod tests {
             );
             let config = result.expect("validation should pass");
             let pkg_config = config
-                .per_package
+                .per_package()
                 .get("crate-a")
                 .expect("crate-a should have config");
             assert!(pkg_config.graduate_zero, "should be marked for graduation");
@@ -1113,7 +1008,7 @@ mod tests {
 
             for pkg in &packages {
                 let pkg_config = config
-                    .per_package
+                    .per_package()
                     .get(&pkg.name)
                     .expect("each package should have config");
                 assert!(matches!(pkg_config.prerelease, Some(PrereleaseSpec::Beta)));
@@ -1142,13 +1037,13 @@ mod tests {
             assert!(result.is_ok());
             let config = result.expect("validation should pass");
 
-            let zero_config = config.per_package.get("zero-crate");
+            let zero_config = config.per_package().get("zero-crate");
             assert!(
                 zero_config.is_some_and(|c| c.graduate_zero),
                 "zero version should graduate"
             );
 
-            let stable_config = config.per_package.get("stable-crate");
+            let stable_config = config.per_package().get("stable-crate");
             assert!(
                 stable_config.is_none() || !stable_config.is_some_and(|c| c.graduate_zero),
                 "stable version should not graduate"
@@ -1193,7 +1088,7 @@ mod tests {
         fn cannot_graduate_from_prerelease_display() {
             let error = ValidationError::CannotGraduateFromPrerelease {
                 package: "my-crate".to_string(),
-                current_version: "0.5.0-alpha.1".to_string(),
+                current_version: "0.5.0-alpha.1".parse().expect("valid version"),
             };
 
             let display = error.to_string();
@@ -1206,7 +1101,7 @@ mod tests {
         fn cannot_graduate_from_prerelease_tip() {
             let error = ValidationError::CannotGraduateFromPrerelease {
                 package: "my-crate".to_string(),
-                current_version: "0.5.0-alpha.1".to_string(),
+                current_version: "0.5.0-alpha.1".parse().expect("valid version"),
             };
 
             let tip = error.tip();
@@ -1265,7 +1160,7 @@ mod tests {
         fn cannot_graduate_stable_version_display() {
             let error = ValidationError::CannotGraduateStableVersion {
                 package: "my-crate".to_string(),
-                version: "2.0.0".to_string(),
+                version: "2.0.0".parse().expect("valid version"),
             };
 
             let display = error.to_string();
@@ -1279,7 +1174,7 @@ mod tests {
         fn cannot_graduate_stable_version_tip() {
             let error = ValidationError::CannotGraduateStableVersion {
                 package: "my-crate".to_string(),
-                version: "2.0.0".to_string(),
+                version: "2.0.0".parse().expect("valid version"),
             };
 
             let tip = error.tip();
@@ -1293,7 +1188,7 @@ mod tests {
             let error = ValidationError::InvalidPrereleaseTag {
                 package: "my-crate".to_string(),
                 tag: "bad.tag".to_string(),
-                reason: "contains invalid character".to_string(),
+                source: PrereleaseSpecParseError::InvalidCharacter("bad.tag".to_string(), '.'),
             };
 
             let display = error.to_string();
@@ -1308,7 +1203,7 @@ mod tests {
             let error = ValidationError::InvalidPrereleaseTag {
                 package: "my-crate".to_string(),
                 tag: "bad.tag".to_string(),
-                reason: "contains invalid character".to_string(),
+                source: PrereleaseSpecParseError::InvalidCharacter("bad.tag".to_string(), '.'),
             };
 
             let tip = error.tip();

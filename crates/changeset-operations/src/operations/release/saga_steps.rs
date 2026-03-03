@@ -1,6 +1,29 @@
 use std::marker::PhantomData;
 use std::path::Path;
 
+macro_rules! saga_step_struct {
+    ($name:ident) => {
+        pub struct $name<G, M, RW, S, C> {
+            _marker: PhantomData<(G, M, RW, S, C)>,
+        }
+
+        impl<G, M, RW, S, C> $name<G, M, RW, S, C> {
+            #[must_use]
+            pub fn new() -> Self {
+                Self {
+                    _marker: PhantomData,
+                }
+            }
+        }
+
+        impl<G, M, RW, S, C> Default for $name<G, M, RW, S, C> {
+            fn default() -> Self {
+                Self::new()
+            }
+        }
+    };
+}
+
 use changeset_project::TagFormat;
 use changeset_saga::SagaStep;
 use semver::Version;
@@ -16,24 +39,7 @@ use crate::traits::{
     WorkspaceVersionManager,
 };
 
-pub struct WriteManifestVersionsStep<G, M, RW, S, C> {
-    _marker: PhantomData<(G, M, RW, S, C)>,
-}
-
-impl<G, M, RW, S, C> WriteManifestVersionsStep<G, M, RW, S, C> {
-    #[must_use]
-    pub fn new() -> Self {
-        Self {
-            _marker: PhantomData,
-        }
-    }
-}
-
-impl<G, M, RW, S, C> Default for WriteManifestVersionsStep<G, M, RW, S, C> {
-    fn default() -> Self {
-        Self::new()
-    }
-}
+saga_step_struct!(WriteManifestVersionsStep);
 
 impl<G, M, RW, S, C> SagaStep for WriteManifestVersionsStep<G, M, RW, S, C>
 where
@@ -108,24 +114,7 @@ where
     }
 }
 
-pub struct UpdateDependencyVersionsStep<G, M, RW, S, C> {
-    _marker: PhantomData<(G, M, RW, S, C)>,
-}
-
-impl<G, M, RW, S, C> UpdateDependencyVersionsStep<G, M, RW, S, C> {
-    #[must_use]
-    pub fn new() -> Self {
-        Self {
-            _marker: PhantomData,
-        }
-    }
-}
-
-impl<G, M, RW, S, C> Default for UpdateDependencyVersionsStep<G, M, RW, S, C> {
-    fn default() -> Self {
-        Self::new()
-    }
-}
+saga_step_struct!(UpdateDependencyVersionsStep);
 
 impl<G, M, RW, S, C> SagaStep for UpdateDependencyVersionsStep<G, M, RW, S, C>
 where
@@ -218,24 +207,7 @@ where
     }
 }
 
-pub struct RemoveWorkspaceVersionStep<G, M, RW, S, C> {
-    _marker: PhantomData<(G, M, RW, S, C)>,
-}
-
-impl<G, M, RW, S, C> RemoveWorkspaceVersionStep<G, M, RW, S, C> {
-    #[must_use]
-    pub fn new() -> Self {
-        Self {
-            _marker: PhantomData,
-        }
-    }
-}
-
-impl<G, M, RW, S, C> Default for RemoveWorkspaceVersionStep<G, M, RW, S, C> {
-    fn default() -> Self {
-        Self::new()
-    }
-}
+saga_step_struct!(RemoveWorkspaceVersionStep);
 
 impl<G, M, RW, S, C> SagaStep for RemoveWorkspaceVersionStep<G, M, RW, S, C>
 where
@@ -288,24 +260,7 @@ where
     }
 }
 
-pub struct MarkChangesetsConsumedStep<G, M, RW, S, C> {
-    _marker: PhantomData<(G, M, RW, S, C)>,
-}
-
-impl<G, M, RW, S, C> MarkChangesetsConsumedStep<G, M, RW, S, C> {
-    #[must_use]
-    pub fn new() -> Self {
-        Self {
-            _marker: PhantomData,
-        }
-    }
-}
-
-impl<G, M, RW, S, C> Default for MarkChangesetsConsumedStep<G, M, RW, S, C> {
-    fn default() -> Self {
-        Self::new()
-    }
-}
+saga_step_struct!(MarkChangesetsConsumedStep);
 
 impl<G, M, RW, S, C> SagaStep for MarkChangesetsConsumedStep<G, M, RW, S, C>
 where
@@ -372,24 +327,7 @@ where
     }
 }
 
-pub struct ClearChangesetsConsumedStep<G, M, RW, S, C> {
-    _marker: PhantomData<(G, M, RW, S, C)>,
-}
-
-impl<G, M, RW, S, C> ClearChangesetsConsumedStep<G, M, RW, S, C> {
-    #[must_use]
-    pub fn new() -> Self {
-        Self {
-            _marker: PhantomData,
-        }
-    }
-}
-
-impl<G, M, RW, S, C> Default for ClearChangesetsConsumedStep<G, M, RW, S, C> {
-    fn default() -> Self {
-        Self::new()
-    }
-}
+saga_step_struct!(ClearChangesetsConsumedStep);
 
 impl<G, M, RW, S, C> SagaStep for ClearChangesetsConsumedStep<G, M, RW, S, C>
 where
@@ -421,13 +359,12 @@ where
             if !consumed_paths.is_empty() {
                 let mut consumed_files = Vec::new();
                 for path in &consumed_paths {
-                    if let Ok(changeset) = ctx.changeset_rw().read_changeset(path) {
-                        consumed_files.push(super::steps::ChangesetFileState {
-                            path: path.clone(),
-                            original_consumed_status: changeset.consumed_for_prerelease.clone(),
-                            backup: Some(changeset),
-                        });
-                    }
+                    let changeset = ctx.changeset_rw().read_changeset(path)?;
+                    consumed_files.push(super::steps::ChangesetFileState {
+                        path: path.clone(),
+                        original_consumed_status: changeset.consumed_for_prerelease.clone(),
+                        backup: Some(changeset),
+                    });
                 }
 
                 let paths_refs: Vec<&Path> = consumed_paths.iter().map(AsRef::as_ref).collect();
@@ -446,9 +383,10 @@ where
                 let version: Version =
                     original_version
                         .parse()
-                        .map_err(|_| OperationError::VersionParse {
+                        .map_err(|source| OperationError::VersionParse {
                             version: original_version.clone(),
                             context: "compensation restore consumed status".to_string(),
+                            source,
                         })?;
                 ctx.changeset_rw().mark_consumed_for_prerelease(
                     &input.changeset_dir,
@@ -465,24 +403,7 @@ where
     }
 }
 
-pub struct DeleteChangesetFilesStep<G, M, RW, S, C> {
-    _marker: PhantomData<(G, M, RW, S, C)>,
-}
-
-impl<G, M, RW, S, C> DeleteChangesetFilesStep<G, M, RW, S, C> {
-    #[must_use]
-    pub fn new() -> Self {
-        Self {
-            _marker: PhantomData,
-        }
-    }
-}
-
-impl<G, M, RW, S, C> Default for DeleteChangesetFilesStep<G, M, RW, S, C> {
-    fn default() -> Self {
-        Self::new()
-    }
-}
+saga_step_struct!(DeleteChangesetFilesStep);
 
 impl<G, M, RW, S, C> SagaStep for DeleteChangesetFilesStep<G, M, RW, S, C>
 where
@@ -512,7 +433,7 @@ where
 
         if should_delete && !input.changeset_files.is_empty() {
             for file_state in &mut input.changeset_files {
-                file_state.backup = ctx.changeset_rw().read_changeset(&file_state.path).ok();
+                file_state.backup = Some(ctx.changeset_rw().read_changeset(&file_state.path)?);
             }
 
             let paths_refs: Vec<&Path> = input
@@ -546,24 +467,7 @@ where
     }
 }
 
-pub struct StageFilesStep<G, M, RW, S, C> {
-    _marker: PhantomData<(G, M, RW, S, C)>,
-}
-
-impl<G, M, RW, S, C> StageFilesStep<G, M, RW, S, C> {
-    #[must_use]
-    pub fn new() -> Self {
-        Self {
-            _marker: PhantomData,
-        }
-    }
-}
-
-impl<G, M, RW, S, C> Default for StageFilesStep<G, M, RW, S, C> {
-    fn default() -> Self {
-        Self::new()
-    }
-}
+saga_step_struct!(StageFilesStep);
 
 impl<G, M, RW, S, C> SagaStep for StageFilesStep<G, M, RW, S, C>
 where
@@ -840,24 +744,7 @@ where
     }
 }
 
-pub struct UpdateReleaseStateStep<G, M, RW, S, C> {
-    _marker: PhantomData<(G, M, RW, S, C)>,
-}
-
-impl<G, M, RW, S, C> UpdateReleaseStateStep<G, M, RW, S, C> {
-    #[must_use]
-    pub fn new() -> Self {
-        Self {
-            _marker: PhantomData,
-        }
-    }
-}
-
-impl<G, M, RW, S, C> Default for UpdateReleaseStateStep<G, M, RW, S, C> {
-    fn default() -> Self {
-        Self::new()
-    }
-}
+saga_step_struct!(UpdateReleaseStateStep);
 
 impl<G, M, RW, S, C> SagaStep for UpdateReleaseStateStep<G, M, RW, S, C>
 where
@@ -917,24 +804,7 @@ where
     }
 }
 
-pub struct RestoreChangelogsStep<G, M, RW, S, C> {
-    _marker: PhantomData<(G, M, RW, S, C)>,
-}
-
-impl<G, M, RW, S, C> RestoreChangelogsStep<G, M, RW, S, C> {
-    #[must_use]
-    pub fn new() -> Self {
-        Self {
-            _marker: PhantomData,
-        }
-    }
-}
-
-impl<G, M, RW, S, C> Default for RestoreChangelogsStep<G, M, RW, S, C> {
-    fn default() -> Self {
-        Self::new()
-    }
-}
+saga_step_struct!(RestoreChangelogsStep);
 
 impl<G, M, RW, S, C> SagaStep for RestoreChangelogsStep<G, M, RW, S, C>
 where

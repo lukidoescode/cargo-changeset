@@ -30,9 +30,6 @@ pub(super) fn load_changesets<RW: ChangesetReader>(
     Ok((changesets, aggregator))
 }
 
-// Errors are deliberately suppressed: in Auto mode, a missing or
-// inaccessible git remote is not a failure - it just means we cannot
-// generate comparison links.
 fn detect_repository_info<G: GitStatusProvider>(
     git_provider: &G,
     project_root: &Path,
@@ -53,8 +50,8 @@ pub(super) fn resolve_repo_info<G: GitStatusProvider>(
             let url = git_provider
                 .remote_url(project_root)?
                 .ok_or(OperationError::ComparisonLinksRequired)?;
-            let repo_info = RepositoryInfo::from_url(&url)
-                .map_err(|_| OperationError::ComparisonLinksRequired)?;
+            let repo_info =
+                RepositoryInfo::from_url(&url).map_err(OperationError::ComparisonLinksUrlParse)?;
             Ok(Some(repo_info))
         }
     }

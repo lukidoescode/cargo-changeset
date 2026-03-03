@@ -41,7 +41,7 @@ pub(crate) fn run(args: ReleaseArgs, start_path: &Path) -> Result<()> {
     let changeset_io = FileSystemChangesetIO::new(&project.root);
     let manifest_writer = FileSystemManifestWriter::new();
     let changelog_writer = FileSystemChangelogWriter::new();
-    let git_provider = Git2Provider::new(&project.root);
+    let git_provider = Git2Provider::new(&project.root)?;
     let release_state_io = FileSystemReleaseStateIO::new();
 
     let parsed_prerelease = parse_prerelease_args(&args.prerelease, &project)?;

@@ -71,6 +71,13 @@ pub enum OperationError {
     #[error("project root mismatch: provider configured for '{}' but called with '{}'", expected.display(), actual.display())]
     ProjectRootMismatch { expected: PathBuf, actual: PathBuf },
 
+    #[error("failed to canonicalize project root '{}'", path.display())]
+    ProjectRootCanonicalize {
+        path: PathBuf,
+        #[source]
+        source: std::io::Error,
+    },
+
     #[error("operation cancelled")]
     Cancelled,
 
@@ -103,6 +110,9 @@ pub enum OperationError {
 
     #[error("comparison links enabled but no repository URL available")]
     ComparisonLinksRequired,
+
+    #[error("comparison links enabled but repository URL could not be parsed")]
+    ComparisonLinksUrlParse(#[source] changeset_changelog::ChangelogError),
 
     #[error("working tree has uncommitted changes; commit or stash them, or use --no-commit")]
     DirtyWorkingTree,
@@ -148,7 +158,12 @@ pub enum OperationError {
     ValidationFailed(#[from] crate::operations::ValidationErrors),
 
     #[error("failed to parse version '{version}' during {context}")]
-    VersionParse { version: String, context: String },
+    VersionParse {
+        version: String,
+        context: String,
+        #[source]
+        source: semver::Error,
+    },
 
     #[error("failed to delete {} tag(s) during compensation: {}", failed_tags.len(), failed_tags.join(", "))]
     TagDeletionFailed { failed_tags: Vec<String> },

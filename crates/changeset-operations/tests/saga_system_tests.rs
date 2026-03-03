@@ -195,7 +195,7 @@ fn run_release_with_git(
     let changeset_reader = FileSystemChangesetIO::new(dir.path());
     let manifest_writer = FileSystemManifestWriter::new();
     let changelog_writer = FileSystemChangelogWriter::new();
-    let git_provider = Git2Provider::new(dir.path());
+    let git_provider = Git2Provider::new(dir.path()).expect("should canonicalize temp dir");
     let release_state_io = FileSystemReleaseStateIO::new();
 
     let operation = ReleaseOperation::new(
@@ -483,7 +483,7 @@ fn system_test_no_rollback_needed_for_dry_run() {
     let changeset_reader = FileSystemChangesetIO::new(dir.path());
     let manifest_writer = FileSystemManifestWriter::new();
     let changelog_writer = FileSystemChangelogWriter::new();
-    let git_provider = Git2Provider::new(dir.path());
+    let git_provider = Git2Provider::new(dir.path()).expect("should canonicalize temp dir");
     let release_state_io = FileSystemReleaseStateIO::new();
 
     let operation = ReleaseOperation::new(
