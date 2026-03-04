@@ -168,6 +168,25 @@ pub enum OperationError {
     #[error("failed to delete {} tag(s) during compensation: {}", failed_tags.len(), failed_tags.join(", "))]
     TagDeletionFailed { failed_tags: Vec<String> },
 
+    #[error("package '{name}' not found in workspace")]
+    PackageNotFound { name: String },
+
+    #[error("cannot graduate package '{package}' with prerelease version '{version}'")]
+    CannotGraduatePrerelease { package: String, version: String },
+
+    #[error("cannot graduate package '{package}' with stable version '{version}' (>= 1.0.0)")]
+    CannotGraduateStable { package: String, version: String },
+
+    #[error("invalid pre-release format '{input}' (expected 'crate:tag')")]
+    InvalidPrereleaseFormat { input: String },
+
+    #[error("invalid prerelease tag '{tag}'")]
+    InvalidPrereleaseTag {
+        tag: String,
+        #[source]
+        source: changeset_core::PrereleaseSpecParseError,
+    },
+
     #[error("release saga failed at step '{step}'")]
     SagaFailed {
         step: String,

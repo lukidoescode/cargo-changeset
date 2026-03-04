@@ -132,13 +132,8 @@ fn cli_to_operation_error(e: CliError) -> changeset_operations::OperationError {
         CliError::CurrentDir(io) => OperationError::Io(io),
         CliError::InvalidPackageBumpFormat { .. }
         | CliError::InvalidBumpType { .. }
-        | CliError::InvalidPrereleaseTag { .. }
         | CliError::VerificationFailed { .. }
-        | CliError::ChangesetDeleted { .. }
-        | CliError::InvalidPrereleaseFormat { .. }
-        | CliError::PackageNotFound { .. }
-        | CliError::CannotGraduatePrerelease { .. }
-        | CliError::CannotGraduateStable { .. } => OperationError::Cancelled,
+        | CliError::ChangesetDeleted { .. } => OperationError::Cancelled,
     }
 }
 

@@ -1,6 +1,7 @@
 mod add;
 mod changelog_aggregation;
 mod init;
+mod manage;
 pub mod release;
 mod status;
 mod verify;
@@ -8,6 +9,10 @@ mod verify;
 pub use crate::planner::{ReleasePlan, VersionPlanner};
 pub use add::{AddInput, AddOperation, AddResult};
 pub use init::{InitInput, InitOperation, InitOutput, InitPlan, build_config_from_input};
+pub use manage::{
+    GraduationDirectInput, GraduationDirectOperation, GraduationManageOperation, ManageEvent,
+    PrereleaseDirectInput, PrereleaseDirectOperation, PrereleaseManageOperation,
+};
 pub use release::{
     ChangelogUpdate, CommitResult, GitOperationResult, PackageVersion, ReleaseInput,
     ReleaseOperation, ReleaseOutcome, ReleaseOutput, TagResult,

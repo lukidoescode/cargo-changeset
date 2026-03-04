@@ -17,9 +17,11 @@ use crate::traits::{
     BumpSelection, CategorySelection, ChangelogSettingsInput, ChangelogWriteResult,
     ChangelogWriter, ChangesetReader, ChangesetWriter, DescriptionInput, GitCommitProvider,
     GitDiffProvider, GitSettingsInput, GitStagingProvider, GitStatusProvider, GitTagProvider,
-    InheritedVersionChecker, InitInteractionProvider, InteractionProvider,
-    ManifestDependencyWriter, ManifestMetadataWriter, ManifestVersionWriter, PackageSelection,
-    ProjectContext, ProjectProvider, ReleaseStateIO, VersionSettingsInput, WorkspaceVersionManager,
+    GraduationAction, GraduationInteractionProvider, InheritedVersionChecker,
+    InitInteractionProvider, InteractionProvider, ManifestDependencyWriter, ManifestMetadataWriter,
+    ManifestVersionWriter, MenuSelection, PackageSelection, PrereleaseAction,
+    PrereleaseInteractionProvider, ProjectContext, ProjectProvider, ReleaseStateIO,
+    VersionSettingsInput, WorkspaceVersionManager,
 };
 
 macro_rules! impl_arc_delegation {
@@ -1366,6 +1368,216 @@ impl_arc_delegation! {
         fn configure_git_settings(&self, context: ProjectContext) -> Result<Option<GitSettingsInput>>;
         fn configure_changelog_settings(&self, context: ProjectContext) -> Result<Option<ChangelogSettingsInput>>;
         fn configure_version_settings(&self) -> Result<Option<VersionSettingsInput>>;
+    }
+}
+
+pub struct MockManageInteractionProvider {
+    prerelease_actions: Mutex<Vec<MenuSelection<PrereleaseAction>>>,
+    graduation_actions: Mutex<Vec<MenuSelection<GraduationAction>>>,
+    package_selections: Mutex<Vec<MenuSelection<usize>>>,
+    graduation_selections: Mutex<Vec<MenuSelection<usize>>>,
+    remove_prerelease_selections: Mutex<Vec<MenuSelection<usize>>>,
+    remove_graduation_selections: Mutex<Vec<MenuSelection<usize>>>,
+    prerelease_tags: Mutex<Vec<String>>,
+}
+
+impl MockManageInteractionProvider {
+    #[must_use]
+    pub fn new() -> Self {
+        Self {
+            prerelease_actions: Mutex::new(Vec::new()),
+            graduation_actions: Mutex::new(Vec::new()),
+            package_selections: Mutex::new(Vec::new()),
+            graduation_selections: Mutex::new(Vec::new()),
+            remove_prerelease_selections: Mutex::new(Vec::new()),
+            remove_graduation_selections: Mutex::new(Vec::new()),
+            prerelease_tags: Mutex::new(Vec::new()),
+        }
+    }
+
+    /// # Panics
+    ///
+    /// Panics if the internal mutex is poisoned.
+    #[must_use]
+    pub fn with_prerelease_actions(self, actions: Vec<MenuSelection<PrereleaseAction>>) -> Self {
+        let mut reversed = actions;
+        reversed.reverse();
+        *self.prerelease_actions.lock().expect("lock poisoned") = reversed;
+        self
+    }
+
+    /// # Panics
+    ///
+    /// Panics if the internal mutex is poisoned.
+    #[must_use]
+    pub fn with_graduation_actions(self, actions: Vec<MenuSelection<GraduationAction>>) -> Self {
+        let mut reversed = actions;
+        reversed.reverse();
+        *self.graduation_actions.lock().expect("lock poisoned") = reversed;
+        self
+    }
+
+    /// # Panics
+    ///
+    /// Panics if the internal mutex is poisoned.
+    #[must_use]
+    pub fn with_package_selections(self, selections: Vec<MenuSelection<usize>>) -> Self {
+        let mut reversed = selections;
+        reversed.reverse();
+        *self.package_selections.lock().expect("lock poisoned") = reversed;
+        self
+    }
+
+    /// # Panics
+    ///
+    /// Panics if the internal mutex is poisoned.
+    #[must_use]
+    pub fn with_graduation_selections(self, selections: Vec<MenuSelection<usize>>) -> Self {
+        let mut reversed = selections;
+        reversed.reverse();
+        *self.graduation_selections.lock().expect("lock poisoned") = reversed;
+        self
+    }
+
+    /// # Panics
+    ///
+    /// Panics if the internal mutex is poisoned.
+    #[must_use]
+    pub fn with_remove_prerelease_selections(self, selections: Vec<MenuSelection<usize>>) -> Self {
+        let mut reversed = selections;
+        reversed.reverse();
+        *self
+            .remove_prerelease_selections
+            .lock()
+            .expect("lock poisoned") = reversed;
+        self
+    }
+
+    /// # Panics
+    ///
+    /// Panics if the internal mutex is poisoned.
+    #[must_use]
+    pub fn with_remove_graduation_selections(self, selections: Vec<MenuSelection<usize>>) -> Self {
+        let mut reversed = selections;
+        reversed.reverse();
+        *self
+            .remove_graduation_selections
+            .lock()
+            .expect("lock poisoned") = reversed;
+        self
+    }
+
+    /// # Panics
+    ///
+    /// Panics if the internal mutex is poisoned.
+    #[must_use]
+    pub fn with_prerelease_tags(self, tags: Vec<String>) -> Self {
+        let mut reversed = tags;
+        reversed.reverse();
+        *self.prerelease_tags.lock().expect("lock poisoned") = reversed;
+        self
+    }
+}
+
+impl Default for MockManageInteractionProvider {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl PrereleaseInteractionProvider for MockManageInteractionProvider {
+    fn select_prerelease_action(&self) -> Result<MenuSelection<PrereleaseAction>> {
+        Ok(self
+            .prerelease_actions
+            .lock()
+            .expect("lock poisoned")
+            .pop()
+            .unwrap_or(MenuSelection::Selected(PrereleaseAction::Done)))
+    }
+
+    fn select_package_for_prerelease(
+        &self,
+        _available: &[&PackageInfo],
+    ) -> Result<MenuSelection<usize>> {
+        Ok(self
+            .package_selections
+            .lock()
+            .expect("lock poisoned")
+            .pop()
+            .unwrap_or(MenuSelection::Cancelled))
+    }
+
+    fn get_prerelease_tag(&self) -> Result<String> {
+        Ok(self
+            .prerelease_tags
+            .lock()
+            .expect("lock poisoned")
+            .pop()
+            .unwrap_or_else(|| "alpha".to_string()))
+    }
+
+    fn select_package_to_remove_prerelease(
+        &self,
+        _items: &[(&str, &str)],
+    ) -> Result<MenuSelection<usize>> {
+        Ok(self
+            .remove_prerelease_selections
+            .lock()
+            .expect("lock poisoned")
+            .pop()
+            .unwrap_or(MenuSelection::Cancelled))
+    }
+}
+
+impl GraduationInteractionProvider for MockManageInteractionProvider {
+    fn select_graduation_action(&self) -> Result<MenuSelection<GraduationAction>> {
+        Ok(self
+            .graduation_actions
+            .lock()
+            .expect("lock poisoned")
+            .pop()
+            .unwrap_or(MenuSelection::Selected(GraduationAction::Done)))
+    }
+
+    fn select_package_for_graduation(
+        &self,
+        _eligible: &[&PackageInfo],
+    ) -> Result<MenuSelection<usize>> {
+        Ok(self
+            .graduation_selections
+            .lock()
+            .expect("lock poisoned")
+            .pop()
+            .unwrap_or(MenuSelection::Cancelled))
+    }
+
+    fn select_package_to_remove_graduation(
+        &self,
+        _items: &[String],
+    ) -> Result<MenuSelection<usize>> {
+        Ok(self
+            .remove_graduation_selections
+            .lock()
+            .expect("lock poisoned")
+            .pop()
+            .unwrap_or(MenuSelection::Cancelled))
+    }
+}
+
+impl_arc_delegation! {
+    impl PrereleaseInteractionProvider for Arc<MockManageInteractionProvider> {
+        fn select_prerelease_action(&self) -> Result<MenuSelection<PrereleaseAction>>;
+        fn select_package_for_prerelease(&self, available: &[&PackageInfo]) -> Result<MenuSelection<usize>>;
+        fn get_prerelease_tag(&self) -> Result<String>;
+        fn select_package_to_remove_prerelease(&self, items: &[(&str, &str)]) -> Result<MenuSelection<usize>>;
+    }
+}
+
+impl_arc_delegation! {
+    impl GraduationInteractionProvider for Arc<MockManageInteractionProvider> {
+        fn select_graduation_action(&self) -> Result<MenuSelection<GraduationAction>>;
+        fn select_package_for_graduation(&self, eligible: &[&PackageInfo]) -> Result<MenuSelection<usize>>;
+        fn select_package_to_remove_graduation(&self, items: &[String]) -> Result<MenuSelection<usize>>;
     }
 }
 

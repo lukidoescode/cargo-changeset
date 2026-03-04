@@ -4,6 +4,7 @@ mod git_provider;
 mod inherited_version_checker;
 mod init_interaction;
 mod interaction;
+mod manage_interaction;
 mod manifest_writer;
 mod project_provider;
 mod release_state_io;
@@ -21,6 +22,10 @@ pub use init_interaction::{
 };
 pub use interaction::{
     BumpSelection, CategorySelection, DescriptionInput, InteractionProvider, PackageSelection,
+};
+pub use manage_interaction::{
+    GraduationAction, GraduationInteractionProvider, MenuSelection, PrereleaseAction,
+    PrereleaseInteractionProvider,
 };
 pub use manifest_writer::{
     FullManifestWriter, ManifestDependencyWriter, ManifestMetadataWriter, ManifestVersionWriter,
