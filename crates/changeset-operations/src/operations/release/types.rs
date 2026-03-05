@@ -22,29 +22,8 @@ pub struct ReleaseInput {
 
 impl ReleaseInput {
     #[must_use]
-    #[allow(clippy::too_many_arguments, clippy::fn_params_excessive_bools)]
-    pub fn new(
-        dry_run: bool,
-        convert_inherited: bool,
-        no_commit: bool,
-        no_tags: bool,
-        keep_changesets: bool,
-        force: bool,
-        per_package_config: HashMap<String, PackageReleaseConfig>,
-        global_prerelease: Option<PrereleaseSpec>,
-        graduate_all: bool,
-    ) -> Self {
-        Self {
-            dry_run,
-            convert_inherited,
-            no_commit,
-            no_tags,
-            keep_changesets,
-            force,
-            per_package_config,
-            global_prerelease,
-            graduate_all,
-        }
+    pub fn builder() -> ReleaseInputBuilder {
+        ReleaseInputBuilder::new()
     }
 
     #[must_use]
@@ -90,6 +69,95 @@ impl ReleaseInput {
     #[must_use]
     pub fn graduate_all(&self) -> bool {
         self.graduate_all
+    }
+}
+
+#[derive(Default)]
+pub struct ReleaseInputBuilder {
+    dry_run: bool,
+    convert_inherited: bool,
+    no_commit: bool,
+    no_tags: bool,
+    keep_changesets: bool,
+    force: bool,
+    per_package_config: HashMap<String, PackageReleaseConfig>,
+    global_prerelease: Option<PrereleaseSpec>,
+    graduate_all: bool,
+}
+
+impl ReleaseInputBuilder {
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    #[must_use]
+    pub fn dry_run(mut self, v: bool) -> Self {
+        self.dry_run = v;
+        self
+    }
+
+    #[must_use]
+    pub fn convert_inherited(mut self, v: bool) -> Self {
+        self.convert_inherited = v;
+        self
+    }
+
+    #[must_use]
+    pub fn no_commit(mut self, v: bool) -> Self {
+        self.no_commit = v;
+        self
+    }
+
+    #[must_use]
+    pub fn no_tags(mut self, v: bool) -> Self {
+        self.no_tags = v;
+        self
+    }
+
+    #[must_use]
+    pub fn keep_changesets(mut self, v: bool) -> Self {
+        self.keep_changesets = v;
+        self
+    }
+
+    #[must_use]
+    pub fn force(mut self, v: bool) -> Self {
+        self.force = v;
+        self
+    }
+
+    #[must_use]
+    pub fn per_package_config(mut self, v: HashMap<String, PackageReleaseConfig>) -> Self {
+        self.per_package_config = v;
+        self
+    }
+
+    #[must_use]
+    pub fn global_prerelease(mut self, v: Option<PrereleaseSpec>) -> Self {
+        self.global_prerelease = v;
+        self
+    }
+
+    #[must_use]
+    pub fn graduate_all(mut self, v: bool) -> Self {
+        self.graduate_all = v;
+        self
+    }
+
+    #[must_use]
+    pub fn build(self) -> ReleaseInput {
+        ReleaseInput {
+            dry_run: self.dry_run,
+            convert_inherited: self.convert_inherited,
+            no_commit: self.no_commit,
+            no_tags: self.no_tags,
+            keep_changesets: self.keep_changesets,
+            force: self.force,
+            per_package_config: self.per_package_config,
+            global_prerelease: self.global_prerelease,
+            graduate_all: self.graduate_all,
+        }
     }
 }
 

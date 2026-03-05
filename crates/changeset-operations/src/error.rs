@@ -172,10 +172,16 @@ pub enum OperationError {
     PackageNotFound { name: String },
 
     #[error("cannot graduate package '{package}' with prerelease version '{version}'")]
-    CannotGraduatePrerelease { package: String, version: String },
+    CannotGraduatePrerelease {
+        package: String,
+        version: semver::Version,
+    },
 
     #[error("cannot graduate package '{package}' with stable version '{version}' (>= 1.0.0)")]
-    CannotGraduateStable { package: String, version: String },
+    CannotGraduateStable {
+        package: String,
+        version: semver::Version,
+    },
 
     #[error("invalid pre-release format '{input}' (expected 'crate:tag')")]
     InvalidPrereleaseFormat { input: String },
@@ -232,8 +238,8 @@ impl From<SagaError<OperationError>> for OperationError {
                     compensation_failures,
                 }
             }
-            _ => Self::SagaFailed {
-                step: "unknown".to_string(),
+            other => Self::SagaFailed {
+                step: other.to_string(),
                 source: Box::new(Self::Cancelled),
             },
         }

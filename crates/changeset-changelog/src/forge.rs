@@ -149,7 +149,7 @@ fn detect_forge(host: &str) -> Option<&'static dyn ForgeStrategy> {
 }
 
 pub struct RepositoryInfo {
-    forge: &'static dyn ForgeStrategy,
+    forge: Option<&'static dyn ForgeStrategy>,
     owner: String,
     repo: String,
     base_url: Url,
@@ -158,7 +158,7 @@ pub struct RepositoryInfo {
 impl std::fmt::Debug for RepositoryInfo {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("RepositoryInfo")
-            .field("forge", &self.forge.name())
+            .field("forge", &self.forge_name())
             .field("owner", &self.owner)
             .field("repo", &self.repo)
             .field("base_url", &self.base_url)
@@ -179,7 +179,7 @@ impl Clone for RepositoryInfo {
 
 impl PartialEq for RepositoryInfo {
     fn eq(&self, other: &Self) -> bool {
-        self.forge.name() == other.forge.name()
+        self.forge_name() == other.forge_name()
             && self.owner == other.owner
             && self.repo == other.repo
             && self.base_url == other.base_url
@@ -202,7 +202,7 @@ impl RepositoryInfo {
             url: url_str.to_string(),
         })?;
 
-        let forge = detect_forge(host).unwrap_or(&GitHub);
+        let forge = detect_forge(host);
         let (owner, repo) = extract_owner_repo(&url)?;
 
         let base_url = Url::parse(&format!("{}://{}", url.scheme(), host)).map_err(|source| {
@@ -222,7 +222,7 @@ impl RepositoryInfo {
 
     #[must_use]
     pub fn forge_name(&self) -> &'static str {
-        self.forge.name()
+        self.forge.map_or("Unknown", ForgeStrategy::name)
     }
 
     #[must_use]
@@ -241,14 +241,16 @@ impl RepositoryInfo {
     }
 
     #[must_use]
-    pub fn comparison_url(&self, base_tag: &str, target_tag: &str) -> String {
-        self.forge.comparison_url(
-            &self.base_url,
-            &self.owner,
-            &self.repo,
-            base_tag,
-            target_tag,
-        )
+    pub fn comparison_url(&self, base_tag: &str, target_tag: &str) -> Option<String> {
+        self.forge.map(|f| {
+            f.comparison_url(
+                &self.base_url,
+                &self.owner,
+                &self.repo,
+                base_tag,
+                target_tag,
+            )
+        })
     }
 }
 
@@ -338,7 +340,10 @@ mod tests {
     fn github_comparison_url() {
         let info = RepositoryInfo::from_url("https://github.com/owner/repo").expect("should parse");
         let url = info.comparison_url("v1.0.0", "v1.1.0");
-        assert_eq!(url, "https://github.com/owner/repo/compare/v1.0.0...v1.1.0");
+        assert_eq!(
+            url.as_deref(),
+            Some("https://github.com/owner/repo/compare/v1.0.0...v1.1.0")
+        );
     }
 
     #[test]
@@ -346,8 +351,8 @@ mod tests {
         let info = RepositoryInfo::from_url("https://gitlab.com/owner/repo").expect("should parse");
         let url = info.comparison_url("v1.0.0", "v1.1.0");
         assert_eq!(
-            url,
-            "https://gitlab.com/owner/repo/-/compare/v1.0.0...v1.1.0"
+            url.as_deref(),
+            Some("https://gitlab.com/owner/repo/-/compare/v1.0.0...v1.1.0")
         );
     }
 
@@ -357,8 +362,8 @@ mod tests {
             RepositoryInfo::from_url("https://bitbucket.org/owner/repo").expect("should parse");
         let url = info.comparison_url("v1.0.0", "v1.1.0");
         assert_eq!(
-            url,
-            "https://bitbucket.org/owner/repo/branches/compare/v1.1.0..v1.0.0"
+            url.as_deref(),
+            Some("https://bitbucket.org/owner/repo/branches/compare/v1.1.0..v1.0.0")
         );
     }
 
@@ -366,7 +371,10 @@ mod tests {
     fn sourcehut_comparison_url() {
         let info = RepositoryInfo::from_url("https://git.sr.ht/~owner/repo").expect("should parse");
         let url = info.comparison_url("v1.0.0", "v1.1.0");
-        assert_eq!(url, "https://git.sr.ht/~owner/repo/log/v1.0.0..v1.1.0");
+        assert_eq!(
+            url.as_deref(),
+            Some("https://git.sr.ht/~owner/repo/log/v1.0.0..v1.1.0")
+        );
     }
 
     #[test]
@@ -401,10 +409,11 @@ mod tests {
     }
 
     #[test]
-    fn unknown_host_defaults_to_github() {
+    fn unknown_host_has_no_forge() {
         let info =
             RepositoryInfo::from_url("https://example.com/owner/repo").expect("should parse");
-        assert_eq!(info.forge_name(), "GitHub");
+        assert_eq!(info.forge_name(), "Unknown");
+        assert!(info.comparison_url("v1.0.0", "v1.1.0").is_none());
     }
 
     #[test]
@@ -419,7 +428,9 @@ mod tests {
     #[test]
     fn sourcehut_produces_single_tilde_in_url() {
         let info = RepositoryInfo::from_url("https://git.sr.ht/~owner/repo").expect("should parse");
-        let url = info.comparison_url("v1.0.0", "v1.1.0");
+        let url = info
+            .comparison_url("v1.0.0", "v1.1.0")
+            .expect("sourcehut should have a forge");
 
         assert!(
             url.contains("/~owner/") && !url.contains("/~~"),

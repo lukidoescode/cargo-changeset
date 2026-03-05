@@ -82,17 +82,11 @@ mod tests {
     use changeset_core::{BumpType, PrereleaseSpec};
 
     fn default_input() -> ReleaseInput {
-        ReleaseInput::new(
-            false,
-            false,
-            true,
-            true,
-            true,
-            false,
-            HashMap::new(),
-            None,
-            false,
-        )
+        ReleaseInput::builder()
+            .no_commit(true)
+            .no_tags(true)
+            .keep_changesets(true)
+            .build()
     }
 
     mod is_prerelease_graduation_tests {
@@ -141,17 +135,12 @@ mod tests {
         #[test]
         fn returns_true_when_graduate_all_and_zero_package() {
             let packages = vec![make_package("crate-a", "0.5.0")];
-            let input = ReleaseInput::new(
-                false,
-                false,
-                true,
-                true,
-                true,
-                false,
-                HashMap::new(),
-                None,
-                true,
-            );
+            let input = ReleaseInput::builder()
+                .no_commit(true)
+                .no_tags(true)
+                .keep_changesets(true)
+                .graduate_all(true)
+                .build();
 
             assert!(is_zero_graduation(&packages, &input, &HashMap::new()));
         }
@@ -167,17 +156,12 @@ mod tests {
         #[test]
         fn returns_false_when_no_zero_version_packages() {
             let packages = vec![make_package("crate-a", "1.0.0")];
-            let input = ReleaseInput::new(
-                false,
-                false,
-                true,
-                true,
-                true,
-                false,
-                HashMap::new(),
-                None,
-                true,
-            );
+            let input = ReleaseInput::builder()
+                .no_commit(true)
+                .no_tags(true)
+                .keep_changesets(true)
+                .graduate_all(true)
+                .build();
 
             assert!(!is_zero_graduation(&packages, &input, &HashMap::new()));
         }
@@ -204,17 +188,12 @@ mod tests {
 
         #[test]
         fn returns_true_when_global_prerelease_set() {
-            let input = ReleaseInput::new(
-                false,
-                false,
-                true,
-                true,
-                true,
-                false,
-                HashMap::new(),
-                Some(PrereleaseSpec::Alpha),
-                false,
-            );
+            let input = ReleaseInput::builder()
+                .no_commit(true)
+                .no_tags(true)
+                .keep_changesets(true)
+                .global_prerelease(Some(PrereleaseSpec::Alpha))
+                .build();
 
             assert!(is_any_prerelease_configured(&input, &HashMap::new()));
         }
@@ -278,17 +257,12 @@ mod tests {
 
         #[test]
         fn returns_force_required_when_prerelease_without_force() {
-            let input = ReleaseInput::new(
-                false,
-                false,
-                true,
-                true,
-                true,
-                false,
-                HashMap::new(),
-                Some(PrereleaseSpec::Alpha),
-                false,
-            );
+            let input = ReleaseInput::builder()
+                .no_commit(true)
+                .no_tags(true)
+                .keep_changesets(true)
+                .global_prerelease(Some(PrereleaseSpec::Alpha))
+                .build();
 
             assert!(matches!(
                 check_early_return(&[], false, &input, &HashMap::new()),
@@ -298,17 +272,13 @@ mod tests {
 
         #[test]
         fn returns_no_changesets_when_prerelease_with_force() {
-            let input = ReleaseInput::new(
-                false,
-                false,
-                true,
-                true,
-                true,
-                true,
-                HashMap::new(),
-                Some(PrereleaseSpec::Alpha),
-                false,
-            );
+            let input = ReleaseInput::builder()
+                .no_commit(true)
+                .no_tags(true)
+                .keep_changesets(true)
+                .force(true)
+                .global_prerelease(Some(PrereleaseSpec::Alpha))
+                .build();
 
             assert!(matches!(
                 check_early_return(&[], false, &input, &HashMap::new()),

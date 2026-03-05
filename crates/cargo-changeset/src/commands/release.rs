@@ -71,17 +71,17 @@ pub(crate) fn run(args: ReleaseArgs, start_path: &Path) -> Result<()> {
         git_provider,
         release_state_io,
     );
-    let input = ReleaseInput::new(
-        args.dry_run,
-        args.convert,
-        args.no_commit,
-        args.no_tags,
-        args.keep_changesets,
-        args.force,
-        per_package_config,
-        parsed_prerelease.and_then(|p| p.global),
-        parsed_graduate.all,
-    );
+    let input = ReleaseInput::builder()
+        .dry_run(args.dry_run)
+        .convert_inherited(args.convert)
+        .no_commit(args.no_commit)
+        .no_tags(args.no_tags)
+        .keep_changesets(args.keep_changesets)
+        .force(args.force)
+        .per_package_config(per_package_config)
+        .global_prerelease(parsed_prerelease.and_then(|p| p.global))
+        .graduate_all(parsed_graduate.all)
+        .build();
     let outcome = operation.execute(start_path, &input)?;
 
     print_outcome(&outcome);

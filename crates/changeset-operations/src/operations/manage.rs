@@ -592,14 +592,14 @@ fn validate_can_graduate(project: &CargoProject, name: &str) -> Result<()> {
     if is_prerelease(&package.version) {
         return Err(OperationError::CannotGraduatePrerelease {
             package: name.to_string(),
-            version: package.version.to_string(),
+            version: package.version.clone(),
         });
     }
 
     if !is_zero_version(&package.version) {
         return Err(OperationError::CannotGraduateStable {
             package: name.to_string(),
-            version: package.version.to_string(),
+            version: package.version.clone(),
         });
     }
 

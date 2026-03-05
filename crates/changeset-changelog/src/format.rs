@@ -78,8 +78,9 @@ pub fn format_comparison_links(
     for (version, previous) in versions {
         let target_tag = format!("v{version}");
         let base_tag = previous.map_or_else(|| "HEAD".to_string(), ToString::to_string);
-        let url = repo_info.comparison_url(&base_tag, &target_tag);
-        let _ = writeln!(output, "[{version}]: {url}");
+        if let Some(url) = repo_info.comparison_url(&base_tag, &target_tag) {
+            let _ = writeln!(output, "[{version}]: {url}");
+        }
     }
 
     output

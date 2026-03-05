@@ -4,19 +4,17 @@ use changeset_manifest::{InitConfig, MetadataSection};
 use semver::Version;
 
 use crate::Result;
+use crate::traits::InheritedVersionChecker;
 
 pub trait FullManifestWriter:
-    ManifestVersionWriter
-    + ManifestDependencyWriter
-    + WorkspaceVersionManager
-    + crate::traits::InheritedVersionChecker
+    ManifestVersionWriter + ManifestDependencyWriter + WorkspaceVersionManager + InheritedVersionChecker
 {
 }
 impl<
     T: ManifestVersionWriter
         + ManifestDependencyWriter
         + WorkspaceVersionManager
-        + crate::traits::InheritedVersionChecker,
+        + InheritedVersionChecker,
 > FullManifestWriter for T
 {
 }

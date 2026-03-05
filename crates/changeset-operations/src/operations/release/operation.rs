@@ -419,8 +419,6 @@ where
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashMap;
-
     use super::*;
     use crate::mocks::{
         MockChangelogWriter, MockChangesetReader, MockGitProvider, MockManifestWriter,
@@ -429,17 +427,12 @@ mod tests {
     use changeset_core::{BumpType, PrereleaseSpec};
 
     fn default_input() -> ReleaseInput {
-        ReleaseInput::new(
-            true,
-            false,
-            true,
-            true,
-            true,
-            false,
-            HashMap::new(),
-            None,
-            false,
-        )
+        ReleaseInput::builder()
+            .dry_run(true)
+            .no_commit(true)
+            .no_tags(true)
+            .keep_changesets(true)
+            .build()
     }
 
     fn make_operation<P, RW, M>(
@@ -645,17 +638,11 @@ mod tests {
         let manifest_writer = MockManifestWriter::new();
 
         let operation = make_operation(project_provider, changeset_reader, manifest_writer);
-        let input = ReleaseInput::new(
-            false,
-            false,
-            true,
-            true,
-            true,
-            false,
-            HashMap::new(),
-            None,
-            false,
-        );
+        let input = ReleaseInput::builder()
+            .no_commit(true)
+            .no_tags(true)
+            .keep_changesets(true)
+            .build();
 
         let result = operation
             .execute(Path::new("/any"), &input)
@@ -682,17 +669,11 @@ mod tests {
             MockGitProvider::new(),
             MockReleaseStateIO::new(),
         );
-        let input = ReleaseInput::new(
-            false,
-            false,
-            true,
-            true,
-            true,
-            false,
-            HashMap::new(),
-            None,
-            false,
-        );
+        let input = ReleaseInput::builder()
+            .no_commit(true)
+            .no_tags(true)
+            .keep_changesets(true)
+            .build();
 
         let ReleaseOutcome::Executed(output) = operation
             .execute(Path::new("/any"), &input)
@@ -720,17 +701,11 @@ mod tests {
             .with_inherited(vec![PathBuf::from("/mock/project/Cargo.toml")]);
 
         let operation = make_operation(project_provider, changeset_reader, manifest_writer);
-        let input = ReleaseInput::new(
-            false,
-            false,
-            true,
-            true,
-            true,
-            false,
-            HashMap::new(),
-            None,
-            false,
-        );
+        let input = ReleaseInput::builder()
+            .no_commit(true)
+            .no_tags(true)
+            .keep_changesets(true)
+            .build();
 
         let result = operation.execute(Path::new("/any"), &input);
 
@@ -750,17 +725,12 @@ mod tests {
             .with_inherited(vec![PathBuf::from("/mock/project/Cargo.toml")]);
 
         let operation = make_operation(project_provider, changeset_reader, manifest_writer);
-        let input = ReleaseInput::new(
-            false,
-            true,
-            true,
-            true,
-            true,
-            false,
-            HashMap::new(),
-            None,
-            false,
-        );
+        let input = ReleaseInput::builder()
+            .convert_inherited(true)
+            .no_commit(true)
+            .no_tags(true)
+            .keep_changesets(true)
+            .build();
 
         let result = operation.execute(Path::new("/any"), &input);
 
@@ -788,17 +758,12 @@ mod tests {
             MockGitProvider::new(),
             MockReleaseStateIO::new(),
         );
-        let input = ReleaseInput::new(
-            false,
-            true,
-            true,
-            true,
-            true,
-            false,
-            HashMap::new(),
-            None,
-            false,
-        );
+        let input = ReleaseInput::builder()
+            .convert_inherited(true)
+            .no_commit(true)
+            .no_tags(true)
+            .keep_changesets(true)
+            .build();
 
         let ReleaseOutcome::Executed(_) = operation
             .execute(Path::new("/any"), &input)
@@ -830,17 +795,10 @@ mod tests {
             git_provider,
             MockReleaseStateIO::new(),
         );
-        let input = ReleaseInput::new(
-            false,
-            false,
-            false,
-            true,
-            true,
-            false,
-            HashMap::new(),
-            None,
-            false,
-        );
+        let input = ReleaseInput::builder()
+            .no_tags(true)
+            .keep_changesets(true)
+            .build();
 
         let result = operation.execute(Path::new("/any"), &input);
 
@@ -864,17 +822,11 @@ mod tests {
             git_provider,
             MockReleaseStateIO::new(),
         );
-        let input = ReleaseInput::new(
-            false,
-            false,
-            true,
-            true,
-            true,
-            false,
-            HashMap::new(),
-            None,
-            false,
-        );
+        let input = ReleaseInput::builder()
+            .no_commit(true)
+            .no_tags(true)
+            .keep_changesets(true)
+            .build();
 
         let result = operation.execute(Path::new("/any"), &input);
 
@@ -898,17 +850,7 @@ mod tests {
             git_provider,
             MockReleaseStateIO::new(),
         );
-        let input = ReleaseInput::new(
-            true,
-            false,
-            false,
-            false,
-            false,
-            false,
-            HashMap::new(),
-            None,
-            false,
-        );
+        let input = ReleaseInput::builder().dry_run(true).build();
 
         let result = operation.execute(Path::new("/any"), &input);
 
@@ -934,17 +876,10 @@ mod tests {
             Arc::clone(&git_provider),
             MockReleaseStateIO::new(),
         );
-        let input = ReleaseInput::new(
-            false,
-            false,
-            false,
-            true,
-            true,
-            false,
-            HashMap::new(),
-            None,
-            false,
-        );
+        let input = ReleaseInput::builder()
+            .no_tags(true)
+            .keep_changesets(true)
+            .build();
 
         let ReleaseOutcome::Executed(output) = operation
             .execute(Path::new("/any"), &input)
@@ -982,17 +917,7 @@ mod tests {
             Arc::clone(&git_provider),
             MockReleaseStateIO::new(),
         );
-        let input = ReleaseInput::new(
-            false,
-            false,
-            false,
-            false,
-            true,
-            false,
-            HashMap::new(),
-            None,
-            false,
-        );
+        let input = ReleaseInput::builder().keep_changesets(true).build();
 
         let ReleaseOutcome::Executed(output) = operation
             .execute(Path::new("/any"), &input)
@@ -1028,17 +953,10 @@ mod tests {
             Arc::clone(&git_provider),
             MockReleaseStateIO::new(),
         );
-        let input = ReleaseInput::new(
-            false,
-            false,
-            false,
-            true,
-            true,
-            false,
-            HashMap::new(),
-            None,
-            false,
-        );
+        let input = ReleaseInput::builder()
+            .no_tags(true)
+            .keep_changesets(true)
+            .build();
 
         let ReleaseOutcome::Executed(output) = operation
             .execute(Path::new("/any"), &input)
@@ -1071,17 +989,7 @@ mod tests {
             Arc::clone(&git_provider),
             MockReleaseStateIO::new(),
         );
-        let input = ReleaseInput::new(
-            false,
-            false,
-            false,
-            false,
-            true,
-            false,
-            HashMap::new(),
-            None,
-            false,
-        );
+        let input = ReleaseInput::builder().keep_changesets(true).build();
 
         let ReleaseOutcome::Executed(output) = operation
             .execute(Path::new("/any"), &input)
@@ -1117,17 +1025,10 @@ mod tests {
             Arc::clone(&git_provider),
             MockReleaseStateIO::new(),
         );
-        let input = ReleaseInput::new(
-            false,
-            false,
-            true,
-            true,
-            false,
-            false,
-            HashMap::new(),
-            None,
-            false,
-        );
+        let input = ReleaseInput::builder()
+            .no_commit(true)
+            .no_tags(true)
+            .build();
 
         let ReleaseOutcome::Executed(output) = operation
             .execute(Path::new("/any"), &input)
@@ -1163,17 +1064,11 @@ mod tests {
             Arc::clone(&git_provider),
             MockReleaseStateIO::new(),
         );
-        let input = ReleaseInput::new(
-            false,
-            false,
-            true,
-            true,
-            true,
-            false,
-            HashMap::new(),
-            None,
-            false,
-        );
+        let input = ReleaseInput::builder()
+            .no_commit(true)
+            .no_tags(true)
+            .keep_changesets(true)
+            .build();
 
         let ReleaseOutcome::Executed(output) = operation
             .execute(Path::new("/any"), &input)
@@ -1211,17 +1106,7 @@ mod tests {
             Arc::clone(&git_provider),
             MockReleaseStateIO::new(),
         );
-        let input = ReleaseInput::new(
-            false,
-            false,
-            false,
-            true,
-            false,
-            false,
-            HashMap::new(),
-            None,
-            false,
-        );
+        let input = ReleaseInput::builder().no_tags(true).build();
 
         let _ = operation
             .execute(Path::new("/any"), &input)
@@ -1261,17 +1146,10 @@ mod tests {
             Arc::clone(&git_provider),
             MockReleaseStateIO::new(),
         );
-        let input = ReleaseInput::new(
-            false,
-            false,
-            false,
-            true,
-            true,
-            false,
-            HashMap::new(),
-            None,
-            false,
-        );
+        let input = ReleaseInput::builder()
+            .no_tags(true)
+            .keep_changesets(true)
+            .build();
 
         let ReleaseOutcome::Executed(output) = operation
             .execute(Path::new("/any"), &input)
@@ -1312,17 +1190,12 @@ mod tests {
             MockGitProvider::new(),
             MockReleaseStateIO::new(),
         );
-        let input = ReleaseInput::new(
-            false,
-            false,
-            true,
-            true,
-            true,
-            false,
-            HashMap::new(),
-            Some(PrereleaseSpec::Alpha),
-            false,
-        );
+        let input = ReleaseInput::builder()
+            .no_commit(true)
+            .no_tags(true)
+            .keep_changesets(true)
+            .global_prerelease(Some(PrereleaseSpec::Alpha))
+            .build();
 
         let result = operation
             .execute(Path::new("/any"), &input)
@@ -1348,17 +1221,12 @@ mod tests {
         let manifest_writer = MockManifestWriter::new();
 
         let operation = make_operation(project_provider, changeset_reader, manifest_writer);
-        let input = ReleaseInput::new(
-            false,
-            false,
-            true,
-            true,
-            true,
-            false,
-            HashMap::new(),
-            Some(PrereleaseSpec::Alpha),
-            false,
-        );
+        let input = ReleaseInput::builder()
+            .no_commit(true)
+            .no_tags(true)
+            .keep_changesets(true)
+            .global_prerelease(Some(PrereleaseSpec::Alpha))
+            .build();
 
         let result = operation.execute(Path::new("/any"), &input);
 
@@ -1375,17 +1243,13 @@ mod tests {
         let manifest_writer = MockManifestWriter::new();
 
         let operation = make_operation(project_provider, changeset_reader, manifest_writer);
-        let input = ReleaseInput::new(
-            false,
-            false,
-            true,
-            true,
-            true,
-            true,
-            HashMap::new(),
-            Some(PrereleaseSpec::Alpha),
-            false,
-        );
+        let input = ReleaseInput::builder()
+            .no_commit(true)
+            .no_tags(true)
+            .keep_changesets(true)
+            .force(true)
+            .global_prerelease(Some(PrereleaseSpec::Alpha))
+            .build();
 
         let result = operation
             .execute(Path::new("/any"), &input)
@@ -1419,17 +1283,11 @@ mod tests {
             MockGitProvider::new(),
             MockReleaseStateIO::new(),
         );
-        let input = ReleaseInput::new(
-            false,
-            false,
-            true,
-            true,
-            true,
-            false,
-            HashMap::new(),
-            None,
-            false,
-        );
+        let input = ReleaseInput::builder()
+            .no_commit(true)
+            .no_tags(true)
+            .keep_changesets(true)
+            .build();
 
         let result = operation
             .execute(Path::new("/any"), &input)
@@ -1470,17 +1328,11 @@ mod tests {
             MockGitProvider::new(),
             MockReleaseStateIO::new(),
         );
-        let input = ReleaseInput::new(
-            false,
-            false,
-            true,
-            true,
-            true,
-            false,
-            HashMap::new(),
-            None,
-            false,
-        );
+        let input = ReleaseInput::builder()
+            .no_commit(true)
+            .no_tags(true)
+            .keep_changesets(true)
+            .build();
 
         let result = operation
             .execute(Path::new("/any"), &input)
@@ -1528,17 +1380,11 @@ mod tests {
             MockGitProvider::new(),
             MockReleaseStateIO::new(),
         );
-        let input = ReleaseInput::new(
-            false,
-            false,
-            true,
-            true,
-            true,
-            false,
-            HashMap::new(),
-            None,
-            false,
-        );
+        let input = ReleaseInput::builder()
+            .no_commit(true)
+            .no_tags(true)
+            .keep_changesets(true)
+            .build();
 
         let result = operation
             .execute(Path::new("/any"), &input)
@@ -1585,17 +1431,12 @@ mod tests {
             MockGitProvider::new(),
             MockReleaseStateIO::new(),
         );
-        let input = ReleaseInput::new(
-            false,
-            false,
-            true,
-            true,
-            true,
-            false,
-            HashMap::new(),
-            Some(PrereleaseSpec::Beta),
-            false,
-        );
+        let input = ReleaseInput::builder()
+            .no_commit(true)
+            .no_tags(true)
+            .keep_changesets(true)
+            .global_prerelease(Some(PrereleaseSpec::Beta))
+            .build();
 
         let result = operation
             .execute(Path::new("/any"), &input)
@@ -1633,17 +1474,11 @@ mod tests {
             Arc::clone(&git_provider),
             MockReleaseStateIO::new(),
         );
-        let input = ReleaseInput::new(
-            false,
-            false,
-            true,
-            true,
-            false,
-            false,
-            HashMap::new(),
-            None,
-            true,
-        );
+        let input = ReleaseInput::builder()
+            .no_commit(true)
+            .no_tags(true)
+            .graduate_all(true)
+            .build();
 
         let ReleaseOutcome::Executed(output) = operation
             .execute(Path::new("/any"), &input)
@@ -1699,17 +1534,10 @@ mod tests {
             Arc::clone(&git_provider),
             MockReleaseStateIO::new(),
         );
-        let input = ReleaseInput::new(
-            false,
-            false,
-            true,
-            true,
-            false,
-            false,
-            HashMap::new(),
-            None,
-            false,
-        );
+        let input = ReleaseInput::builder()
+            .no_commit(true)
+            .no_tags(true)
+            .build();
 
         let ReleaseOutcome::Executed(output) = operation
             .execute(Path::new("/any"), &input)
@@ -1761,17 +1589,11 @@ mod tests {
             MockGitProvider::new(),
             Arc::clone(&release_state_io),
         );
-        let input = ReleaseInput::new(
-            false,
-            false,
-            true,
-            true,
-            true,
-            false,
-            HashMap::new(),
-            None,
-            false,
-        );
+        let input = ReleaseInput::builder()
+            .no_commit(true)
+            .no_tags(true)
+            .keep_changesets(true)
+            .build();
 
         let ReleaseOutcome::Executed(output) = operation
             .execute(Path::new("/any"), &input)
@@ -1812,17 +1634,12 @@ mod tests {
             MockGitProvider::new(),
             Arc::clone(&release_state_io),
         );
-        let input = ReleaseInput::new(
-            false,
-            false,
-            true,
-            true,
-            true,
-            false,
-            HashMap::new(),
-            Some(PrereleaseSpec::Beta),
-            false,
-        );
+        let input = ReleaseInput::builder()
+            .no_commit(true)
+            .no_tags(true)
+            .keep_changesets(true)
+            .global_prerelease(Some(PrereleaseSpec::Beta))
+            .build();
 
         let ReleaseOutcome::Executed(output) = operation
             .execute(Path::new("/any"), &input)
@@ -1863,17 +1680,11 @@ mod tests {
             MockGitProvider::new(),
             Arc::clone(&release_state_io),
         );
-        let input = ReleaseInput::new(
-            false,
-            false,
-            true,
-            true,
-            true,
-            false,
-            HashMap::new(),
-            None,
-            false,
-        );
+        let input = ReleaseInput::builder()
+            .no_commit(true)
+            .no_tags(true)
+            .keep_changesets(true)
+            .build();
 
         let ReleaseOutcome::Executed(output) = operation
             .execute(Path::new("/any"), &input)
@@ -1905,17 +1716,12 @@ mod tests {
         let manifest_writer = MockManifestWriter::new();
 
         let operation = make_operation(project_provider, changeset_reader, manifest_writer);
-        let input = ReleaseInput::new(
-            false,
-            false,
-            true,
-            true,
-            true,
-            false,
-            HashMap::new(),
-            None,
-            true,
-        );
+        let input = ReleaseInput::builder()
+            .no_commit(true)
+            .no_tags(true)
+            .keep_changesets(true)
+            .graduate_all(true)
+            .build();
 
         let ReleaseOutcome::Executed(output) = operation
             .execute(Path::new("/any"), &input)
@@ -1957,17 +1763,11 @@ mod tests {
             MockGitProvider::new(),
             Arc::clone(&release_state_io),
         );
-        let input = ReleaseInput::new(
-            false,
-            false,
-            true,
-            true,
-            true,
-            false,
-            HashMap::new(),
-            None,
-            false,
-        );
+        let input = ReleaseInput::builder()
+            .no_commit(true)
+            .no_tags(true)
+            .keep_changesets(true)
+            .build();
 
         let ReleaseOutcome::Executed(output) = operation
             .execute(Path::new("/any"), &input)
@@ -2016,17 +1816,11 @@ mod tests {
             MockGitProvider::new(),
             Arc::clone(&release_state_io),
         );
-        let input = ReleaseInput::new(
-            false,
-            false,
-            true,
-            true,
-            true,
-            false,
-            HashMap::new(),
-            None,
-            false,
-        );
+        let input = ReleaseInput::builder()
+            .no_commit(true)
+            .no_tags(true)
+            .keep_changesets(true)
+            .build();
 
         let ReleaseOutcome::Executed(output) = operation
             .execute(Path::new("/any"), &input)
@@ -2075,17 +1869,10 @@ mod tests {
             git_provider,
             MockReleaseStateIO::new(),
         );
-        let input = ReleaseInput::new(
-            false,
-            false,
-            false,
-            true,
-            true,
-            false,
-            HashMap::new(),
-            None,
-            false,
-        );
+        let input = ReleaseInput::builder()
+            .no_tags(true)
+            .keep_changesets(true)
+            .build();
 
         let result = operation.execute(Path::new("/any"), &input);
 
@@ -2133,17 +1920,7 @@ mod tests {
             Arc::clone(&git_provider),
             Arc::new(MockReleaseStateIO::new()),
         );
-        let input = ReleaseInput::new(
-            false,
-            false,
-            false,
-            false,
-            true,
-            false,
-            HashMap::new(),
-            None,
-            false,
-        );
+        let input = ReleaseInput::builder().keep_changesets(true).build();
 
         let result = operation.execute(Path::new("/any"), &input);
         assert!(result.is_ok(), "release should succeed");
@@ -2170,17 +1947,7 @@ mod tests {
             git_provider,
             MockReleaseStateIO::new(),
         );
-        let input = ReleaseInput::new(
-            false,
-            false,
-            false,
-            false,
-            true,
-            false,
-            HashMap::new(),
-            None,
-            false,
-        );
+        let input = ReleaseInput::builder().keep_changesets(true).build();
 
         let result = operation.execute(Path::new("/any"), &input);
 

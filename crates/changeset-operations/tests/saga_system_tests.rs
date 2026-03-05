@@ -4,7 +4,6 @@
 //! that the saga pattern correctly restores the workspace to its original state
 //! when failures occur at various steps.
 
-use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
 use std::process::Command;
@@ -206,17 +205,11 @@ fn run_release_with_git(
         git_provider,
         release_state_io,
     );
-    let input = ReleaseInput::new(
-        false,
-        false,
-        no_commit,
-        no_tags,
-        keep_changesets,
-        false,
-        HashMap::new(),
-        None,
-        false,
-    );
+    let input = ReleaseInput::builder()
+        .no_commit(no_commit)
+        .no_tags(no_tags)
+        .keep_changesets(keep_changesets)
+        .build();
 
     operation.execute(dir.path(), &input)
 }
@@ -494,17 +487,7 @@ fn system_test_no_rollback_needed_for_dry_run() {
         git_provider,
         release_state_io,
     );
-    let input = ReleaseInput::new(
-        true,
-        false,
-        false,
-        false,
-        false,
-        false,
-        HashMap::new(),
-        None,
-        false,
-    );
+    let input = ReleaseInput::builder().dry_run(true).build();
 
     let result = operation
         .execute(dir.path(), &input)

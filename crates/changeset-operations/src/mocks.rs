@@ -1482,7 +1482,9 @@ impl PrereleaseInteractionProvider for MockManageInteractionProvider {
             .lock()
             .expect("lock poisoned")
             .pop_front()
-            .unwrap_or(MenuSelection::Selected(PrereleaseAction::Done)))
+            .expect(
+                "mock prerelease action queue exhausted — test did not provide enough responses",
+            ))
     }
 
     fn select_package_for_prerelease(
@@ -1494,7 +1496,9 @@ impl PrereleaseInteractionProvider for MockManageInteractionProvider {
             .lock()
             .expect("lock poisoned")
             .pop_front()
-            .unwrap_or(MenuSelection::Cancelled))
+            .expect(
+                "mock package selection queue exhausted — test did not provide enough responses",
+            ))
     }
 
     fn get_prerelease_tag(&self) -> Result<String> {
@@ -1503,7 +1507,7 @@ impl PrereleaseInteractionProvider for MockManageInteractionProvider {
             .lock()
             .expect("lock poisoned")
             .pop_front()
-            .unwrap_or_else(|| "alpha".to_string()))
+            .expect("mock prerelease tag queue exhausted — test did not provide enough responses"))
     }
 
     fn select_package_to_remove_prerelease(
@@ -1515,7 +1519,7 @@ impl PrereleaseInteractionProvider for MockManageInteractionProvider {
             .lock()
             .expect("lock poisoned")
             .pop_front()
-            .unwrap_or(MenuSelection::Cancelled))
+            .expect("mock remove prerelease selection queue exhausted — test did not provide enough responses"))
     }
 }
 
@@ -1526,7 +1530,9 @@ impl GraduationInteractionProvider for MockManageInteractionProvider {
             .lock()
             .expect("lock poisoned")
             .pop_front()
-            .unwrap_or(MenuSelection::Selected(GraduationAction::Done)))
+            .expect(
+                "mock graduation action queue exhausted — test did not provide enough responses",
+            ))
     }
 
     fn select_package_for_graduation(
@@ -1538,7 +1544,9 @@ impl GraduationInteractionProvider for MockManageInteractionProvider {
             .lock()
             .expect("lock poisoned")
             .pop_front()
-            .unwrap_or(MenuSelection::Cancelled))
+            .expect(
+                "mock graduation selection queue exhausted — test did not provide enough responses",
+            ))
     }
 
     fn select_package_to_remove_graduation(
@@ -1550,7 +1558,7 @@ impl GraduationInteractionProvider for MockManageInteractionProvider {
             .lock()
             .expect("lock poisoned")
             .pop_front()
-            .unwrap_or(MenuSelection::Cancelled))
+            .expect("mock remove graduation selection queue exhausted — test did not provide enough responses"))
     }
 }
 

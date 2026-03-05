@@ -14,7 +14,7 @@ pub use crate::types::{PackageReleaseConfig, PackageVersion};
 pub use config_builder::ValidatedReleaseConfig;
 pub use operation::ReleaseOperation;
 pub use types::{
-    ChangelogUpdate, CommitResult, GitOperationResult, ReleaseInput, ReleaseOutcome, ReleaseOutput,
-    TagResult,
+    ChangelogUpdate, CommitResult, GitOperationResult, ReleaseInput, ReleaseInputBuilder,
+    ReleaseOutcome, ReleaseOutput, TagResult,
 };
 pub use validator::{ReleaseCliInput, ReleaseValidator, ValidationError, ValidationErrors};

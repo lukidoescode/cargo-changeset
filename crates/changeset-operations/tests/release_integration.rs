@@ -176,17 +176,13 @@ fn run_release(
         git_provider,
         release_state_io,
     );
-    let input = ReleaseInput::new(
-        dry_run,
-        convert_inherited,
-        true,
-        true,
-        true,
-        false,
-        HashMap::new(),
-        None,
-        false,
-    );
+    let input = ReleaseInput::builder()
+        .dry_run(dry_run)
+        .convert_inherited(convert_inherited)
+        .no_commit(true)
+        .no_tags(true)
+        .keep_changesets(true)
+        .build();
 
     operation.execute(dir.path(), &input)
 }
@@ -581,17 +577,11 @@ fn run_release_with_git(
         git_provider,
         release_state_io,
     );
-    let input = ReleaseInput::new(
-        false,
-        false,
-        no_commit,
-        no_tags,
-        keep_changesets,
-        false,
-        HashMap::new(),
-        None,
-        false,
-    );
+    let input = ReleaseInput::builder()
+        .no_commit(no_commit)
+        .no_tags(no_tags)
+        .keep_changesets(keep_changesets)
+        .build();
 
     operation.execute(dir.path(), &input)
 }
@@ -872,17 +862,12 @@ fn run_release_with_prerelease(
         git_provider,
         release_state_io,
     );
-    let input = ReleaseInput::new(
-        false,
-        false,
-        true,
-        true,
-        true,
-        false,
-        HashMap::new(),
-        prerelease,
-        false,
-    );
+    let input = ReleaseInput::builder()
+        .no_commit(true)
+        .no_tags(true)
+        .keep_changesets(true)
+        .global_prerelease(prerelease)
+        .build();
 
     operation.execute(dir.path(), &input)
 }
@@ -1360,17 +1345,14 @@ fn run_release_with_config(
         git_provider,
         release_state_io,
     );
-    let input = ReleaseInput::new(
-        false,
-        false,
-        true,
-        true,
-        true,
-        false,
-        per_package_config,
-        global_prerelease,
-        graduate_all,
-    );
+    let input = ReleaseInput::builder()
+        .no_commit(true)
+        .no_tags(true)
+        .keep_changesets(true)
+        .per_package_config(per_package_config)
+        .global_prerelease(global_prerelease)
+        .graduate_all(graduate_all)
+        .build();
 
     operation.execute(dir.path(), &input)
 }
