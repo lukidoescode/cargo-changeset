@@ -56,3 +56,75 @@ pub(super) fn resolve_repo_info<G: GitStatusProvider>(
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::mocks::MockGitProvider;
+    use changeset_changelog::{ChangelogConfig, ChangelogLocation};
+
+    fn make_config(setting: ComparisonLinksSetting) -> ChangelogConfig {
+        ChangelogConfig::new(ChangelogLocation::Root, setting, None)
+    }
+
+    mod resolve_repo_info_tests {
+        use super::*;
+
+        #[test]
+        fn disabled_returns_none() -> anyhow::Result<()> {
+            let git = MockGitProvider::new();
+            let config = make_config(ComparisonLinksSetting::Disabled);
+
+            let result = resolve_repo_info(&git, Path::new("/any"), &config)?;
+
+            assert!(result.is_none());
+            Ok(())
+        }
+
+        #[test]
+        fn auto_returns_none_when_no_remote() -> anyhow::Result<()> {
+            let git = MockGitProvider::new();
+            let config = make_config(ComparisonLinksSetting::Auto);
+
+            let result = resolve_repo_info(&git, Path::new("/any"), &config)?;
+
+            assert!(result.is_none());
+            Ok(())
+        }
+
+        #[test]
+        fn auto_returns_repo_info_when_valid_remote() -> anyhow::Result<()> {
+            let git = MockGitProvider::new().with_remote_url("https://github.com/owner/repo.git");
+            let config = make_config(ComparisonLinksSetting::Auto);
+
+            let result = resolve_repo_info(&git, Path::new("/any"), &config)?;
+
+            assert!(result.is_some());
+            Ok(())
+        }
+
+        #[test]
+        fn enabled_returns_repo_info_when_valid_remote() -> anyhow::Result<()> {
+            let git = MockGitProvider::new().with_remote_url("https://github.com/owner/repo.git");
+            let config = make_config(ComparisonLinksSetting::Enabled);
+
+            let result = resolve_repo_info(&git, Path::new("/any"), &config)?;
+
+            assert!(result.is_some());
+            Ok(())
+        }
+
+        #[test]
+        fn enabled_errors_when_no_remote() {
+            let git = MockGitProvider::new();
+            let config = make_config(ComparisonLinksSetting::Enabled);
+
+            let result = resolve_repo_info(&git, Path::new("/any"), &config);
+
+            assert!(matches!(
+                result,
+                Err(OperationError::ComparisonLinksRequired)
+            ));
+        }
+    }
+}

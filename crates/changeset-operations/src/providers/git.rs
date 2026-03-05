@@ -9,6 +9,9 @@ use crate::traits::{
 
 pub struct Git2Provider {
     project_root: PathBuf,
+    // Mutex is intentional: the lazy init pattern (check None, then open) requires
+    // exclusive access even on the "already initialized" path, so RwLock would not
+    // help — every call would still need write() to pass through the init guard.
     repo: Mutex<Option<Repository>>,
 }
 

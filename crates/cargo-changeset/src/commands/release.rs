@@ -38,10 +38,10 @@ struct ParsedGraduateArgs {
 pub(crate) fn run(args: ReleaseArgs, start_path: &Path) -> Result<()> {
     let project_provider = FileSystemProjectProvider::new();
     let project = project_provider.discover_project(start_path)?;
-    let changeset_io = FileSystemChangesetIO::new(&project.root);
+    let changeset_io = FileSystemChangesetIO::new(project.root());
     let manifest_writer = FileSystemManifestWriter::new();
     let changelog_writer = FileSystemChangelogWriter::new();
-    let git_provider = Git2Provider::new(&project.root)?;
+    let git_provider = Git2Provider::new(project.root())?;
     let release_state_io = FileSystemReleaseStateIO::new();
 
     let parsed_prerelease = parse_prerelease_args(&args.prerelease, &project)?;
@@ -71,17 +71,17 @@ pub(crate) fn run(args: ReleaseArgs, start_path: &Path) -> Result<()> {
         git_provider,
         release_state_io,
     );
-    let input = ReleaseInput {
-        dry_run: args.dry_run,
-        convert_inherited: args.convert,
-        no_commit: args.no_commit,
-        no_tags: args.no_tags,
-        keep_changesets: args.keep_changesets,
-        force: args.force,
+    let input = ReleaseInput::new(
+        args.dry_run,
+        args.convert,
+        args.no_commit,
+        args.no_tags,
+        args.keep_changesets,
+        args.force,
         per_package_config,
-        global_prerelease: parsed_prerelease.and_then(|p| p.global),
-        graduate_all: parsed_graduate.all,
-    };
+        parsed_prerelease.and_then(|p| p.global),
+        parsed_graduate.all,
+    );
     let outcome = operation.execute(start_path, &input)?;
 
     print_outcome(&outcome);
@@ -103,10 +103,10 @@ fn parse_prerelease_args(
     for arg in args {
         if arg.is_empty() {
             // Empty string means infer from existing prerelease
-            let has_prerelease = project.packages.iter().any(|p| is_prerelease(&p.version));
+            let has_prerelease = project.packages().iter().any(|p| is_prerelease(&p.version));
             if has_prerelease {
                 let first_prerelease = project
-                    .packages
+                    .packages()
                     .iter()
                     .find(|p| is_prerelease(&p.version))
                     .and_then(|p| changeset_version::extract_prerelease_tag(&p.version));

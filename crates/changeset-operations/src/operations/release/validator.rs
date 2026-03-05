@@ -5,22 +5,44 @@ use changeset_project::{GraduationState, PrereleaseState, ProjectKind};
 use changeset_version::{is_prerelease, is_zero_version};
 use semver::Version;
 
-use super::config_builder::{ParsedPrereleaseCache, ReleaseConfigBuilder, ValidatedReleaseConfig};
+use super::config_builder::{ParsedPrereleaseCache, ValidatedReleaseConfig, build_release_config};
 use super::types::ReleaseInput;
 
 #[derive(Debug, Clone, Default)]
 pub struct ReleaseCliInput {
-    pub cli_prerelease: HashMap<String, PrereleaseSpec>,
-    pub global_prerelease: Option<PrereleaseSpec>,
-    pub cli_graduate: HashSet<String>,
-    pub graduate_all: bool,
+    pub(crate) cli_prerelease: HashMap<String, PrereleaseSpec>,
+    pub(crate) global_prerelease: Option<PrereleaseSpec>,
+    pub(crate) cli_graduate: HashSet<String>,
+    pub(crate) graduate_all: bool,
+}
+
+impl ReleaseCliInput {
+    #[must_use]
+    pub fn cli_prerelease(&self) -> &HashMap<String, PrereleaseSpec> {
+        &self.cli_prerelease
+    }
+
+    #[must_use]
+    pub fn global_prerelease(&self) -> Option<&PrereleaseSpec> {
+        self.global_prerelease.as_ref()
+    }
+
+    #[must_use]
+    pub fn cli_graduate(&self) -> &HashSet<String> {
+        &self.cli_graduate
+    }
+
+    #[must_use]
+    pub fn graduate_all(&self) -> bool {
+        self.graduate_all
+    }
 }
 
 impl From<&ReleaseInput> for ReleaseCliInput {
     fn from(input: &ReleaseInput) -> Self {
         Self {
             cli_prerelease: input
-                .per_package_config
+                .per_package_config()
                 .iter()
                 .filter_map(|(name, config)| {
                     config
@@ -29,14 +51,14 @@ impl From<&ReleaseInput> for ReleaseCliInput {
                         .map(|spec| (name.clone(), spec.clone()))
                 })
                 .collect(),
-            global_prerelease: input.global_prerelease.clone(),
+            global_prerelease: input.global_prerelease().cloned(),
             cli_graduate: input
-                .per_package_config
+                .per_package_config()
                 .iter()
                 .filter(|(_, config)| config.graduate_zero)
                 .map(|(name, _)| name.clone())
                 .collect(),
-            graduate_all: input.graduate_all,
+            graduate_all: input.graduate_all(),
         }
     }
 }
@@ -479,7 +501,7 @@ impl ReleaseValidator {
         graduation_state: Option<&GraduationState>,
         packages: &[PackageInfo],
     ) -> ValidatedReleaseConfig {
-        ReleaseConfigBuilder::build(cli_input, parsed_cache, graduation_state, packages)
+        build_release_config(cli_input, parsed_cache, graduation_state, packages)
     }
 }
 

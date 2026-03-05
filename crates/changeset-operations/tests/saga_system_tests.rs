@@ -206,17 +206,17 @@ fn run_release_with_git(
         git_provider,
         release_state_io,
     );
-    let input = ReleaseInput {
-        dry_run: false,
-        convert_inherited: false,
+    let input = ReleaseInput::new(
+        false,
+        false,
         no_commit,
         no_tags,
         keep_changesets,
-        force: false,
-        per_package_config: HashMap::new(),
-        global_prerelease: None,
-        graduate_all: false,
-    };
+        false,
+        HashMap::new(),
+        None,
+        false,
+    );
 
     operation.execute(dir.path(), &input)
 }
@@ -494,17 +494,17 @@ fn system_test_no_rollback_needed_for_dry_run() {
         git_provider,
         release_state_io,
     );
-    let input = ReleaseInput {
-        dry_run: true,
-        convert_inherited: false,
-        no_commit: false,
-        no_tags: false,
-        keep_changesets: false,
-        force: false,
-        per_package_config: HashMap::new(),
-        global_prerelease: None,
-        graduate_all: false,
-    };
+    let input = ReleaseInput::new(
+        true,
+        false,
+        false,
+        false,
+        false,
+        false,
+        HashMap::new(),
+        None,
+        false,
+    );
 
     let result = operation
         .execute(dir.path(), &input)

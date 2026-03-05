@@ -10,8 +10,8 @@ pub use crate::planner::{ReleasePlan, VersionPlanner};
 pub use add::{AddInput, AddOperation, AddResult};
 pub use init::{InitInput, InitOperation, InitOutput, InitPlan, build_config_from_input};
 pub use manage::{
-    GraduationDirectInput, GraduationDirectOperation, GraduationManageOperation, ManageEvent,
-    PrereleaseDirectInput, PrereleaseDirectOperation, PrereleaseManageOperation,
+    GraduationDirectInput, GraduationDirectOperation, GraduationEvent, GraduationManageOperation,
+    PrereleaseDirectInput, PrereleaseDirectOperation, PrereleaseEvent, PrereleaseManageOperation,
 };
 pub use release::{
     ChangelogUpdate, CommitResult, GitOperationResult, PackageVersion, ReleaseInput,

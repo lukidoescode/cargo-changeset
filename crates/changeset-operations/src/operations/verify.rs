@@ -57,7 +57,7 @@ where
         let head_ref = input.head.as_deref().unwrap_or("HEAD");
         let changed_files =
             self.git_provider
-                .changed_files(&project.root, &input.base, head_ref)?;
+                .changed_files(project.root(), &input.base, head_ref)?;
 
         let (changeset_changes, code_changes): (Vec<_>, Vec<_>) = changed_files
             .into_iter()

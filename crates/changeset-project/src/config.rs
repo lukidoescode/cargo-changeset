@@ -317,10 +317,10 @@ fn parse_package_root_config(project_root: &Path) -> Result<RootChangesetConfig,
 ///
 /// Returns an error if the manifest cannot be read or parsed, or if glob patterns are invalid.
 pub fn parse_root_config(project: &CargoProject) -> Result<RootChangesetConfig, ProjectError> {
-    match project.kind {
-        ProjectKind::SinglePackage => parse_package_root_config(&project.root),
+    match project.kind() {
+        ProjectKind::SinglePackage => parse_package_root_config(project.root()),
         ProjectKind::VirtualWorkspace | ProjectKind::WorkspaceWithRoot => {
-            parse_workspace_root_config(&project.root)
+            parse_workspace_root_config(project.root())
         }
     }
 }
@@ -353,7 +353,7 @@ pub fn load_changeset_configs(
     let root_config = parse_root_config(project)?;
 
     let mut package_configs = HashMap::new();
-    for package in &project.packages {
+    for package in project.packages() {
         let config = parse_package_config(&package.path)?;
         package_configs.insert(package.name.clone(), config);
     }

@@ -101,7 +101,7 @@ where
         let (root_config, _) = self.project_provider.load_configs(&project)?;
 
         let context = ProjectContext {
-            is_single_package: project.kind == ProjectKind::SinglePackage,
+            is_single_package: *project.kind() == ProjectKind::SinglePackage,
         };
         let config = self.build_config(input, context)?;
 
@@ -131,7 +131,7 @@ where
             if plan.config.is_empty() {
                 false
             } else {
-                let manifest_path = project.root.join("Cargo.toml");
+                let manifest_path = project.root().join("Cargo.toml");
                 writer.write_metadata(&manifest_path, plan.metadata_section, &plan.config)?;
                 true
             }
@@ -196,11 +196,11 @@ fn build_init_plan(
     config: InitConfig,
 ) -> InitPlan {
     let changeset_dir_path = root_config.changeset_dir();
-    let full_changeset_dir = project.root.join(changeset_dir_path);
+    let full_changeset_dir = project.root().join(changeset_dir_path);
     let dir_exists = full_changeset_dir.exists();
     let gitkeep_exists = full_changeset_dir.join(".gitkeep").exists();
 
-    let metadata_section = match project.kind {
+    let metadata_section = match project.kind() {
         ProjectKind::VirtualWorkspace | ProjectKind::WorkspaceWithRoot => {
             MetadataSection::Workspace
         }

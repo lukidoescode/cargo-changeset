@@ -161,9 +161,9 @@ where
             PrepareResult::EarlyReturn(outcome) => return Ok(outcome),
         };
 
-        let plan = self.plan_release(&context, input.dry_run)?;
+        let plan = self.plan_release(&context, input.dry_run())?;
 
-        if input.dry_run {
+        if input.dry_run() {
             return Ok(ReleaseOutcome::DryRun(plan.output));
         }
 
@@ -178,7 +178,7 @@ where
         let project = self.project_provider.discover_project(start_path)?;
         let (root_config, _) = self.project_provider.load_configs(&project)?;
 
-        let changeset_dir = project.root.join(root_config.changeset_dir());
+        let changeset_dir = project.root().join(root_config.changeset_dir());
         let changeset_files = self.changeset_io.list_changesets(&changeset_dir)?;
 
         let prerelease_state = self
@@ -193,16 +193,16 @@ where
             &cli_input,
             prerelease_state.as_ref(),
             graduation_state.as_ref(),
-            &project.packages,
-            &project.kind,
+            project.packages(),
+            project.kind(),
         )?;
 
         let per_package_config = validated_config.into_per_package();
 
         let is_prerelease_graduation =
-            classifiers::is_prerelease_graduation(&project.packages, &per_package_config);
+            classifiers::is_prerelease_graduation(project.packages(), &per_package_config);
         let is_zero_graduation =
-            classifiers::is_zero_graduation(&project.packages, input, &per_package_config);
+            classifiers::is_zero_graduation(project.packages(), input, &per_package_config);
         let is_graduating = is_prerelease_graduation || is_zero_graduation;
 
         match classifiers::check_early_return(
@@ -222,16 +222,16 @@ where
 
         let git_config = root_config.git_config();
         let git_options = GitOptions {
-            should_commit: !input.no_commit && git_config.commit(),
-            should_create_tags: !input.no_tags && git_config.tags(),
-            should_delete_changesets: !input.keep_changesets && !git_config.keep_changesets(),
+            should_commit: !input.no_commit() && git_config.commit(),
+            should_create_tags: !input.no_tags() && git_config.tags(),
+            should_delete_changesets: !input.keep_changesets() && !git_config.keep_changesets(),
         };
         let is_prerelease_release =
             classifiers::is_any_prerelease_configured(input, &per_package_config);
 
-        self.validate_working_tree(&project.root, git_options.should_commit, input.dry_run)?;
+        self.validate_working_tree(project.root(), git_options.should_commit, input.dry_run())?;
         let inherited_packages =
-            self.check_inherited_versions(&project.packages, input.convert_inherited)?;
+            self.check_inherited_versions(project.packages(), input.convert_inherited())?;
 
         Ok(PrepareResult::Ready(ReleaseContext {
             project,
@@ -259,11 +259,11 @@ where
         )?;
 
         let planned_releases = if context.classification.is_prerelease_graduation {
-            VersionPlanner::plan_graduation(&context.project.packages)?.releases
+            VersionPlanner::plan_graduation(context.project.packages())?.releases
         } else {
             VersionPlanner::plan_releases_per_package(
                 &changesets,
-                &context.project.packages,
+                context.project.packages(),
                 &context.per_package_config,
                 context.root_config.zero_version_behavior(),
             )?
@@ -272,13 +272,13 @@ where
 
         let package_lookup: IndexMap<_, _> = context
             .project
-            .packages
+            .packages()
             .iter()
             .map(|p| (p.name.clone(), p.clone()))
             .collect();
 
         let unchanged_packages =
-            classifiers::collect_unchanged_packages(&context.project.packages, &planned_releases);
+            classifiers::collect_unchanged_packages(context.project.packages(), &planned_releases);
 
         let (changelog_updates, changelog_backups) = if dry_run {
             (Vec::new(), Vec::new())
@@ -287,13 +287,13 @@ where
                 context.root_config.changelog_config().changelog(),
             );
             let backups = self.capture_changelog_state(
-                &context.project.root,
+                context.project.root(),
                 strategy.as_ref(),
                 &planned_releases,
                 &package_lookup,
             )?;
             let updates = self.generate_changelog_updates(
-                &context.project.root,
+                context.project.root(),
                 context.root_config.changelog_config(),
                 strategy.as_ref(),
                 &aggregator,
@@ -331,7 +331,7 @@ where
 
         let saga_data = ReleaseSagaData::new(
             context.changeset_dir.clone(),
-            context.project.root.join("Cargo.toml"),
+            context.project.root().join("Cargo.toml"),
             plan.output.planned_releases.clone(),
             package_paths,
             plan.output.changelog_updates.clone(),
@@ -376,7 +376,7 @@ where
         type UpdateState<G, M, RW, S, CW> = UpdateReleaseStateStep<G, M, RW, S, CW>;
 
         let git_config = context.root_config.git_config();
-        let use_crate_prefix = match &context.project.kind {
+        let use_crate_prefix = match context.project.kind() {
             ProjectKind::SinglePackage => git_config.tag_format() == TagFormat::CratePrefixed,
             ProjectKind::VirtualWorkspace | ProjectKind::WorkspaceWithRoot => true,
         };
@@ -401,7 +401,7 @@ where
             .then(UpdateState::<G, M, RW, S, C>::new())
             .build();
 
-        let saga_context = self.create_saga_context(&context.project.root);
+        let saga_context = self.create_saga_context(context.project.root());
         saga.execute(&saga_context, saga_data).map_err(Into::into)
     }
 
@@ -429,17 +429,17 @@ mod tests {
     use changeset_core::{BumpType, PrereleaseSpec};
 
     fn default_input() -> ReleaseInput {
-        ReleaseInput {
-            dry_run: true,
-            convert_inherited: false,
-            no_commit: true,
-            no_tags: true,
-            keep_changesets: true,
-            force: false,
-            per_package_config: HashMap::new(),
-            global_prerelease: None,
-            graduate_all: false,
-        }
+        ReleaseInput::new(
+            true,
+            false,
+            true,
+            true,
+            true,
+            false,
+            HashMap::new(),
+            None,
+            false,
+        )
     }
 
     fn make_operation<P, RW, M>(
@@ -645,17 +645,17 @@ mod tests {
         let manifest_writer = MockManifestWriter::new();
 
         let operation = make_operation(project_provider, changeset_reader, manifest_writer);
-        let input = ReleaseInput {
-            dry_run: false,
-            convert_inherited: false,
-            no_commit: true,
-            no_tags: true,
-            keep_changesets: true,
-            force: false,
-            per_package_config: HashMap::new(),
-            global_prerelease: None,
-            graduate_all: false,
-        };
+        let input = ReleaseInput::new(
+            false,
+            false,
+            true,
+            true,
+            true,
+            false,
+            HashMap::new(),
+            None,
+            false,
+        );
 
         let result = operation
             .execute(Path::new("/any"), &input)
@@ -682,17 +682,17 @@ mod tests {
             MockGitProvider::new(),
             MockReleaseStateIO::new(),
         );
-        let input = ReleaseInput {
-            dry_run: false,
-            convert_inherited: false,
-            no_commit: true,
-            no_tags: true,
-            keep_changesets: true,
-            force: false,
-            per_package_config: HashMap::new(),
-            global_prerelease: None,
-            graduate_all: false,
-        };
+        let input = ReleaseInput::new(
+            false,
+            false,
+            true,
+            true,
+            true,
+            false,
+            HashMap::new(),
+            None,
+            false,
+        );
 
         let ReleaseOutcome::Executed(output) = operation
             .execute(Path::new("/any"), &input)
@@ -720,17 +720,17 @@ mod tests {
             .with_inherited(vec![PathBuf::from("/mock/project/Cargo.toml")]);
 
         let operation = make_operation(project_provider, changeset_reader, manifest_writer);
-        let input = ReleaseInput {
-            dry_run: false,
-            convert_inherited: false,
-            no_commit: true,
-            no_tags: true,
-            keep_changesets: true,
-            force: false,
-            per_package_config: HashMap::new(),
-            global_prerelease: None,
-            graduate_all: false,
-        };
+        let input = ReleaseInput::new(
+            false,
+            false,
+            true,
+            true,
+            true,
+            false,
+            HashMap::new(),
+            None,
+            false,
+        );
 
         let result = operation.execute(Path::new("/any"), &input);
 
@@ -750,17 +750,17 @@ mod tests {
             .with_inherited(vec![PathBuf::from("/mock/project/Cargo.toml")]);
 
         let operation = make_operation(project_provider, changeset_reader, manifest_writer);
-        let input = ReleaseInput {
-            dry_run: false,
-            convert_inherited: true,
-            no_commit: true,
-            no_tags: true,
-            keep_changesets: true,
-            force: false,
-            per_package_config: HashMap::new(),
-            global_prerelease: None,
-            graduate_all: false,
-        };
+        let input = ReleaseInput::new(
+            false,
+            true,
+            true,
+            true,
+            true,
+            false,
+            HashMap::new(),
+            None,
+            false,
+        );
 
         let result = operation.execute(Path::new("/any"), &input);
 
@@ -788,17 +788,17 @@ mod tests {
             MockGitProvider::new(),
             MockReleaseStateIO::new(),
         );
-        let input = ReleaseInput {
-            dry_run: false,
-            convert_inherited: true,
-            no_commit: true,
-            no_tags: true,
-            keep_changesets: true,
-            force: false,
-            per_package_config: HashMap::new(),
-            global_prerelease: None,
-            graduate_all: false,
-        };
+        let input = ReleaseInput::new(
+            false,
+            true,
+            true,
+            true,
+            true,
+            false,
+            HashMap::new(),
+            None,
+            false,
+        );
 
         let ReleaseOutcome::Executed(_) = operation
             .execute(Path::new("/any"), &input)
@@ -830,17 +830,17 @@ mod tests {
             git_provider,
             MockReleaseStateIO::new(),
         );
-        let input = ReleaseInput {
-            dry_run: false,
-            convert_inherited: false,
-            no_commit: false,
-            no_tags: true,
-            keep_changesets: true,
-            force: false,
-            per_package_config: HashMap::new(),
-            global_prerelease: None,
-            graduate_all: false,
-        };
+        let input = ReleaseInput::new(
+            false,
+            false,
+            false,
+            true,
+            true,
+            false,
+            HashMap::new(),
+            None,
+            false,
+        );
 
         let result = operation.execute(Path::new("/any"), &input);
 
@@ -864,17 +864,17 @@ mod tests {
             git_provider,
             MockReleaseStateIO::new(),
         );
-        let input = ReleaseInput {
-            dry_run: false,
-            convert_inherited: false,
-            no_commit: true,
-            no_tags: true,
-            keep_changesets: true,
-            force: false,
-            per_package_config: HashMap::new(),
-            global_prerelease: None,
-            graduate_all: false,
-        };
+        let input = ReleaseInput::new(
+            false,
+            false,
+            true,
+            true,
+            true,
+            false,
+            HashMap::new(),
+            None,
+            false,
+        );
 
         let result = operation.execute(Path::new("/any"), &input);
 
@@ -898,17 +898,17 @@ mod tests {
             git_provider,
             MockReleaseStateIO::new(),
         );
-        let input = ReleaseInput {
-            dry_run: true,
-            convert_inherited: false,
-            no_commit: false,
-            no_tags: false,
-            keep_changesets: false,
-            force: false,
-            per_package_config: HashMap::new(),
-            global_prerelease: None,
-            graduate_all: false,
-        };
+        let input = ReleaseInput::new(
+            true,
+            false,
+            false,
+            false,
+            false,
+            false,
+            HashMap::new(),
+            None,
+            false,
+        );
 
         let result = operation.execute(Path::new("/any"), &input);
 
@@ -934,17 +934,17 @@ mod tests {
             Arc::clone(&git_provider),
             MockReleaseStateIO::new(),
         );
-        let input = ReleaseInput {
-            dry_run: false,
-            convert_inherited: false,
-            no_commit: false,
-            no_tags: true,
-            keep_changesets: true,
-            force: false,
-            per_package_config: HashMap::new(),
-            global_prerelease: None,
-            graduate_all: false,
-        };
+        let input = ReleaseInput::new(
+            false,
+            false,
+            false,
+            true,
+            true,
+            false,
+            HashMap::new(),
+            None,
+            false,
+        );
 
         let ReleaseOutcome::Executed(output) = operation
             .execute(Path::new("/any"), &input)
@@ -982,17 +982,17 @@ mod tests {
             Arc::clone(&git_provider),
             MockReleaseStateIO::new(),
         );
-        let input = ReleaseInput {
-            dry_run: false,
-            convert_inherited: false,
-            no_commit: false,
-            no_tags: false,
-            keep_changesets: true,
-            force: false,
-            per_package_config: HashMap::new(),
-            global_prerelease: None,
-            graduate_all: false,
-        };
+        let input = ReleaseInput::new(
+            false,
+            false,
+            false,
+            false,
+            true,
+            false,
+            HashMap::new(),
+            None,
+            false,
+        );
 
         let ReleaseOutcome::Executed(output) = operation
             .execute(Path::new("/any"), &input)
@@ -1028,17 +1028,17 @@ mod tests {
             Arc::clone(&git_provider),
             MockReleaseStateIO::new(),
         );
-        let input = ReleaseInput {
-            dry_run: false,
-            convert_inherited: false,
-            no_commit: false,
-            no_tags: true,
-            keep_changesets: true,
-            force: false,
-            per_package_config: HashMap::new(),
-            global_prerelease: None,
-            graduate_all: false,
-        };
+        let input = ReleaseInput::new(
+            false,
+            false,
+            false,
+            true,
+            true,
+            false,
+            HashMap::new(),
+            None,
+            false,
+        );
 
         let ReleaseOutcome::Executed(output) = operation
             .execute(Path::new("/any"), &input)
@@ -1071,17 +1071,17 @@ mod tests {
             Arc::clone(&git_provider),
             MockReleaseStateIO::new(),
         );
-        let input = ReleaseInput {
-            dry_run: false,
-            convert_inherited: false,
-            no_commit: false,
-            no_tags: false,
-            keep_changesets: true,
-            force: false,
-            per_package_config: HashMap::new(),
-            global_prerelease: None,
-            graduate_all: false,
-        };
+        let input = ReleaseInput::new(
+            false,
+            false,
+            false,
+            false,
+            true,
+            false,
+            HashMap::new(),
+            None,
+            false,
+        );
 
         let ReleaseOutcome::Executed(output) = operation
             .execute(Path::new("/any"), &input)
@@ -1117,17 +1117,17 @@ mod tests {
             Arc::clone(&git_provider),
             MockReleaseStateIO::new(),
         );
-        let input = ReleaseInput {
-            dry_run: false,
-            convert_inherited: false,
-            no_commit: true,
-            no_tags: true,
-            keep_changesets: false,
-            force: false,
-            per_package_config: HashMap::new(),
-            global_prerelease: None,
-            graduate_all: false,
-        };
+        let input = ReleaseInput::new(
+            false,
+            false,
+            true,
+            true,
+            false,
+            false,
+            HashMap::new(),
+            None,
+            false,
+        );
 
         let ReleaseOutcome::Executed(output) = operation
             .execute(Path::new("/any"), &input)
@@ -1163,17 +1163,17 @@ mod tests {
             Arc::clone(&git_provider),
             MockReleaseStateIO::new(),
         );
-        let input = ReleaseInput {
-            dry_run: false,
-            convert_inherited: false,
-            no_commit: true,
-            no_tags: true,
-            keep_changesets: true,
-            force: false,
-            per_package_config: HashMap::new(),
-            global_prerelease: None,
-            graduate_all: false,
-        };
+        let input = ReleaseInput::new(
+            false,
+            false,
+            true,
+            true,
+            true,
+            false,
+            HashMap::new(),
+            None,
+            false,
+        );
 
         let ReleaseOutcome::Executed(output) = operation
             .execute(Path::new("/any"), &input)
@@ -1211,17 +1211,17 @@ mod tests {
             Arc::clone(&git_provider),
             MockReleaseStateIO::new(),
         );
-        let input = ReleaseInput {
-            dry_run: false,
-            convert_inherited: false,
-            no_commit: false,
-            no_tags: true,
-            keep_changesets: false,
-            force: false,
-            per_package_config: HashMap::new(),
-            global_prerelease: None,
-            graduate_all: false,
-        };
+        let input = ReleaseInput::new(
+            false,
+            false,
+            false,
+            true,
+            false,
+            false,
+            HashMap::new(),
+            None,
+            false,
+        );
 
         let _ = operation
             .execute(Path::new("/any"), &input)
@@ -1261,17 +1261,17 @@ mod tests {
             Arc::clone(&git_provider),
             MockReleaseStateIO::new(),
         );
-        let input = ReleaseInput {
-            dry_run: false,
-            convert_inherited: false,
-            no_commit: false,
-            no_tags: true,
-            keep_changesets: true,
-            force: false,
-            per_package_config: HashMap::new(),
-            global_prerelease: None,
-            graduate_all: false,
-        };
+        let input = ReleaseInput::new(
+            false,
+            false,
+            false,
+            true,
+            true,
+            false,
+            HashMap::new(),
+            None,
+            false,
+        );
 
         let ReleaseOutcome::Executed(output) = operation
             .execute(Path::new("/any"), &input)
@@ -1312,17 +1312,17 @@ mod tests {
             MockGitProvider::new(),
             MockReleaseStateIO::new(),
         );
-        let input = ReleaseInput {
-            dry_run: false,
-            convert_inherited: false,
-            no_commit: true,
-            no_tags: true,
-            keep_changesets: true,
-            force: false,
-            per_package_config: HashMap::new(),
-            global_prerelease: Some(PrereleaseSpec::Alpha),
-            graduate_all: false,
-        };
+        let input = ReleaseInput::new(
+            false,
+            false,
+            true,
+            true,
+            true,
+            false,
+            HashMap::new(),
+            Some(PrereleaseSpec::Alpha),
+            false,
+        );
 
         let result = operation
             .execute(Path::new("/any"), &input)
@@ -1348,17 +1348,17 @@ mod tests {
         let manifest_writer = MockManifestWriter::new();
 
         let operation = make_operation(project_provider, changeset_reader, manifest_writer);
-        let input = ReleaseInput {
-            dry_run: false,
-            convert_inherited: false,
-            no_commit: true,
-            no_tags: true,
-            keep_changesets: true,
-            force: false,
-            per_package_config: HashMap::new(),
-            global_prerelease: Some(PrereleaseSpec::Alpha),
-            graduate_all: false,
-        };
+        let input = ReleaseInput::new(
+            false,
+            false,
+            true,
+            true,
+            true,
+            false,
+            HashMap::new(),
+            Some(PrereleaseSpec::Alpha),
+            false,
+        );
 
         let result = operation.execute(Path::new("/any"), &input);
 
@@ -1375,17 +1375,17 @@ mod tests {
         let manifest_writer = MockManifestWriter::new();
 
         let operation = make_operation(project_provider, changeset_reader, manifest_writer);
-        let input = ReleaseInput {
-            dry_run: false,
-            convert_inherited: false,
-            no_commit: true,
-            no_tags: true,
-            keep_changesets: true,
-            force: true,
-            per_package_config: HashMap::new(),
-            global_prerelease: Some(PrereleaseSpec::Alpha),
-            graduate_all: false,
-        };
+        let input = ReleaseInput::new(
+            false,
+            false,
+            true,
+            true,
+            true,
+            true,
+            HashMap::new(),
+            Some(PrereleaseSpec::Alpha),
+            false,
+        );
 
         let result = operation
             .execute(Path::new("/any"), &input)
@@ -1419,17 +1419,17 @@ mod tests {
             MockGitProvider::new(),
             MockReleaseStateIO::new(),
         );
-        let input = ReleaseInput {
-            dry_run: false,
-            convert_inherited: false,
-            no_commit: true,
-            no_tags: true,
-            keep_changesets: true,
-            force: false,
-            per_package_config: HashMap::new(),
-            global_prerelease: None,
-            graduate_all: false,
-        };
+        let input = ReleaseInput::new(
+            false,
+            false,
+            true,
+            true,
+            true,
+            false,
+            HashMap::new(),
+            None,
+            false,
+        );
 
         let result = operation
             .execute(Path::new("/any"), &input)
@@ -1470,17 +1470,17 @@ mod tests {
             MockGitProvider::new(),
             MockReleaseStateIO::new(),
         );
-        let input = ReleaseInput {
-            dry_run: false,
-            convert_inherited: false,
-            no_commit: true,
-            no_tags: true,
-            keep_changesets: true,
-            force: false,
-            per_package_config: HashMap::new(),
-            global_prerelease: None,
-            graduate_all: false,
-        };
+        let input = ReleaseInput::new(
+            false,
+            false,
+            true,
+            true,
+            true,
+            false,
+            HashMap::new(),
+            None,
+            false,
+        );
 
         let result = operation
             .execute(Path::new("/any"), &input)
@@ -1528,17 +1528,17 @@ mod tests {
             MockGitProvider::new(),
             MockReleaseStateIO::new(),
         );
-        let input = ReleaseInput {
-            dry_run: false,
-            convert_inherited: false,
-            no_commit: true,
-            no_tags: true,
-            keep_changesets: true,
-            force: false,
-            per_package_config: HashMap::new(),
-            global_prerelease: None,
-            graduate_all: false,
-        };
+        let input = ReleaseInput::new(
+            false,
+            false,
+            true,
+            true,
+            true,
+            false,
+            HashMap::new(),
+            None,
+            false,
+        );
 
         let result = operation
             .execute(Path::new("/any"), &input)
@@ -1585,17 +1585,17 @@ mod tests {
             MockGitProvider::new(),
             MockReleaseStateIO::new(),
         );
-        let input = ReleaseInput {
-            dry_run: false,
-            convert_inherited: false,
-            no_commit: true,
-            no_tags: true,
-            keep_changesets: true,
-            force: false,
-            per_package_config: HashMap::new(),
-            global_prerelease: Some(PrereleaseSpec::Beta),
-            graduate_all: false,
-        };
+        let input = ReleaseInput::new(
+            false,
+            false,
+            true,
+            true,
+            true,
+            false,
+            HashMap::new(),
+            Some(PrereleaseSpec::Beta),
+            false,
+        );
 
         let result = operation
             .execute(Path::new("/any"), &input)
@@ -1633,17 +1633,17 @@ mod tests {
             Arc::clone(&git_provider),
             MockReleaseStateIO::new(),
         );
-        let input = ReleaseInput {
-            dry_run: false,
-            convert_inherited: false,
-            no_commit: true,
-            no_tags: true,
-            keep_changesets: false,
-            force: false,
-            per_package_config: HashMap::new(),
-            global_prerelease: None,
-            graduate_all: true,
-        };
+        let input = ReleaseInput::new(
+            false,
+            false,
+            true,
+            true,
+            false,
+            false,
+            HashMap::new(),
+            None,
+            true,
+        );
 
         let ReleaseOutcome::Executed(output) = operation
             .execute(Path::new("/any"), &input)
@@ -1699,17 +1699,17 @@ mod tests {
             Arc::clone(&git_provider),
             MockReleaseStateIO::new(),
         );
-        let input = ReleaseInput {
-            dry_run: false,
-            convert_inherited: false,
-            no_commit: true,
-            no_tags: true,
-            keep_changesets: false,
-            force: false,
-            per_package_config: HashMap::new(),
-            global_prerelease: None,
-            graduate_all: false,
-        };
+        let input = ReleaseInput::new(
+            false,
+            false,
+            true,
+            true,
+            false,
+            false,
+            HashMap::new(),
+            None,
+            false,
+        );
 
         let ReleaseOutcome::Executed(output) = operation
             .execute(Path::new("/any"), &input)
@@ -1761,17 +1761,17 @@ mod tests {
             MockGitProvider::new(),
             Arc::clone(&release_state_io),
         );
-        let input = ReleaseInput {
-            dry_run: false,
-            convert_inherited: false,
-            no_commit: true,
-            no_tags: true,
-            keep_changesets: true,
-            force: false,
-            per_package_config: HashMap::new(),
-            global_prerelease: None,
-            graduate_all: false,
-        };
+        let input = ReleaseInput::new(
+            false,
+            false,
+            true,
+            true,
+            true,
+            false,
+            HashMap::new(),
+            None,
+            false,
+        );
 
         let ReleaseOutcome::Executed(output) = operation
             .execute(Path::new("/any"), &input)
@@ -1812,17 +1812,17 @@ mod tests {
             MockGitProvider::new(),
             Arc::clone(&release_state_io),
         );
-        let input = ReleaseInput {
-            dry_run: false,
-            convert_inherited: false,
-            no_commit: true,
-            no_tags: true,
-            keep_changesets: true,
-            force: false,
-            per_package_config: HashMap::new(),
-            global_prerelease: Some(PrereleaseSpec::Beta),
-            graduate_all: false,
-        };
+        let input = ReleaseInput::new(
+            false,
+            false,
+            true,
+            true,
+            true,
+            false,
+            HashMap::new(),
+            Some(PrereleaseSpec::Beta),
+            false,
+        );
 
         let ReleaseOutcome::Executed(output) = operation
             .execute(Path::new("/any"), &input)
@@ -1863,17 +1863,17 @@ mod tests {
             MockGitProvider::new(),
             Arc::clone(&release_state_io),
         );
-        let input = ReleaseInput {
-            dry_run: false,
-            convert_inherited: false,
-            no_commit: true,
-            no_tags: true,
-            keep_changesets: true,
-            force: false,
-            per_package_config: HashMap::new(),
-            global_prerelease: None,
-            graduate_all: false,
-        };
+        let input = ReleaseInput::new(
+            false,
+            false,
+            true,
+            true,
+            true,
+            false,
+            HashMap::new(),
+            None,
+            false,
+        );
 
         let ReleaseOutcome::Executed(output) = operation
             .execute(Path::new("/any"), &input)
@@ -1905,17 +1905,17 @@ mod tests {
         let manifest_writer = MockManifestWriter::new();
 
         let operation = make_operation(project_provider, changeset_reader, manifest_writer);
-        let input = ReleaseInput {
-            dry_run: false,
-            convert_inherited: false,
-            no_commit: true,
-            no_tags: true,
-            keep_changesets: true,
-            force: false,
-            per_package_config: HashMap::new(),
-            global_prerelease: None,
-            graduate_all: true,
-        };
+        let input = ReleaseInput::new(
+            false,
+            false,
+            true,
+            true,
+            true,
+            false,
+            HashMap::new(),
+            None,
+            true,
+        );
 
         let ReleaseOutcome::Executed(output) = operation
             .execute(Path::new("/any"), &input)
@@ -1957,17 +1957,17 @@ mod tests {
             MockGitProvider::new(),
             Arc::clone(&release_state_io),
         );
-        let input = ReleaseInput {
-            dry_run: false,
-            convert_inherited: false,
-            no_commit: true,
-            no_tags: true,
-            keep_changesets: true,
-            force: false,
-            per_package_config: HashMap::new(),
-            global_prerelease: None,
-            graduate_all: false,
-        };
+        let input = ReleaseInput::new(
+            false,
+            false,
+            true,
+            true,
+            true,
+            false,
+            HashMap::new(),
+            None,
+            false,
+        );
 
         let ReleaseOutcome::Executed(output) = operation
             .execute(Path::new("/any"), &input)
@@ -2016,17 +2016,17 @@ mod tests {
             MockGitProvider::new(),
             Arc::clone(&release_state_io),
         );
-        let input = ReleaseInput {
-            dry_run: false,
-            convert_inherited: false,
-            no_commit: true,
-            no_tags: true,
-            keep_changesets: true,
-            force: false,
-            per_package_config: HashMap::new(),
-            global_prerelease: None,
-            graduate_all: false,
-        };
+        let input = ReleaseInput::new(
+            false,
+            false,
+            true,
+            true,
+            true,
+            false,
+            HashMap::new(),
+            None,
+            false,
+        );
 
         let ReleaseOutcome::Executed(output) = operation
             .execute(Path::new("/any"), &input)
@@ -2075,17 +2075,17 @@ mod tests {
             git_provider,
             MockReleaseStateIO::new(),
         );
-        let input = ReleaseInput {
-            dry_run: false,
-            convert_inherited: false,
-            no_commit: false,
-            no_tags: true,
-            keep_changesets: true,
-            force: false,
-            per_package_config: HashMap::new(),
-            global_prerelease: None,
-            graduate_all: false,
-        };
+        let input = ReleaseInput::new(
+            false,
+            false,
+            false,
+            true,
+            true,
+            false,
+            HashMap::new(),
+            None,
+            false,
+        );
 
         let result = operation.execute(Path::new("/any"), &input);
 
@@ -2133,17 +2133,17 @@ mod tests {
             Arc::clone(&git_provider),
             Arc::new(MockReleaseStateIO::new()),
         );
-        let input = ReleaseInput {
-            dry_run: false,
-            convert_inherited: false,
-            no_commit: false,
-            no_tags: false,
-            keep_changesets: true,
-            force: false,
-            per_package_config: HashMap::new(),
-            global_prerelease: None,
-            graduate_all: false,
-        };
+        let input = ReleaseInput::new(
+            false,
+            false,
+            false,
+            false,
+            true,
+            false,
+            HashMap::new(),
+            None,
+            false,
+        );
 
         let result = operation.execute(Path::new("/any"), &input);
         assert!(result.is_ok(), "release should succeed");
@@ -2170,17 +2170,17 @@ mod tests {
             git_provider,
             MockReleaseStateIO::new(),
         );
-        let input = ReleaseInput {
-            dry_run: false,
-            convert_inherited: false,
-            no_commit: false,
-            no_tags: false,
-            keep_changesets: true,
-            force: false,
-            per_package_config: HashMap::new(),
-            global_prerelease: None,
-            graduate_all: false,
-        };
+        let input = ReleaseInput::new(
+            false,
+            false,
+            false,
+            false,
+            true,
+            false,
+            HashMap::new(),
+            None,
+            false,
+        );
 
         let result = operation.execute(Path::new("/any"), &input);
 

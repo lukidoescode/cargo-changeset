@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, RwLock};
 
@@ -51,7 +51,7 @@ pub struct MockProjectProvider {
 impl MockProjectProvider {
     #[must_use]
     pub fn new(project: CargoProject) -> Self {
-        let changeset_dir = project.root.join(".changeset");
+        let changeset_dir = project.root().join(".changeset");
         Self {
             project,
             changeset_dir,
@@ -62,7 +62,11 @@ impl MockProjectProvider {
     #[must_use]
     pub fn with_changeset_dir(mut self, dir: PathBuf) -> Self {
         if let Some(parent) = dir.parent() {
-            self.project.root = parent.to_path_buf();
+            self.project = CargoProject::new(
+                parent.to_path_buf(),
+                self.project.kind().clone(),
+                self.project.packages().to_vec(),
+            );
         }
         self.changeset_dir = dir;
         self
@@ -70,7 +74,11 @@ impl MockProjectProvider {
 
     #[must_use]
     pub fn with_project_root(mut self, root: PathBuf) -> Self {
-        self.project.root = root;
+        self.project = CargoProject::new(
+            root,
+            self.project.kind().clone(),
+            self.project.packages().to_vec(),
+        );
         self
     }
 
@@ -86,15 +94,15 @@ impl MockProjectProvider {
     #[must_use]
     pub fn single_package(name: &str, version: &str) -> Self {
         let root = PathBuf::from("/mock/project");
-        let project = CargoProject {
-            root: root.clone(),
-            kind: ProjectKind::SinglePackage,
-            packages: vec![PackageInfo {
+        let project = CargoProject::new(
+            root.clone(),
+            ProjectKind::SinglePackage,
+            vec![PackageInfo {
                 name: name.to_string(),
                 version: version.parse().expect("valid version"),
                 path: root.clone(),
             }],
-        };
+        );
         Self::new(project)
     }
 
@@ -113,11 +121,7 @@ impl MockProjectProvider {
             })
             .collect();
 
-        let project = CargoProject {
-            root,
-            kind: ProjectKind::VirtualWorkspace,
-            packages: pkg_infos,
-        };
+        let project = CargoProject::new(root, ProjectKind::VirtualWorkspace, pkg_infos);
         Self::new(project)
     }
 }
@@ -1372,26 +1376,26 @@ impl_arc_delegation! {
 }
 
 pub struct MockManageInteractionProvider {
-    prerelease_actions: Mutex<Vec<MenuSelection<PrereleaseAction>>>,
-    graduation_actions: Mutex<Vec<MenuSelection<GraduationAction>>>,
-    package_selections: Mutex<Vec<MenuSelection<usize>>>,
-    graduation_selections: Mutex<Vec<MenuSelection<usize>>>,
-    remove_prerelease_selections: Mutex<Vec<MenuSelection<usize>>>,
-    remove_graduation_selections: Mutex<Vec<MenuSelection<usize>>>,
-    prerelease_tags: Mutex<Vec<String>>,
+    prerelease_actions: Mutex<VecDeque<MenuSelection<PrereleaseAction>>>,
+    graduation_actions: Mutex<VecDeque<MenuSelection<GraduationAction>>>,
+    package_selections: Mutex<VecDeque<MenuSelection<usize>>>,
+    graduation_selections: Mutex<VecDeque<MenuSelection<usize>>>,
+    remove_prerelease_selections: Mutex<VecDeque<MenuSelection<usize>>>,
+    remove_graduation_selections: Mutex<VecDeque<MenuSelection<usize>>>,
+    prerelease_tags: Mutex<VecDeque<String>>,
 }
 
 impl MockManageInteractionProvider {
     #[must_use]
     pub fn new() -> Self {
         Self {
-            prerelease_actions: Mutex::new(Vec::new()),
-            graduation_actions: Mutex::new(Vec::new()),
-            package_selections: Mutex::new(Vec::new()),
-            graduation_selections: Mutex::new(Vec::new()),
-            remove_prerelease_selections: Mutex::new(Vec::new()),
-            remove_graduation_selections: Mutex::new(Vec::new()),
-            prerelease_tags: Mutex::new(Vec::new()),
+            prerelease_actions: Mutex::new(VecDeque::new()),
+            graduation_actions: Mutex::new(VecDeque::new()),
+            package_selections: Mutex::new(VecDeque::new()),
+            graduation_selections: Mutex::new(VecDeque::new()),
+            remove_prerelease_selections: Mutex::new(VecDeque::new()),
+            remove_graduation_selections: Mutex::new(VecDeque::new()),
+            prerelease_tags: Mutex::new(VecDeque::new()),
         }
     }
 
@@ -1400,9 +1404,7 @@ impl MockManageInteractionProvider {
     /// Panics if the internal mutex is poisoned.
     #[must_use]
     pub fn with_prerelease_actions(self, actions: Vec<MenuSelection<PrereleaseAction>>) -> Self {
-        let mut reversed = actions;
-        reversed.reverse();
-        *self.prerelease_actions.lock().expect("lock poisoned") = reversed;
+        *self.prerelease_actions.lock().expect("lock poisoned") = actions.into();
         self
     }
 
@@ -1411,9 +1413,7 @@ impl MockManageInteractionProvider {
     /// Panics if the internal mutex is poisoned.
     #[must_use]
     pub fn with_graduation_actions(self, actions: Vec<MenuSelection<GraduationAction>>) -> Self {
-        let mut reversed = actions;
-        reversed.reverse();
-        *self.graduation_actions.lock().expect("lock poisoned") = reversed;
+        *self.graduation_actions.lock().expect("lock poisoned") = actions.into();
         self
     }
 
@@ -1422,9 +1422,7 @@ impl MockManageInteractionProvider {
     /// Panics if the internal mutex is poisoned.
     #[must_use]
     pub fn with_package_selections(self, selections: Vec<MenuSelection<usize>>) -> Self {
-        let mut reversed = selections;
-        reversed.reverse();
-        *self.package_selections.lock().expect("lock poisoned") = reversed;
+        *self.package_selections.lock().expect("lock poisoned") = selections.into();
         self
     }
 
@@ -1433,9 +1431,7 @@ impl MockManageInteractionProvider {
     /// Panics if the internal mutex is poisoned.
     #[must_use]
     pub fn with_graduation_selections(self, selections: Vec<MenuSelection<usize>>) -> Self {
-        let mut reversed = selections;
-        reversed.reverse();
-        *self.graduation_selections.lock().expect("lock poisoned") = reversed;
+        *self.graduation_selections.lock().expect("lock poisoned") = selections.into();
         self
     }
 
@@ -1444,12 +1440,10 @@ impl MockManageInteractionProvider {
     /// Panics if the internal mutex is poisoned.
     #[must_use]
     pub fn with_remove_prerelease_selections(self, selections: Vec<MenuSelection<usize>>) -> Self {
-        let mut reversed = selections;
-        reversed.reverse();
         *self
             .remove_prerelease_selections
             .lock()
-            .expect("lock poisoned") = reversed;
+            .expect("lock poisoned") = selections.into();
         self
     }
 
@@ -1458,12 +1452,10 @@ impl MockManageInteractionProvider {
     /// Panics if the internal mutex is poisoned.
     #[must_use]
     pub fn with_remove_graduation_selections(self, selections: Vec<MenuSelection<usize>>) -> Self {
-        let mut reversed = selections;
-        reversed.reverse();
         *self
             .remove_graduation_selections
             .lock()
-            .expect("lock poisoned") = reversed;
+            .expect("lock poisoned") = selections.into();
         self
     }
 
@@ -1472,9 +1464,7 @@ impl MockManageInteractionProvider {
     /// Panics if the internal mutex is poisoned.
     #[must_use]
     pub fn with_prerelease_tags(self, tags: Vec<String>) -> Self {
-        let mut reversed = tags;
-        reversed.reverse();
-        *self.prerelease_tags.lock().expect("lock poisoned") = reversed;
+        *self.prerelease_tags.lock().expect("lock poisoned") = tags.into();
         self
     }
 }
@@ -1491,7 +1481,7 @@ impl PrereleaseInteractionProvider for MockManageInteractionProvider {
             .prerelease_actions
             .lock()
             .expect("lock poisoned")
-            .pop()
+            .pop_front()
             .unwrap_or(MenuSelection::Selected(PrereleaseAction::Done)))
     }
 
@@ -1503,7 +1493,7 @@ impl PrereleaseInteractionProvider for MockManageInteractionProvider {
             .package_selections
             .lock()
             .expect("lock poisoned")
-            .pop()
+            .pop_front()
             .unwrap_or(MenuSelection::Cancelled))
     }
 
@@ -1512,7 +1502,7 @@ impl PrereleaseInteractionProvider for MockManageInteractionProvider {
             .prerelease_tags
             .lock()
             .expect("lock poisoned")
-            .pop()
+            .pop_front()
             .unwrap_or_else(|| "alpha".to_string()))
     }
 
@@ -1524,7 +1514,7 @@ impl PrereleaseInteractionProvider for MockManageInteractionProvider {
             .remove_prerelease_selections
             .lock()
             .expect("lock poisoned")
-            .pop()
+            .pop_front()
             .unwrap_or(MenuSelection::Cancelled))
     }
 }
@@ -1535,7 +1525,7 @@ impl GraduationInteractionProvider for MockManageInteractionProvider {
             .graduation_actions
             .lock()
             .expect("lock poisoned")
-            .pop()
+            .pop_front()
             .unwrap_or(MenuSelection::Selected(GraduationAction::Done)))
     }
 
@@ -1547,7 +1537,7 @@ impl GraduationInteractionProvider for MockManageInteractionProvider {
             .graduation_selections
             .lock()
             .expect("lock poisoned")
-            .pop()
+            .pop_front()
             .unwrap_or(MenuSelection::Cancelled))
     }
 
@@ -1559,7 +1549,7 @@ impl GraduationInteractionProvider for MockManageInteractionProvider {
             .remove_graduation_selections
             .lock()
             .expect("lock poisoned")
-            .pop()
+            .pop_front()
             .unwrap_or(MenuSelection::Cancelled))
     }
 }

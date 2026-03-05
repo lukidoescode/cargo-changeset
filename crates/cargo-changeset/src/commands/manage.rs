@@ -3,8 +3,8 @@ use std::path::Path;
 use changeset_core::PackageInfo;
 use changeset_operations::OperationError;
 use changeset_operations::operations::{
-    GraduationDirectInput, GraduationDirectOperation, GraduationManageOperation, ManageEvent,
-    PrereleaseDirectInput, PrereleaseDirectOperation, PrereleaseManageOperation,
+    GraduationDirectInput, GraduationDirectOperation, GraduationEvent, GraduationManageOperation,
+    PrereleaseDirectInput, PrereleaseDirectOperation, PrereleaseEvent, PrereleaseManageOperation,
 };
 use changeset_operations::providers::{FileSystemProjectProvider, FileSystemReleaseStateIO};
 use changeset_operations::traits::{
@@ -45,16 +45,11 @@ fn run_prerelease(args: ManagePrereleaseArgs, start_path: &Path) -> Result<()> {
             FileSystemProjectProvider::new(),
             FileSystemReleaseStateIO::new(),
         );
-        let input = PrereleaseDirectInput {
-            add: args.add,
-            remove: args.remove,
-            graduate: args.graduate,
-            list: args.list,
-        };
+        let input = PrereleaseDirectInput::new(args.add, args.remove, args.graduate, args.list);
         operation.execute(start_path, &input)?
     };
 
-    print_manage_events(&events);
+    print_prerelease_events(&events);
     Ok(())
 }
 
@@ -78,22 +73,18 @@ fn run_graduation(args: ManageGraduationArgs, start_path: &Path) -> Result<()> {
             FileSystemProjectProvider::new(),
             FileSystemReleaseStateIO::new(),
         );
-        let input = GraduationDirectInput {
-            add: args.add,
-            remove: args.remove,
-            list: args.list,
-        };
+        let input = GraduationDirectInput::new(args.add, args.remove, args.list);
         operation.execute(start_path, &input)?
     };
 
-    print_manage_events(&events);
+    print_graduation_events(&events);
     Ok(())
 }
 
-fn print_manage_events(events: &[ManageEvent]) {
+fn print_prerelease_events(events: &[PrereleaseEvent]) {
     for event in events {
         match event {
-            ManageEvent::DisplayPrereleaseState(items) => {
+            PrereleaseEvent::DisplayState(items) => {
                 println!();
                 if items.is_empty() {
                     println!("(No packages in pre-release mode)");
@@ -107,7 +98,34 @@ fn print_manage_events(events: &[ManageEvent]) {
                 }
                 println!();
             }
-            ManageEvent::DisplayGraduationState(items) => {
+            PrereleaseEvent::Added { crate_name, tag } => {
+                println!("Added {crate_name} to pre-release configuration with tag '{tag}'");
+            }
+            PrereleaseEvent::Removed { crate_name } => {
+                println!("Removed {crate_name} from pre-release configuration");
+            }
+            PrereleaseEvent::MovedToGraduation { crate_name } => {
+                println!("Moved {crate_name} to graduation queue");
+            }
+            PrereleaseEvent::AllPackagesInPrerelease => {
+                println!("All packages are already in pre-release mode.");
+            }
+            PrereleaseEvent::NoPrereleasePackages => {
+                println!("No packages are currently in pre-release mode.");
+            }
+            PrereleaseEvent::NoEligibleForGraduation => {
+                println!(
+                    "No eligible packages for graduation (must be 0.x stable version and not already queued)."
+                );
+            }
+        }
+    }
+}
+
+fn print_graduation_events(events: &[GraduationEvent]) {
+    for event in events {
+        match event {
+            GraduationEvent::DisplayState(items) => {
                 println!();
                 if items.is_empty() {
                     println!("(No packages queued for graduation)");
@@ -121,33 +139,18 @@ fn print_manage_events(events: &[ManageEvent]) {
                 }
                 println!();
             }
-            ManageEvent::AddedPrerelease { crate_name, tag } => {
-                println!("Added {crate_name} to pre-release configuration with tag '{tag}'");
-            }
-            ManageEvent::RemovedPrerelease { crate_name } => {
-                println!("Removed {crate_name} from pre-release configuration");
-            }
-            ManageEvent::MovedToGraduation { crate_name } => {
-                println!("Moved {crate_name} to graduation queue");
-            }
-            ManageEvent::AddedGraduation { crate_name } => {
+            GraduationEvent::Added { crate_name } => {
                 println!("Added {crate_name} to graduation queue");
             }
-            ManageEvent::RemovedGraduation { crate_name } => {
+            GraduationEvent::Removed { crate_name } => {
                 println!("Removed {crate_name} from graduation queue");
             }
-            ManageEvent::AllPackagesInPrerelease => {
-                println!("All packages are already in pre-release mode.");
-            }
-            ManageEvent::NoPrereleasePackages => {
-                println!("No packages are currently in pre-release mode.");
-            }
-            ManageEvent::NoEligibleForGraduation => {
+            GraduationEvent::NoEligibleForGraduation => {
                 println!(
                     "No eligible packages for graduation (must be 0.x stable version and not already queued)."
                 );
             }
-            ManageEvent::NoGraduationPackages => {
+            GraduationEvent::NoGraduationPackages => {
                 println!("No packages are currently queued for graduation.");
             }
         }

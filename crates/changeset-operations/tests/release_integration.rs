@@ -176,17 +176,17 @@ fn run_release(
         git_provider,
         release_state_io,
     );
-    let input = ReleaseInput {
+    let input = ReleaseInput::new(
         dry_run,
         convert_inherited,
-        no_commit: true,
-        no_tags: true,
-        keep_changesets: true,
-        force: false,
-        per_package_config: HashMap::new(),
-        global_prerelease: None,
-        graduate_all: false,
-    };
+        true,
+        true,
+        true,
+        false,
+        HashMap::new(),
+        None,
+        false,
+    );
 
     operation.execute(dir.path(), &input)
 }
@@ -581,17 +581,17 @@ fn run_release_with_git(
         git_provider,
         release_state_io,
     );
-    let input = ReleaseInput {
-        dry_run: false,
-        convert_inherited: false,
+    let input = ReleaseInput::new(
+        false,
+        false,
         no_commit,
         no_tags,
         keep_changesets,
-        force: false,
-        per_package_config: HashMap::new(),
-        global_prerelease: None,
-        graduate_all: false,
-    };
+        false,
+        HashMap::new(),
+        None,
+        false,
+    );
 
     operation.execute(dir.path(), &input)
 }
@@ -872,17 +872,17 @@ fn run_release_with_prerelease(
         git_provider,
         release_state_io,
     );
-    let input = ReleaseInput {
-        dry_run: false,
-        convert_inherited: false,
-        no_commit: true,
-        no_tags: true,
-        keep_changesets: true,
-        force: false,
-        per_package_config: HashMap::new(),
-        global_prerelease: prerelease,
-        graduate_all: false,
-    };
+    let input = ReleaseInput::new(
+        false,
+        false,
+        true,
+        true,
+        true,
+        false,
+        HashMap::new(),
+        prerelease,
+        false,
+    );
 
     operation.execute(dir.path(), &input)
 }
@@ -1360,17 +1360,17 @@ fn run_release_with_config(
         git_provider,
         release_state_io,
     );
-    let input = ReleaseInput {
-        dry_run: false,
-        convert_inherited: false,
-        no_commit: true,
-        no_tags: true,
-        keep_changesets: true,
-        force: false,
+    let input = ReleaseInput::new(
+        false,
+        false,
+        true,
+        true,
+        true,
+        false,
         per_package_config,
         global_prerelease,
         graduate_all,
-    };
+    );
 
     operation.execute(dir.path(), &input)
 }

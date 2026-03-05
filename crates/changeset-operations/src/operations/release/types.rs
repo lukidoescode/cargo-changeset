@@ -9,15 +9,88 @@ use semver::Version;
 use crate::types::{PackageReleaseConfig, PackageVersion};
 
 pub struct ReleaseInput {
-    pub dry_run: bool,
-    pub convert_inherited: bool,
-    pub no_commit: bool,
-    pub no_tags: bool,
-    pub keep_changesets: bool,
-    pub force: bool,
-    pub per_package_config: HashMap<String, PackageReleaseConfig>,
-    pub global_prerelease: Option<PrereleaseSpec>,
-    pub graduate_all: bool,
+    dry_run: bool,
+    convert_inherited: bool,
+    no_commit: bool,
+    no_tags: bool,
+    keep_changesets: bool,
+    force: bool,
+    per_package_config: HashMap<String, PackageReleaseConfig>,
+    global_prerelease: Option<PrereleaseSpec>,
+    graduate_all: bool,
+}
+
+impl ReleaseInput {
+    #[must_use]
+    #[allow(clippy::too_many_arguments, clippy::fn_params_excessive_bools)]
+    pub fn new(
+        dry_run: bool,
+        convert_inherited: bool,
+        no_commit: bool,
+        no_tags: bool,
+        keep_changesets: bool,
+        force: bool,
+        per_package_config: HashMap<String, PackageReleaseConfig>,
+        global_prerelease: Option<PrereleaseSpec>,
+        graduate_all: bool,
+    ) -> Self {
+        Self {
+            dry_run,
+            convert_inherited,
+            no_commit,
+            no_tags,
+            keep_changesets,
+            force,
+            per_package_config,
+            global_prerelease,
+            graduate_all,
+        }
+    }
+
+    #[must_use]
+    pub fn dry_run(&self) -> bool {
+        self.dry_run
+    }
+
+    #[must_use]
+    pub fn convert_inherited(&self) -> bool {
+        self.convert_inherited
+    }
+
+    #[must_use]
+    pub fn no_commit(&self) -> bool {
+        self.no_commit
+    }
+
+    #[must_use]
+    pub fn no_tags(&self) -> bool {
+        self.no_tags
+    }
+
+    #[must_use]
+    pub fn keep_changesets(&self) -> bool {
+        self.keep_changesets
+    }
+
+    #[must_use]
+    pub fn force(&self) -> bool {
+        self.force
+    }
+
+    #[must_use]
+    pub fn per_package_config(&self) -> &HashMap<String, PackageReleaseConfig> {
+        &self.per_package_config
+    }
+
+    #[must_use]
+    pub fn global_prerelease(&self) -> Option<&PrereleaseSpec> {
+        self.global_prerelease.as_ref()
+    }
+
+    #[must_use]
+    pub fn graduate_all(&self) -> bool {
+        self.graduate_all
+    }
 }
 
 #[derive(Debug, Clone)]

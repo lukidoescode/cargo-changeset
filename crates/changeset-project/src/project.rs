@@ -18,9 +18,35 @@ pub enum ProjectKind {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CargoProject {
-    pub root: PathBuf,
-    pub kind: ProjectKind,
-    pub packages: Vec<PackageInfo>,
+    root: PathBuf,
+    kind: ProjectKind,
+    packages: Vec<PackageInfo>,
+}
+
+impl CargoProject {
+    #[must_use]
+    pub fn new(root: PathBuf, kind: ProjectKind, packages: Vec<PackageInfo>) -> Self {
+        Self {
+            root,
+            kind,
+            packages,
+        }
+    }
+
+    #[must_use]
+    pub fn root(&self) -> &Path {
+        &self.root
+    }
+
+    #[must_use]
+    pub fn kind(&self) -> &ProjectKind {
+        &self.kind
+    }
+
+    #[must_use]
+    pub fn packages(&self) -> &[PackageInfo] {
+        &self.packages
+    }
 }
 
 /// # Errors
@@ -38,11 +64,7 @@ pub fn discover_project(start_dir: &Path) -> Result<CargoProject, ProjectError> 
     let kind = determine_project_kind(&manifest);
     let packages = collect_packages(&root, &manifest, &kind)?;
 
-    Ok(CargoProject {
-        root,
-        kind,
-        packages,
-    })
+    Ok(CargoProject::new(root, kind, packages))
 }
 
 /// # Errors
@@ -52,7 +74,7 @@ pub fn ensure_changeset_dir(
     project: &CargoProject,
     config: &RootChangesetConfig,
 ) -> Result<PathBuf, ProjectError> {
-    let changeset_dir = project.root.join(config.changeset_dir());
+    let changeset_dir = project.root().join(config.changeset_dir());
     let changesets_subdir = changeset_dir.join(CHANGESETS_SUBDIR);
     if !changesets_subdir.exists() {
         std::fs::create_dir_all(&changesets_subdir).map_err(|source| {

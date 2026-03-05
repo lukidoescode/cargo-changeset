@@ -17,6 +17,8 @@ pub struct PrereleaseManageOperation<P, S, I> {
     interaction_provider: I,
 }
 
+// GraduationInteractionProvider is required because the prerelease menu
+// includes a "Graduate" action that moves packages to the graduation queue.
 impl<P, S, I> PrereleaseManageOperation<P, S, I>
 where
     P: ProjectProvider,
@@ -34,10 +36,10 @@ where
     /// # Errors
     ///
     /// Returns an error if project discovery, state loading, or interaction fails.
-    pub fn execute(&self, start_path: &Path) -> Result<Vec<ManageEvent>> {
+    pub fn execute(&self, start_path: &Path) -> Result<Vec<PrereleaseEvent>> {
         let project = self.project_provider.discover_project(start_path)?;
         let (root_config, _) = self.project_provider.load_configs(&project)?;
-        let changeset_dir = project.root.join(root_config.changeset_dir());
+        let changeset_dir = project.root().join(root_config.changeset_dir());
 
         let mut prerelease_state = self
             .release_state_io
@@ -52,7 +54,7 @@ where
         let mut events = Vec::new();
 
         loop {
-            events.push(ManageEvent::DisplayPrereleaseState(
+            events.push(PrereleaseEvent::DisplayState(
                 prerelease_state
                     .iter()
                     .map(|(k, v)| (k.to_string(), v.to_string()))
@@ -91,16 +93,16 @@ where
         project: &CargoProject,
         changeset_dir: &Path,
         prerelease_state: &mut PrereleaseState,
-        events: &mut Vec<ManageEvent>,
+        events: &mut Vec<PrereleaseEvent>,
     ) -> Result<()> {
         let available: Vec<_> = project
-            .packages
+            .packages()
             .iter()
             .filter(|p| !prerelease_state.contains(&p.name))
             .collect();
 
         if available.is_empty() {
-            events.push(ManageEvent::AllPackagesInPrerelease);
+            events.push(PrereleaseEvent::AllPackagesInPrerelease);
             return Ok(());
         }
 
@@ -120,7 +122,7 @@ where
         prerelease_state.insert(crate_name.clone(), tag.clone());
         self.release_state_io
             .save_prerelease_state(changeset_dir, prerelease_state)?;
-        events.push(ManageEvent::AddedPrerelease {
+        events.push(PrereleaseEvent::Added {
             crate_name: crate_name.clone(),
             tag,
         });
@@ -132,10 +134,10 @@ where
         &self,
         changeset_dir: &Path,
         prerelease_state: &mut PrereleaseState,
-        events: &mut Vec<ManageEvent>,
+        events: &mut Vec<PrereleaseEvent>,
     ) -> Result<()> {
         if prerelease_state.is_empty() {
-            events.push(ManageEvent::NoPrereleasePackages);
+            events.push(PrereleaseEvent::NoPrereleasePackages);
             return Ok(());
         }
 
@@ -161,7 +163,7 @@ where
         let _ = prerelease_state.remove(&crate_name);
         self.release_state_io
             .save_prerelease_state(changeset_dir, prerelease_state)?;
-        events.push(ManageEvent::RemovedPrerelease { crate_name });
+        events.push(PrereleaseEvent::Removed { crate_name });
 
         Ok(())
     }
@@ -172,16 +174,16 @@ where
         changeset_dir: &Path,
         prerelease_state: &mut PrereleaseState,
         graduation_state: &mut GraduationState,
-        events: &mut Vec<ManageEvent>,
+        events: &mut Vec<PrereleaseEvent>,
     ) -> Result<()> {
         let eligible: Vec<_> = project
-            .packages
+            .packages()
             .iter()
             .filter(|p| is_zero_version(&p.version) && !is_prerelease(&p.version))
             .collect();
 
         if eligible.is_empty() {
-            events.push(ManageEvent::NoEligibleForGraduation);
+            events.push(PrereleaseEvent::NoEligibleForGraduation);
             return Ok(());
         }
 
@@ -203,7 +205,7 @@ where
         graduation_state.add(crate_name.clone());
         self.release_state_io
             .save_graduation_state(changeset_dir, graduation_state)?;
-        events.push(ManageEvent::MovedToGraduation {
+        events.push(PrereleaseEvent::MovedToGraduation {
             crate_name: crate_name.clone(),
         });
 
@@ -234,10 +236,10 @@ where
     /// # Errors
     ///
     /// Returns an error if project discovery, state loading, or interaction fails.
-    pub fn execute(&self, start_path: &Path) -> Result<Vec<ManageEvent>> {
+    pub fn execute(&self, start_path: &Path) -> Result<Vec<GraduationEvent>> {
         let project = self.project_provider.discover_project(start_path)?;
         let (root_config, _) = self.project_provider.load_configs(&project)?;
-        let changeset_dir = project.root.join(root_config.changeset_dir());
+        let changeset_dir = project.root().join(root_config.changeset_dir());
 
         let mut state = self
             .release_state_io
@@ -247,7 +249,7 @@ where
         let mut events = Vec::new();
 
         loop {
-            events.push(ManageEvent::DisplayGraduationState(
+            events.push(GraduationEvent::DisplayState(
                 state.iter().map(str::to_string).collect(),
             ));
 
@@ -256,7 +258,7 @@ where
             match action {
                 MenuSelection::Selected(GraduationAction::Add) => {
                     let eligible: Vec<_> = project
-                        .packages
+                        .packages()
                         .iter()
                         .filter(|p| {
                             is_zero_version(&p.version)
@@ -266,7 +268,7 @@ where
                         .collect();
 
                     if eligible.is_empty() {
-                        events.push(ManageEvent::NoEligibleForGraduation);
+                        events.push(GraduationEvent::NoEligibleForGraduation);
                         continue;
                     }
 
@@ -282,13 +284,13 @@ where
                     state.add(crate_name.clone());
                     self.release_state_io
                         .save_graduation_state(&changeset_dir, &state)?;
-                    events.push(ManageEvent::AddedGraduation {
+                    events.push(GraduationEvent::Added {
                         crate_name: crate_name.clone(),
                     });
                 }
                 MenuSelection::Selected(GraduationAction::Remove) => {
                     if state.is_empty() {
-                        events.push(ManageEvent::NoGraduationPackages);
+                        events.push(GraduationEvent::NoGraduationPackages);
                         continue;
                     }
 
@@ -307,7 +309,7 @@ where
                     let _ = state.remove(crate_name);
                     self.release_state_io
                         .save_graduation_state(&changeset_dir, &state)?;
-                    events.push(ManageEvent::RemovedGraduation {
+                    events.push(GraduationEvent::Removed {
                         crate_name: crate_name.clone(),
                     });
                 }
@@ -345,10 +347,10 @@ where
         &self,
         start_path: &Path,
         input: &PrereleaseDirectInput,
-    ) -> Result<Vec<ManageEvent>> {
+    ) -> Result<Vec<PrereleaseEvent>> {
         let project = self.project_provider.discover_project(start_path)?;
         let (root_config, _) = self.project_provider.load_configs(&project)?;
-        let changeset_dir = project.root.join(root_config.changeset_dir());
+        let changeset_dir = project.root().join(root_config.changeset_dir());
 
         let mut prerelease_state = self
             .release_state_io
@@ -371,13 +373,13 @@ where
 
             prerelease_state.insert(crate_name.clone(), tag.clone());
             modified_prerelease = true;
-            events.push(ManageEvent::AddedPrerelease { crate_name, tag });
+            events.push(PrereleaseEvent::Added { crate_name, tag });
         }
 
         for crate_name in &input.remove {
             if prerelease_state.remove(crate_name).is_some() {
                 modified_prerelease = true;
-                events.push(ManageEvent::RemovedPrerelease {
+                events.push(PrereleaseEvent::Removed {
                     crate_name: crate_name.clone(),
                 });
             }
@@ -393,7 +395,7 @@ where
 
             graduation_state.add(crate_name.clone());
             modified_graduation = true;
-            events.push(ManageEvent::MovedToGraduation {
+            events.push(PrereleaseEvent::MovedToGraduation {
                 crate_name: crate_name.clone(),
             });
         }
@@ -408,7 +410,7 @@ where
         }
 
         if input.list {
-            events.push(ManageEvent::DisplayPrereleaseState(
+            events.push(PrereleaseEvent::DisplayState(
                 prerelease_state
                     .iter()
                     .map(|(k, v)| (k.to_string(), v.to_string()))
@@ -421,10 +423,22 @@ where
 }
 
 pub struct PrereleaseDirectInput {
-    pub add: Vec<String>,
-    pub remove: Vec<String>,
-    pub graduate: Vec<String>,
-    pub list: bool,
+    add: Vec<String>,
+    remove: Vec<String>,
+    graduate: Vec<String>,
+    list: bool,
+}
+
+impl PrereleaseDirectInput {
+    #[must_use]
+    pub fn new(add: Vec<String>, remove: Vec<String>, graduate: Vec<String>, list: bool) -> Self {
+        Self {
+            add,
+            remove,
+            graduate,
+            list,
+        }
+    }
 }
 
 pub struct GraduationDirectOperation<P, S> {
@@ -451,10 +465,10 @@ where
         &self,
         start_path: &Path,
         input: &GraduationDirectInput,
-    ) -> Result<Vec<ManageEvent>> {
+    ) -> Result<Vec<GraduationEvent>> {
         let project = self.project_provider.discover_project(start_path)?;
         let (root_config, _) = self.project_provider.load_configs(&project)?;
-        let changeset_dir = project.root.join(root_config.changeset_dir());
+        let changeset_dir = project.root().join(root_config.changeset_dir());
 
         let mut state = self
             .release_state_io
@@ -470,7 +484,7 @@ where
 
             state.add(crate_name.clone());
             modified = true;
-            events.push(ManageEvent::AddedGraduation {
+            events.push(GraduationEvent::Added {
                 crate_name: crate_name.clone(),
             });
         }
@@ -478,7 +492,7 @@ where
         for crate_name in &input.remove {
             if state.remove(crate_name) {
                 modified = true;
-                events.push(ManageEvent::RemovedGraduation {
+                events.push(GraduationEvent::Removed {
                     crate_name: crate_name.clone(),
                 });
             }
@@ -490,7 +504,7 @@ where
         }
 
         if input.list {
-            events.push(ManageEvent::DisplayGraduationState(
+            events.push(GraduationEvent::DisplayState(
                 state.iter().map(str::to_string).collect(),
             ));
         }
@@ -500,22 +514,34 @@ where
 }
 
 pub struct GraduationDirectInput {
-    pub add: Vec<String>,
-    pub remove: Vec<String>,
-    pub list: bool,
+    add: Vec<String>,
+    remove: Vec<String>,
+    list: bool,
+}
+
+impl GraduationDirectInput {
+    #[must_use]
+    pub fn new(add: Vec<String>, remove: Vec<String>, list: bool) -> Self {
+        Self { add, remove, list }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum ManageEvent {
-    DisplayPrereleaseState(Vec<(String, String)>),
-    DisplayGraduationState(Vec<String>),
-    AddedPrerelease { crate_name: String, tag: String },
-    RemovedPrerelease { crate_name: String },
+pub enum PrereleaseEvent {
+    DisplayState(Vec<(String, String)>),
+    Added { crate_name: String, tag: String },
+    Removed { crate_name: String },
     MovedToGraduation { crate_name: String },
-    AddedGraduation { crate_name: String },
-    RemovedGraduation { crate_name: String },
     AllPackagesInPrerelease,
     NoPrereleasePackages,
+    NoEligibleForGraduation,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum GraduationEvent {
+    DisplayState(Vec<String>),
+    Added { crate_name: String },
+    Removed { crate_name: String },
     NoEligibleForGraduation,
     NoGraduationPackages,
 }
@@ -546,7 +572,7 @@ fn validate_prerelease_tag(tag: &str) -> Result<()> {
 }
 
 fn validate_package_exists(project: &CargoProject, name: &str) -> Result<()> {
-    if !project.packages.iter().any(|p| p.name == name) {
+    if !project.packages().iter().any(|p| p.name == name) {
         return Err(OperationError::PackageNotFound {
             name: name.to_string(),
         });
@@ -556,7 +582,7 @@ fn validate_package_exists(project: &CargoProject, name: &str) -> Result<()> {
 
 fn validate_can_graduate(project: &CargoProject, name: &str) -> Result<()> {
     let package = project
-        .packages
+        .packages()
         .iter()
         .find(|p| p.name == name)
         .ok_or_else(|| OperationError::PackageNotFound {
@@ -588,10 +614,10 @@ mod tests {
     use std::path::PathBuf;
 
     fn make_project(packages: Vec<(&str, &str)>) -> CargoProject {
-        CargoProject {
-            root: PathBuf::from("/mock/project"),
-            kind: ProjectKind::VirtualWorkspace,
-            packages: packages
+        CargoProject::new(
+            PathBuf::from("/mock/project"),
+            ProjectKind::VirtualWorkspace,
+            packages
                 .into_iter()
                 .map(|(name, version)| PackageInfo {
                     name: name.to_string(),
@@ -599,7 +625,7 @@ mod tests {
                     path: PathBuf::from(format!("/mock/project/crates/{name}")),
                 })
                 .collect(),
-        }
+        )
     }
 
     mod parse_prerelease_entry_tests {
@@ -878,7 +904,7 @@ mod tests {
             assert!(
                 events
                     .iter()
-                    .any(|e| matches!(e, ManageEvent::DisplayPrereleaseState(_)))
+                    .any(|e| matches!(e, PrereleaseEvent::DisplayState(_)))
             );
         }
 
@@ -930,7 +956,7 @@ mod tests {
 
             assert!(events.iter().any(|e| matches!(
                 e,
-                ManageEvent::AddedPrerelease {
+                PrereleaseEvent::Added {
                     crate_name,
                     tag,
                 } if crate_name == "crate-a" && tag == "alpha"
@@ -965,7 +991,7 @@ mod tests {
             assert!(
                 events
                     .iter()
-                    .any(|e| matches!(e, ManageEvent::AllPackagesInPrerelease))
+                    .any(|e| matches!(e, PrereleaseEvent::AllPackagesInPrerelease))
             );
         }
     }
@@ -999,7 +1025,7 @@ mod tests {
             assert!(
                 events
                     .iter()
-                    .any(|e| matches!(e, ManageEvent::DisplayGraduationState(_)))
+                    .any(|e| matches!(e, GraduationEvent::DisplayState(_)))
             );
         }
 
@@ -1028,7 +1054,7 @@ mod tests {
 
             assert!(events.iter().any(|e| matches!(
                 e,
-                ManageEvent::AddedGraduation { crate_name } if crate_name == "crate-a"
+                GraduationEvent::Added { crate_name } if crate_name == "crate-a"
             )));
         }
 
@@ -1056,7 +1082,7 @@ mod tests {
             assert!(
                 events
                     .iter()
-                    .any(|e| matches!(e, ManageEvent::NoGraduationPackages))
+                    .any(|e| matches!(e, GraduationEvent::NoGraduationPackages))
             );
         }
     }

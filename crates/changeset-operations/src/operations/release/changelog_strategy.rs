@@ -195,3 +195,160 @@ impl ChangelogHandler for PerPackageChangelogStrategy {
         Ok(changelog_updates)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::mocks::{MockChangelogWriter, make_changeset, make_package};
+    use changeset_core::BumpType;
+
+    fn make_release(name: &str, from: &str, to: &str) -> PackageVersion {
+        PackageVersion {
+            name: name.to_string(),
+            current_version: from.parse().expect("valid"),
+            new_version: to.parse().expect("valid"),
+            bump_type: BumpType::Patch,
+        }
+    }
+
+    mod root_changelog_strategy_tests {
+        use super::*;
+        use std::path::PathBuf;
+
+        #[test]
+        fn capture_state_returns_empty_when_no_releases() -> anyhow::Result<()> {
+            let writer = MockChangelogWriter::new();
+            let lookup = IndexMap::new();
+            let ctx = ChangelogCaptureContext {
+                project_root: Path::new("/project"),
+                planned_releases: &[],
+                package_lookup: &lookup,
+                changelog_writer: &writer,
+            };
+
+            let result = RootChangelogStrategy.capture_state(&ctx)?;
+
+            assert!(result.is_empty());
+            Ok(())
+        }
+
+        #[test]
+        fn capture_state_captures_root_changelog() -> anyhow::Result<()> {
+            let writer = MockChangelogWriter::new();
+            let releases = vec![make_release("crate-a", "1.0.0", "1.0.1")];
+            let lookup = IndexMap::new();
+            let ctx = ChangelogCaptureContext {
+                project_root: Path::new("/project"),
+                planned_releases: &releases,
+                package_lookup: &lookup,
+                changelog_writer: &writer,
+            };
+
+            let result = RootChangelogStrategy.capture_state(&ctx)?;
+
+            assert_eq!(result.len(), 1);
+            assert_eq!(result[0].path, PathBuf::from("/project/CHANGELOG.md"));
+            assert!(!result[0].file_existed);
+            Ok(())
+        }
+
+        #[test]
+        fn generate_updates_writes_root_changelog() -> anyhow::Result<()> {
+            let writer = MockChangelogWriter::new();
+            let releases = vec![make_release("crate-a", "1.0.0", "1.0.1")];
+            let mut aggregator = ChangesetAggregator::new();
+            aggregator.add_changeset(&make_changeset("crate-a", BumpType::Patch, "Fix bug"));
+            let lookup = IndexMap::new();
+            let ctx = ChangelogGenerateContext {
+                project_root: Path::new("/project"),
+                aggregator: &aggregator,
+                planned_releases: &releases,
+                package_lookup: &lookup,
+                repo_info: None,
+                today: chrono::NaiveDate::from_ymd_opt(2025, 1, 1).expect("valid date"),
+                changelog_writer: &writer,
+            };
+
+            let updates = RootChangelogStrategy.generate_updates(&ctx)?;
+
+            assert_eq!(updates.len(), 1);
+            assert!(updates[0].package.is_none());
+            Ok(())
+        }
+    }
+
+    mod per_package_changelog_strategy_tests {
+        use super::*;
+
+        #[test]
+        fn capture_state_returns_per_package_paths() -> anyhow::Result<()> {
+            let writer = MockChangelogWriter::new();
+            let releases = vec![make_release("crate-a", "1.0.0", "1.0.1")];
+            let pkg = make_package("crate-a", "1.0.0");
+            let mut lookup = IndexMap::new();
+            lookup.insert("crate-a".to_string(), pkg);
+            let ctx = ChangelogCaptureContext {
+                project_root: Path::new("/project"),
+                planned_releases: &releases,
+                package_lookup: &lookup,
+                changelog_writer: &writer,
+            };
+
+            let result = PerPackageChangelogStrategy.capture_state(&ctx)?;
+
+            assert_eq!(result.len(), 1);
+            assert!(result[0].path.to_string_lossy().contains("crate-a"));
+            Ok(())
+        }
+
+        #[test]
+        fn generate_updates_writes_per_package_changelog() -> anyhow::Result<()> {
+            let writer = MockChangelogWriter::new();
+            let releases = vec![make_release("crate-a", "1.0.0", "1.0.1")];
+            let pkg = make_package("crate-a", "1.0.0");
+            let mut aggregator = ChangesetAggregator::new();
+            aggregator.add_changeset(&make_changeset("crate-a", BumpType::Patch, "Fix bug"));
+            let mut lookup = IndexMap::new();
+            lookup.insert("crate-a".to_string(), pkg);
+            let ctx = ChangelogGenerateContext {
+                project_root: Path::new("/project"),
+                aggregator: &aggregator,
+                planned_releases: &releases,
+                package_lookup: &lookup,
+                repo_info: None,
+                today: chrono::NaiveDate::from_ymd_opt(2025, 1, 1).expect("valid date"),
+                changelog_writer: &writer,
+            };
+
+            let updates = PerPackageChangelogStrategy.generate_updates(&ctx)?;
+
+            assert_eq!(updates.len(), 1);
+            assert_eq!(updates[0].package.as_deref(), Some("crate-a"));
+            Ok(())
+        }
+
+        #[test]
+        fn generate_updates_returns_empty_when_no_changes() -> anyhow::Result<()> {
+            let writer = MockChangelogWriter::new();
+            let releases = vec![make_release("crate-a", "1.0.0", "1.0.1")];
+            let pkg = make_package("crate-a", "1.0.0");
+            let aggregator = ChangesetAggregator::new();
+            let mut lookup = IndexMap::new();
+            lookup.insert("crate-a".to_string(), pkg);
+            let ctx = ChangelogGenerateContext {
+                project_root: Path::new("/project"),
+                aggregator: &aggregator,
+                planned_releases: &releases,
+                package_lookup: &lookup,
+                repo_info: None,
+                today: chrono::NaiveDate::from_ymd_opt(2025, 1, 1).expect("valid date"),
+                changelog_writer: &writer,
+            };
+
+            let updates = PerPackageChangelogStrategy.generate_updates(&ctx)?;
+
+            assert!(updates.is_empty());
+            Ok(())
+        }
+    }
+}
