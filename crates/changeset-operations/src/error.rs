@@ -212,6 +212,17 @@ pub enum OperationError {
 
 pub type Result<T> = std::result::Result<T, OperationError>;
 
+/// # Errors
+///
+/// Returns [`OperationError::InvalidPrereleaseTag`] when `tag` cannot be parsed.
+pub fn parse_prerelease_tag(tag: &str) -> Result<changeset_core::PrereleaseSpec> {
+    tag.parse()
+        .map_err(|source| OperationError::InvalidPrereleaseTag {
+            tag: tag.to_string(),
+            source,
+        })
+}
+
 impl From<SagaError<OperationError>> for OperationError {
     fn from(err: SagaError<OperationError>) -> Self {
         match err {
@@ -277,5 +288,42 @@ mod tests {
         let err = OperationError::Cancelled;
 
         assert!(err.to_string().contains("cancelled"));
+    }
+
+    #[test]
+    fn project_root_canonicalize_error_includes_path() {
+        let err = OperationError::ProjectRootCanonicalize {
+            path: PathBuf::from("/some/path"),
+            source: std::io::Error::other("test"),
+        };
+        assert!(err.to_string().contains("/some/path"));
+    }
+
+    #[test]
+    fn version_parse_error_includes_version_and_context() {
+        let err = OperationError::VersionParse {
+            version: "not-a-version".to_string(),
+            context: "test context".to_string(),
+            source: "bad".parse::<semver::Version>().expect_err("should fail"),
+        };
+        assert!(err.to_string().contains("not-a-version"));
+        assert!(err.to_string().contains("test context"));
+    }
+
+    #[test]
+    fn parse_prerelease_tag_succeeds_for_valid_tag() {
+        let spec = parse_prerelease_tag("alpha").expect("should parse valid tag");
+
+        assert_eq!(spec.identifier(), "alpha");
+    }
+
+    #[test]
+    fn parse_prerelease_tag_returns_error_for_invalid_tag() {
+        let err = parse_prerelease_tag("bad.tag").expect_err("should fail for invalid tag");
+
+        assert!(matches!(
+            err,
+            OperationError::InvalidPrereleaseTag { ref tag, .. } if tag == "bad.tag"
+        ));
     }
 }

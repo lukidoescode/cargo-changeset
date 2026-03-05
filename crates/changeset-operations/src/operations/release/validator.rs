@@ -16,28 +16,6 @@ pub struct ReleaseCliInput {
     pub(crate) graduate_all: bool,
 }
 
-impl ReleaseCliInput {
-    #[must_use]
-    pub fn cli_prerelease(&self) -> &HashMap<String, PrereleaseSpec> {
-        &self.cli_prerelease
-    }
-
-    #[must_use]
-    pub fn global_prerelease(&self) -> Option<&PrereleaseSpec> {
-        self.global_prerelease.as_ref()
-    }
-
-    #[must_use]
-    pub fn cli_graduate(&self) -> &HashSet<String> {
-        &self.cli_graduate
-    }
-
-    #[must_use]
-    pub fn graduate_all(&self) -> bool {
-        self.graduate_all
-    }
-}
-
 impl From<&ReleaseInput> for ReleaseCliInput {
     fn from(input: &ReleaseInput) -> Self {
         Self {
@@ -1232,6 +1210,97 @@ mod tests {
 
             assert!(tip.contains("--remove my-crate"));
             assert!(tip.contains("re-add"));
+        }
+    }
+
+    mod release_cli_input_conversion {
+        use super::*;
+        use crate::types::PackageReleaseConfig;
+        use changeset_core::PrereleaseSpec;
+        use std::collections::HashMap;
+
+        #[test]
+        fn extracts_prerelease_packages() {
+            let mut map = HashMap::new();
+            map.insert(
+                "crate-a".to_string(),
+                PackageReleaseConfig {
+                    prerelease: Some(PrereleaseSpec::Alpha),
+                    graduate_zero: false,
+                },
+            );
+            map.insert(
+                "crate-b".to_string(),
+                PackageReleaseConfig {
+                    prerelease: None,
+                    graduate_zero: false,
+                },
+            );
+
+            let input = ReleaseInput::builder().per_package_config(map).build();
+            let cli_input = ReleaseCliInput::from(&input);
+
+            assert_eq!(cli_input.cli_prerelease.len(), 1);
+            assert!(cli_input.cli_prerelease.contains_key("crate-a"));
+        }
+
+        #[test]
+        fn extracts_graduate_zero_packages() {
+            let mut map = HashMap::new();
+            map.insert(
+                "crate-a".to_string(),
+                PackageReleaseConfig {
+                    prerelease: None,
+                    graduate_zero: true,
+                },
+            );
+            map.insert(
+                "crate-b".to_string(),
+                PackageReleaseConfig {
+                    prerelease: None,
+                    graduate_zero: false,
+                },
+            );
+
+            let input = ReleaseInput::builder().per_package_config(map).build();
+            let cli_input = ReleaseCliInput::from(&input);
+
+            assert_eq!(cli_input.cli_graduate.len(), 1);
+            assert!(cli_input.cli_graduate.contains("crate-a"));
+        }
+
+        #[test]
+        fn extracts_global_prerelease() {
+            let input = ReleaseInput::builder()
+                .global_prerelease(Some(PrereleaseSpec::Rc))
+                .build();
+            let cli_input = ReleaseCliInput::from(&input);
+
+            let global = cli_input.global_prerelease;
+            assert!(global.is_some());
+            assert_eq!(
+                global.expect("should have global prerelease").identifier(),
+                "rc"
+            );
+        }
+
+        #[test]
+        fn defaults_empty() {
+            let input = ReleaseInput::builder().build();
+            let cli_input = ReleaseCliInput::from(&input);
+
+            assert!(cli_input.cli_prerelease.is_empty());
+            assert!(cli_input.cli_graduate.is_empty());
+            assert!(cli_input.global_prerelease.is_none());
+            assert!(!cli_input.graduate_all);
+        }
+
+        #[test]
+        fn graduate_all_propagates() {
+            let input = ReleaseInput::builder().graduate_all(true).build();
+            let cli_input = ReleaseCliInput::from(&input);
+
+            assert!(cli_input.graduate_all);
         }
     }
 

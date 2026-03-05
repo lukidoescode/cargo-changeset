@@ -339,6 +339,20 @@ mod tests {
         }
 
         #[test]
+        fn preserves_error_chain() {
+            let io_err = io::Error::other("chain test");
+            let dialoguer_err = dialoguer::Error::IO(io_err);
+
+            let result = dialoguer_to_operation_error(dialoguer_err);
+
+            let source = std::error::Error::source(&result);
+            assert!(
+                source.is_some(),
+                "error chain should be preserved through conversion"
+            );
+        }
+
+        #[test]
         fn preserves_io_error_message() {
             let io_err = io::Error::other("terminal unavailable");
             let dialoguer_err = dialoguer::Error::IO(io_err);

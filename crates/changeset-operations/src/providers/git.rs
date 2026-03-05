@@ -172,6 +172,18 @@ mod tests {
     }
 
     #[test]
+    fn returns_canonicalize_error_for_nonexistent_path() {
+        let result = Git2Provider::new(Path::new("/nonexistent/path/to/project"));
+
+        assert!(result.is_err());
+        let err = result.err().expect("should be an error");
+        assert!(matches!(
+            err,
+            OperationError::ProjectRootCanonicalize { .. }
+        ));
+    }
+
+    #[test]
     fn reuses_cached_repository() {
         let (_dir, canonical) = create_temp_git_repo();
 

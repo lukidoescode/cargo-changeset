@@ -9,4 +9,4 @@ pub mod verification;
 #[cfg(test)]
 pub mod mocks;
 
-pub use error::{CompensationFailure, OperationError, Result};
+pub use error::{CompensationFailure, OperationError, Result, parse_prerelease_tag};

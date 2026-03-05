@@ -254,3 +254,63 @@ pub(super) struct ReleasePlan {
     pub(super) package_lookup: IndexMap<String, PackageInfo>,
     pub(super) changelog_backups: Vec<ChangelogFileState>,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::types::PackageReleaseConfig;
+    use changeset_core::PrereleaseSpec;
+    use std::collections::HashMap;
+
+    #[test]
+    fn builder_defaults_all_false() {
+        let input = ReleaseInput::builder().build();
+
+        assert!(!input.dry_run());
+        assert!(!input.convert_inherited());
+        assert!(!input.no_commit());
+        assert!(!input.no_tags());
+        assert!(!input.keep_changesets());
+        assert!(!input.force());
+        assert!(!input.graduate_all());
+        assert!(input.per_package_config().is_empty());
+        assert!(input.global_prerelease().is_none());
+    }
+
+    #[test]
+    fn builder_sets_dry_run() {
+        let input = ReleaseInput::builder().dry_run(true).build();
+
+        assert!(input.dry_run());
+    }
+
+    #[test]
+    fn builder_sets_global_prerelease() {
+        let input = ReleaseInput::builder()
+            .global_prerelease(Some(PrereleaseSpec::Alpha))
+            .build();
+
+        let prerelease = input.global_prerelease();
+        assert!(prerelease.is_some());
+        assert_eq!(
+            prerelease.expect("should have prerelease").identifier(),
+            "alpha"
+        );
+    }
+
+    #[test]
+    fn builder_sets_per_package_config() {
+        let mut map = HashMap::new();
+        map.insert(
+            "crate-a".to_string(),
+            PackageReleaseConfig {
+                prerelease: None,
+                graduate_zero: false,
+            },
+        );
+
+        let input = ReleaseInput::builder().per_package_config(map).build();
+
+        assert!(input.per_package_config().contains_key("crate-a"));
+    }
+}

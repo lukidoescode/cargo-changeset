@@ -277,6 +277,54 @@ mod tests {
         }
     }
 
+    mod strategy_for_tests {
+        use super::*;
+        use indexmap::IndexMap;
+        use std::path::{Path, PathBuf};
+
+        #[test]
+        fn root_location_dispatches_to_root_strategy() -> anyhow::Result<()> {
+            let strategy = strategy_for(ChangelogLocation::Root);
+            let releases = vec![make_release("crate-a", "1.0.0", "1.0.1")];
+            let lookup = IndexMap::new();
+            let writer = MockChangelogWriter::new();
+            let ctx = ChangelogCaptureContext {
+                project_root: Path::new("/project"),
+                planned_releases: &releases,
+                package_lookup: &lookup,
+                changelog_writer: &writer,
+            };
+
+            let result = strategy.capture_state(&ctx)?;
+
+            assert_eq!(result.len(), 1);
+            assert_eq!(result[0].path, PathBuf::from("/project/CHANGELOG.md"));
+            Ok(())
+        }
+
+        #[test]
+        fn per_package_location_dispatches_to_per_package_strategy() -> anyhow::Result<()> {
+            let strategy = strategy_for(ChangelogLocation::PerPackage);
+            let releases = vec![make_release("crate-a", "1.0.0", "1.0.1")];
+            let pkg = make_package("crate-a", "1.0.0");
+            let mut lookup = IndexMap::new();
+            lookup.insert("crate-a".to_string(), pkg);
+            let writer = MockChangelogWriter::new();
+            let ctx = ChangelogCaptureContext {
+                project_root: Path::new("/project"),
+                planned_releases: &releases,
+                package_lookup: &lookup,
+                changelog_writer: &writer,
+            };
+
+            let result = strategy.capture_state(&ctx)?;
+
+            assert_eq!(result.len(), 1);
+            assert!(result[0].path.to_string_lossy().contains("crate-a"));
+            Ok(())
+        }
+    }
+
     mod per_package_changelog_strategy_tests {
         use super::*;
 
@@ -349,6 +397,91 @@ mod tests {
 
             assert!(updates.is_empty());
             Ok(())
+        }
+    }
+
+    mod changelog_file_read_error {
+        use super::*;
+        use std::path::PathBuf;
+
+        #[test]
+        fn capture_state_returns_changelog_file_read_when_read_fails() {
+            let changelog_path = PathBuf::from("/nonexistent/project/CHANGELOG.md");
+            let writer = MockChangelogWriter::new().with_existing_changelog(changelog_path);
+            let releases = vec![make_release("crate-a", "1.0.0", "1.0.1")];
+            let lookup = IndexMap::new();
+            let ctx = ChangelogCaptureContext {
+                project_root: Path::new("/nonexistent/project"),
+                planned_releases: &releases,
+                package_lookup: &lookup,
+                changelog_writer: &writer,
+            };
+
+            let result = RootChangelogStrategy.capture_state(&ctx);
+
+            assert!(result.is_err());
+            assert!(matches!(
+                result.expect_err("should fail"),
+                OperationError::ChangelogFileRead { .. }
+            ),);
+        }
+    }
+
+    mod version_helpers {
+        use super::*;
+
+        #[test]
+        fn max_planned_version_empty_returns_none() {
+            assert!(max_planned_version(&[]).is_none());
+        }
+
+        #[test]
+        fn max_planned_version_single_element() {
+            let releases = vec![make_release("crate-a", "1.0.0", "1.0.1")];
+
+            let result = max_planned_version(&releases);
+
+            assert_eq!(result, Some("1.0.1".parse().expect("valid version")));
+        }
+
+        #[test]
+        fn max_planned_version_multiple_returns_max() {
+            let releases = vec![
+                make_release("crate-a", "1.0.0", "1.0.1"),
+                make_release("crate-b", "2.0.0", "3.0.0"),
+                make_release("crate-c", "0.5.0", "0.6.0"),
+            ];
+
+            let result = max_planned_version(&releases);
+
+            assert_eq!(result, Some("3.0.0".parse().expect("valid version")));
+        }
+
+        #[test]
+        fn max_current_version_empty_returns_none() {
+            assert!(max_current_version(&[]).is_none());
+        }
+
+        #[test]
+        fn max_current_version_single_element() {
+            let releases = vec![make_release("crate-a", "1.0.0", "1.0.1")];
+
+            let result = max_current_version(&releases);
+
+            assert_eq!(result, Some("1.0.0".parse().expect("valid version")));
+        }
+
+        #[test]
+        fn max_current_version_multiple_returns_max() {
+            let releases = vec![
+                make_release("crate-a", "1.0.0", "1.0.1"),
+                make_release("crate-b", "2.0.0", "3.0.0"),
+                make_release("crate-c", "0.5.0", "0.6.0"),
+            ];
+
+            let result = max_current_version(&releases);
+
+            assert_eq!(result, Some("2.0.0".parse().expect("valid version")));
         }
     }
 }

@@ -136,12 +136,7 @@ fn parse_prerelease_args(
 }
 
 fn parse_prerelease_spec(s: &str) -> Result<PrereleaseSpec> {
-    Ok(s.parse().map_err(
-        |source| changeset_operations::OperationError::InvalidPrereleaseTag {
-            tag: s.to_string(),
-            source,
-        },
-    )?)
+    Ok(changeset_operations::parse_prerelease_tag(s)?)
 }
 
 fn parse_graduate_args(args: &[String]) -> ParsedGraduateArgs {

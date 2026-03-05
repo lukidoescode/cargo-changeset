@@ -1,6 +1,5 @@
 use std::path::Path;
 
-use changeset_core::PrereleaseSpec;
 use changeset_project::{CargoProject, GraduationState, PrereleaseState};
 use changeset_version::{is_prerelease, is_zero_version};
 
@@ -17,8 +16,6 @@ pub struct PrereleaseManageOperation<P, S, I> {
     interaction_provider: I,
 }
 
-// GraduationInteractionProvider is required because the prerelease menu
-// includes a "Graduate" action that moves packages to the graduation queue.
 impl<P, S, I> PrereleaseManageOperation<P, S, I>
 where
     P: ProjectProvider,
@@ -563,11 +560,7 @@ fn parse_prerelease_entry(input: &str) -> Result<(String, String)> {
 }
 
 fn validate_prerelease_tag(tag: &str) -> Result<()> {
-    tag.parse::<PrereleaseSpec>()
-        .map_err(|source| OperationError::InvalidPrereleaseTag {
-            tag: tag.to_string(),
-            source,
-        })?;
+    crate::error::parse_prerelease_tag(tag)?;
     Ok(())
 }
 
@@ -899,8 +892,9 @@ mod tests {
 
             let events = operation
                 .execute(std::path::Path::new("/any"))
-                .expect("should succeed");
+                .expect("prerelease manage operation should execute without error");
 
+            assert_eq!(events.len(), 1);
             assert!(
                 events
                     .iter()
@@ -925,7 +919,7 @@ mod tests {
 
             let events = operation
                 .execute(std::path::Path::new("/any"))
-                .expect("should succeed");
+                .expect("prerelease manage operation should execute without error");
 
             assert_eq!(events.len(), 1);
         }
@@ -952,22 +946,180 @@ mod tests {
 
             let events = operation
                 .execute(std::path::Path::new("/any"))
-                .expect("should succeed");
+                .expect("prerelease manage operation should execute without error");
 
-            assert!(events.iter().any(|e| matches!(
-                e,
-                PrereleaseEvent::Added {
-                    crate_name,
-                    tag,
-                } if crate_name == "crate-a" && tag == "alpha"
-            )));
+            assert!(events.contains(&PrereleaseEvent::Added {
+                crate_name: "crate-a".to_string(),
+                tag: "alpha".to_string(),
+            }));
+
+            let prerelease_state = release_state_io
+                .get_prerelease_state()
+                .expect("prerelease state should be saved");
+            assert!(prerelease_state.contains("crate-a"));
+            assert_eq!(prerelease_state.get("crate-a"), Some("alpha"));
+        }
+
+        #[test]
+        fn removes_package_from_prerelease() {
+            let project_provider = MockProjectProvider::workspace(vec![("crate-a", "1.0.0")]);
+            let release_state_io = Arc::new(MockReleaseStateIO::new().with_prerelease_state({
+                let mut state = PrereleaseState::default();
+                state.insert("crate-a".to_string(), "alpha".to_string());
+                state
+            }));
+            let interaction = Arc::new(
+                MockManageInteractionProvider::new()
+                    .with_prerelease_actions(vec![
+                        MenuSelection::Selected(PrereleaseAction::Remove),
+                        MenuSelection::Selected(PrereleaseAction::Done),
+                    ])
+                    .with_remove_prerelease_selections(vec![MenuSelection::Selected(0)]),
+            );
+
+            let operation = PrereleaseManageOperation::new(
+                project_provider,
+                Arc::clone(&release_state_io),
+                Arc::clone(&interaction),
+            );
+
+            let events = operation
+                .execute(std::path::Path::new("/any"))
+                .expect("prerelease manage operation should execute without error");
+
+            assert!(events.contains(&PrereleaseEvent::Removed {
+                crate_name: "crate-a".to_string(),
+            }));
+            match release_state_io.get_prerelease_state() {
+                None => {}
+                Some(state) => assert!(!state.contains("crate-a")),
+            }
+        }
+
+        #[test]
+        fn reports_no_prerelease_packages_on_remove_when_empty() {
+            let project_provider = MockProjectProvider::workspace(vec![("crate-a", "1.0.0")]);
+            let release_state_io = Arc::new(MockReleaseStateIO::new());
+            let interaction = Arc::new(
+                MockManageInteractionProvider::new().with_prerelease_actions(vec![
+                    MenuSelection::Selected(PrereleaseAction::Remove),
+                    MenuSelection::Selected(PrereleaseAction::Done),
+                ]),
+            );
+
+            let operation = PrereleaseManageOperation::new(
+                project_provider,
+                Arc::clone(&release_state_io),
+                Arc::clone(&interaction),
+            );
+
+            let events = operation
+                .execute(std::path::Path::new("/any"))
+                .expect("prerelease manage operation should execute without error");
+
+            assert!(events.contains(&PrereleaseEvent::NoPrereleasePackages));
+        }
+
+        #[test]
+        fn moves_package_to_graduation() {
+            let project_provider = MockProjectProvider::workspace(vec![("crate-a", "0.1.0")]);
+            let release_state_io = Arc::new(MockReleaseStateIO::new().with_prerelease_state({
+                let mut state = PrereleaseState::default();
+                state.insert("crate-a".to_string(), "alpha".to_string());
+                state
+            }));
+            let interaction = Arc::new(
+                MockManageInteractionProvider::new()
+                    .with_prerelease_actions(vec![
+                        MenuSelection::Selected(PrereleaseAction::Graduate),
+                        MenuSelection::Selected(PrereleaseAction::Done),
+                    ])
+                    .with_graduation_selections(vec![MenuSelection::Selected(0)]),
+            );
+
+            let operation = PrereleaseManageOperation::new(
+                project_provider,
+                Arc::clone(&release_state_io),
+                Arc::clone(&interaction),
+            );
+
+            let events = operation
+                .execute(std::path::Path::new("/any"))
+                .expect("prerelease manage operation should execute without error");
+
+            assert!(events.contains(&PrereleaseEvent::MovedToGraduation {
+                crate_name: "crate-a".to_string(),
+            }));
+            let graduation_state = release_state_io
+                .get_graduation_state()
+                .expect("graduation state should be saved");
+            assert!(graduation_state.contains("crate-a"));
+            match release_state_io.get_prerelease_state() {
+                None => {}
+                Some(state) => assert!(!state.contains("crate-a")),
+            }
+        }
+
+        #[test]
+        fn reports_no_eligible_for_graduation_when_all_stable() {
+            let project_provider = MockProjectProvider::workspace(vec![("crate-a", "1.0.0")]);
+            let release_state_io = Arc::new(MockReleaseStateIO::new());
+            let interaction = Arc::new(
+                MockManageInteractionProvider::new().with_prerelease_actions(vec![
+                    MenuSelection::Selected(PrereleaseAction::Graduate),
+                    MenuSelection::Selected(PrereleaseAction::Done),
+                ]),
+            );
+
+            let operation = PrereleaseManageOperation::new(
+                project_provider,
+                Arc::clone(&release_state_io),
+                Arc::clone(&interaction),
+            );
+
+            let events = operation
+                .execute(std::path::Path::new("/any"))
+                .expect("prerelease manage operation should execute without error");
+
+            assert!(events.contains(&PrereleaseEvent::NoEligibleForGraduation));
+        }
+
+        #[test]
+        fn cancels_add_when_package_selection_cancelled() {
+            let project_provider = MockProjectProvider::workspace(vec![("crate-a", "0.1.0")]);
+            let release_state_io = Arc::new(MockReleaseStateIO::new());
+            let interaction = Arc::new(
+                MockManageInteractionProvider::new()
+                    .with_prerelease_actions(vec![
+                        MenuSelection::Selected(PrereleaseAction::Add),
+                        MenuSelection::Selected(PrereleaseAction::Done),
+                    ])
+                    .with_package_selections(vec![MenuSelection::Cancelled]),
+            );
+
+            let operation = PrereleaseManageOperation::new(
+                project_provider,
+                Arc::clone(&release_state_io),
+                Arc::clone(&interaction),
+            );
+
+            let events = operation
+                .execute(std::path::Path::new("/any"))
+                .expect("prerelease manage operation should execute without error");
+
+            assert!(
+                !events
+                    .iter()
+                    .any(|e| matches!(e, PrereleaseEvent::Added { .. }))
+            );
+            assert!(release_state_io.get_prerelease_state().is_none());
         }
 
         #[test]
         fn reports_all_packages_in_prerelease() {
             let project_provider = MockProjectProvider::workspace(vec![("crate-a", "0.1.0")]);
             let release_state_io = Arc::new(MockReleaseStateIO::new().with_prerelease_state({
-                let mut state = changeset_project::PrereleaseState::default();
+                let mut state = PrereleaseState::default();
                 state.insert("crate-a".to_string(), "alpha".to_string());
                 state
             }));
@@ -986,13 +1138,9 @@ mod tests {
 
             let events = operation
                 .execute(std::path::Path::new("/any"))
-                .expect("should succeed");
+                .expect("prerelease manage operation should execute without error");
 
-            assert!(
-                events
-                    .iter()
-                    .any(|e| matches!(e, PrereleaseEvent::AllPackagesInPrerelease))
-            );
+            assert!(events.contains(&PrereleaseEvent::AllPackagesInPrerelease));
         }
     }
 
@@ -1020,13 +1168,134 @@ mod tests {
 
             let events = operation
                 .execute(std::path::Path::new("/any"))
-                .expect("should succeed");
+                .expect("graduation manage operation should execute without error");
 
+            assert_eq!(events.len(), 1);
             assert!(
                 events
                     .iter()
                     .any(|e| matches!(e, GraduationEvent::DisplayState(_)))
             );
+        }
+
+        #[test]
+        fn exits_on_cancelled() {
+            let project_provider = MockProjectProvider::workspace(vec![("crate-a", "0.1.0")]);
+            let release_state_io = Arc::new(MockReleaseStateIO::new());
+            let interaction = Arc::new(
+                MockManageInteractionProvider::new()
+                    .with_graduation_actions(vec![MenuSelection::Cancelled]),
+            );
+
+            let operation = GraduationManageOperation::new(
+                project_provider,
+                Arc::clone(&release_state_io),
+                Arc::clone(&interaction),
+            );
+
+            let events = operation
+                .execute(std::path::Path::new("/any"))
+                .expect("graduation manage operation should execute without error");
+
+            assert_eq!(events.len(), 1);
+            assert!(
+                events
+                    .iter()
+                    .any(|e| matches!(e, GraduationEvent::DisplayState(_)))
+            );
+        }
+
+        #[test]
+        fn cancels_add_when_package_selection_cancelled() {
+            let project_provider = MockProjectProvider::workspace(vec![("crate-a", "0.1.0")]);
+            let release_state_io = Arc::new(MockReleaseStateIO::new());
+            let interaction = Arc::new(
+                MockManageInteractionProvider::new()
+                    .with_graduation_actions(vec![
+                        MenuSelection::Selected(GraduationAction::Add),
+                        MenuSelection::Selected(GraduationAction::Done),
+                    ])
+                    .with_graduation_selections(vec![MenuSelection::Cancelled]),
+            );
+
+            let operation = GraduationManageOperation::new(
+                project_provider,
+                Arc::clone(&release_state_io),
+                Arc::clone(&interaction),
+            );
+
+            let events = operation
+                .execute(std::path::Path::new("/any"))
+                .expect("graduation manage operation should execute without error");
+
+            assert!(
+                !events
+                    .iter()
+                    .any(|e| matches!(e, GraduationEvent::Added { .. }))
+            );
+            assert!(release_state_io.get_graduation_state().is_none());
+        }
+
+        #[test]
+        fn reports_no_eligible_for_graduation_when_all_stable() {
+            let project_provider = MockProjectProvider::workspace(vec![("crate-a", "1.0.0")]);
+            let release_state_io = Arc::new(MockReleaseStateIO::new());
+            let interaction = Arc::new(
+                MockManageInteractionProvider::new().with_graduation_actions(vec![
+                    MenuSelection::Selected(GraduationAction::Add),
+                    MenuSelection::Selected(GraduationAction::Done),
+                ]),
+            );
+
+            let operation = GraduationManageOperation::new(
+                project_provider,
+                Arc::clone(&release_state_io),
+                Arc::clone(&interaction),
+            );
+
+            let events = operation
+                .execute(std::path::Path::new("/any"))
+                .expect("graduation manage operation should execute without error");
+
+            assert!(events.contains(&GraduationEvent::NoEligibleForGraduation));
+        }
+
+        #[test]
+        fn cancels_remove_when_selection_cancelled() {
+            let project_provider = MockProjectProvider::workspace(vec![("crate-a", "0.1.0")]);
+            let release_state_io = Arc::new(MockReleaseStateIO::new().with_graduation_state({
+                let mut state = GraduationState::default();
+                state.add("crate-a".to_string());
+                state
+            }));
+            let interaction = Arc::new(
+                MockManageInteractionProvider::new()
+                    .with_graduation_actions(vec![
+                        MenuSelection::Selected(GraduationAction::Remove),
+                        MenuSelection::Selected(GraduationAction::Done),
+                    ])
+                    .with_remove_graduation_selections(vec![MenuSelection::Cancelled]),
+            );
+
+            let operation = GraduationManageOperation::new(
+                project_provider,
+                Arc::clone(&release_state_io),
+                Arc::clone(&interaction),
+            );
+
+            let events = operation
+                .execute(std::path::Path::new("/any"))
+                .expect("graduation manage operation should execute without error");
+
+            assert!(
+                !events
+                    .iter()
+                    .any(|e| matches!(e, GraduationEvent::Removed { .. }))
+            );
+            let graduation_state = release_state_io
+                .get_graduation_state()
+                .expect("graduation state should still exist");
+            assert!(graduation_state.contains("crate-a"));
         }
 
         #[test]
@@ -1050,12 +1319,52 @@ mod tests {
 
             let events = operation
                 .execute(std::path::Path::new("/any"))
-                .expect("should succeed");
+                .expect("graduation manage operation should execute without error");
 
-            assert!(events.iter().any(|e| matches!(
-                e,
-                GraduationEvent::Added { crate_name } if crate_name == "crate-a"
-            )));
+            assert!(events.contains(&GraduationEvent::Added {
+                crate_name: "crate-a".to_string(),
+            }));
+
+            let graduation_state = release_state_io
+                .get_graduation_state()
+                .expect("graduation state should be saved");
+            assert!(graduation_state.contains("crate-a"));
+        }
+
+        #[test]
+        fn removes_package_from_graduation() {
+            let project_provider = MockProjectProvider::workspace(vec![("crate-a", "0.1.0")]);
+            let release_state_io = Arc::new(MockReleaseStateIO::new().with_graduation_state({
+                let mut state = GraduationState::default();
+                state.add("crate-a".to_string());
+                state
+            }));
+            let interaction = Arc::new(
+                MockManageInteractionProvider::new()
+                    .with_graduation_actions(vec![
+                        MenuSelection::Selected(GraduationAction::Remove),
+                        MenuSelection::Selected(GraduationAction::Done),
+                    ])
+                    .with_remove_graduation_selections(vec![MenuSelection::Selected(0)]),
+            );
+
+            let operation = GraduationManageOperation::new(
+                project_provider,
+                Arc::clone(&release_state_io),
+                Arc::clone(&interaction),
+            );
+
+            let events = operation
+                .execute(std::path::Path::new("/any"))
+                .expect("graduation manage operation should execute without error");
+
+            assert!(events.contains(&GraduationEvent::Removed {
+                crate_name: "crate-a".to_string(),
+            }));
+            match release_state_io.get_graduation_state() {
+                None => {}
+                Some(state) => assert!(!state.contains("crate-a")),
+            }
         }
 
         #[test]
@@ -1077,13 +1386,9 @@ mod tests {
 
             let events = operation
                 .execute(std::path::Path::new("/any"))
-                .expect("should succeed");
+                .expect("graduation manage operation should execute without error");
 
-            assert!(
-                events
-                    .iter()
-                    .any(|e| matches!(e, GraduationEvent::NoGraduationPackages))
-            );
+            assert!(events.contains(&GraduationEvent::NoGraduationPackages));
         }
     }
 }

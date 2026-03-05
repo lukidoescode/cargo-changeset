@@ -45,14 +45,14 @@ pub(super) fn build_release_config(
             .prerelease = Some(spec.clone());
     }
 
-    for (pkg, spec) in cli_input.cli_prerelease() {
+    for (pkg, spec) in &cli_input.cli_prerelease {
         per_package
             .entry(pkg.clone())
             .or_insert_with(PackageReleaseConfig::default)
             .prerelease = Some(spec.clone());
     }
 
-    if let Some(global) = cli_input.global_prerelease() {
+    if let Some(global) = cli_input.global_prerelease.as_ref() {
         for pkg in packages {
             per_package
                 .entry(pkg.name.clone())
@@ -70,14 +70,14 @@ pub(super) fn build_release_config(
         }
     }
 
-    for pkg in cli_input.cli_graduate() {
+    for pkg in &cli_input.cli_graduate {
         per_package
             .entry(pkg.clone())
             .or_insert_with(PackageReleaseConfig::default)
             .graduate_zero = true;
     }
 
-    if cli_input.graduate_all() {
+    if cli_input.graduate_all {
         for pkg in packages {
             if is_zero_version(&pkg.version) {
                 per_package
