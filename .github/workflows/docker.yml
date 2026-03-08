@@ -11,6 +11,7 @@ on:
         required: false
 
 permissions:
+  contents: read
   packages: write
 
 env:
@@ -31,6 +32,8 @@ jobs:
             digest-name: linux-arm64
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - name: Extract metadata
         id: meta
@@ -127,6 +130,7 @@ jobs:
       - name: Create multi-arch manifest for GHCR
         working-directory: /tmp/digests
         run: | # zizmor: ignore[template-injection]
+          # shellcheck disable=SC2046
           docker buildx imagetools create \
             $(jq -cr '.tags | map("-t " + .) | join(" ")' <<< '${{ steps.meta-ghcr.outputs.json }}') \
             $(printf '${{ env.GHCR_IMAGE }}@sha256:%s ' *)
@@ -134,6 +138,7 @@ jobs:
       - name: Create multi-arch manifest for Docker Hub
         working-directory: /tmp/digests
         run: | # zizmor: ignore[template-injection]
+          # shellcheck disable=SC2046
           docker buildx imagetools create \
             $(jq -cr '.tags | map("-t " + .) | join(" ")' <<< '${{ steps.meta-dockerhub.outputs.json }}') \
             $(printf '${{ env.DOCKERHUB_IMAGE }}@sha256:%s ' *)

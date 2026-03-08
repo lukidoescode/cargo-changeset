@@ -14,6 +14,8 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - name: Download actionlint
         id: get_actionlint
@@ -21,7 +23,7 @@ jobs:
         shell: bash
 
       - name: Run actionlint
-        run: ${{ steps.get_actionlint.outputs.executable }} -color
+        run: ${{ steps.get_actionlint.outputs.executable }} -color # zizmor: ignore[template-injection]
         shell: bash
 
   zizmor:
