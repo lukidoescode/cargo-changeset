@@ -17,16 +17,27 @@ type_complexity = "allow"                    # Some bevy types are just complex.
 struct_excessive_bools = "allow"             # CLI input structs map directly to command-line flags
 unwrap_used = "deny"
 
+[workspace.metadata]
+
+[workspace.metadata.changeset]
+commit = true
+tags = true
+keep_changesets = false
+tag_format = "crate-prefixed"
+changelog = "root"
+comparison_links = "auto"
+zero_version_behavior = "effective-minor"
+
 [workspace.dependencies]
 # Internal crates - versions managed independently in each crate
 changeset-core = { path = "crates/changeset-core", version = "0.0.1" }
 changeset-parse = { path = "crates/changeset-parse", version = "0.0.1" }
-changeset-git = { path = "crates/changeset-git", version = "0.0.1" }
+changeset-git = { path = "crates/changeset-git", version = "0.0.2" }
 changeset-version = { path = "crates/changeset-version", version = "0.0.1" }
-changeset-project = { path = "crates/changeset-project", version = "0.0.1" }
-changeset-changelog = { path = "crates/changeset-changelog", version = "0.0.1" }
-changeset-operations = { path = "crates/changeset-operations", version = "0.0.1" }
-changeset-manifest = { path = "crates/changeset-manifest", version = "0.0.1" }
+changeset-project = { path = "crates/changeset-project", version = "0.1.0" }
+changeset-changelog = { path = "crates/changeset-changelog", version = "0.0.2" }
+changeset-operations = { path = "crates/changeset-operations", version = "0.1.0" }
+changeset-manifest = { path = "crates/changeset-manifest", version = "0.0.2" }
 changeset-saga = { path = "crates/changeset-saga", version = "0.0.1" }
 
 # External dependencies
