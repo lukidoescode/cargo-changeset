@@ -21,12 +21,12 @@ unwrap_used = "deny"
 # Internal crates - versions managed independently in each crate
 changeset-core = { path = "crates/changeset-core", version = "0.0.1" }
 changeset-parse = { path = "crates/changeset-parse", version = "0.0.1" }
-changeset-git = { path = "crates/changeset-git", version = "0.0.1" }
+changeset-git = { path = "crates/changeset-git", version = "0.0.2" }
 changeset-version = { path = "crates/changeset-version", version = "0.0.1" }
-changeset-project = { path = "crates/changeset-project", version = "0.0.1" }
-changeset-changelog = { path = "crates/changeset-changelog", version = "0.0.1" }
-changeset-operations = { path = "crates/changeset-operations", version = "0.0.1" }
-changeset-manifest = { path = "crates/changeset-manifest", version = "0.0.1" }
+changeset-project = { path = "crates/changeset-project", version = "0.1.0" }
+changeset-changelog = { path = "crates/changeset-changelog", version = "0.0.2" }
+changeset-operations = { path = "crates/changeset-operations", version = "0.1.0" }
+changeset-manifest = { path = "crates/changeset-manifest", version = "0.0.2" }
 changeset-saga = { path = "crates/changeset-saga", version = "0.0.1" }
 
 # External dependencies
