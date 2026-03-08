@@ -24,4 +24,4 @@ jobs:
       - name: Install cargo-changeset
         run: cargo install cargo-changeset --version 0.1.0
       - name: Verify changeset coverage
-        run: cargo changeset verify --base ${{ github.base_ref }}
+        run: cargo changeset verify --base origin/${{ github.base_ref }}
