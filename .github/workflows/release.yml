@@ -1,0 +1,77 @@
+---
+
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: Only run dry-run, do not publish
+        type: boolean
+        default: false
+      pre_release:
+        description: Pre-release tag (e.g. alpha, beta)
+        type: string
+        required: false
+      graduate:
+        description: Graduate pre-releases to stable
+        type: boolean
+        default: false
+      keep_changesets:
+        description: Keep changeset files after release
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Configure git identity
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Cache cargo-changeset binary
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/bin/cargo-changeset
+          key: cargo-changeset-${{ runner.os }}-0.0.2
+
+      - name: Install cargo-changeset
+        run: cargo install cargo-changeset --version 0.0.2
+
+      - name: Build release flags
+        id: flags
+        run: |
+          FLAGS=""
+          if [ -n "${{ inputs.pre_release }}" ]; then
+            FLAGS="$FLAGS --prerelease ${{ inputs.pre_release }}"
+          fi
+          if [ "${{ inputs.graduate }}" = "true" ]; then
+            FLAGS="$FLAGS --graduate"
+          fi
+          if [ "${{ inputs.keep_changesets }}" = "true" ]; then
+            FLAGS="$FLAGS --keep-changesets"
+          fi
+          echo "flags=$FLAGS" >> "$GITHUB_OUTPUT"
+
+      - name: Dry run release
+        run: cargo changeset release --dry-run ${{ steps.flags.outputs.flags }}
+
+      - name: Execute release
+        if: ${{ inputs.dry_run == false }}
+        run: cargo changeset release ${{ steps.flags.outputs.flags }}
+
+      - name: Push release commit and tags
+        if: ${{ inputs.dry_run == false }}
+        run: |-
+          git remote set-url origin "https://x-access-token:${{ secrets.GH_RELEASE_PAT }}@github.com/${{ github.repository }}.git"
+          git push --follow-tags
