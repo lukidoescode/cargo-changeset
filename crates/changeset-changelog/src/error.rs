@@ -28,6 +28,9 @@ pub enum ChangelogError {
         source: url::ParseError,
     },
 
+    #[error("URL '{url}' has no host")]
+    MissingHost { url: String },
+
     #[error("invalid repository path in URL '{url}': expected owner/repo format")]
     InvalidRepositoryPath { url: String },
 

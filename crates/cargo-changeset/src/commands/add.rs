@@ -20,14 +20,15 @@ pub(super) fn run(args: AddArgs, start_path: &Path) -> Result<()> {
     let project_provider = FileSystemProjectProvider::new();
     let project = project_provider.discover_project(start_path)?;
 
-    let is_single_package = project.kind == ProjectKind::SinglePackage && args.packages.is_empty();
+    let is_single_package =
+        *project.kind() == ProjectKind::SinglePackage && args.packages.is_empty();
     if is_single_package {
-        if let Some(pkg) = project.packages.first() {
+        if let Some(pkg) = project.packages().first() {
             println!("Using package: {} ({})", pkg.name, pkg.version);
         }
     }
 
-    let changeset_writer = FileSystemChangesetIO::new(&project.root);
+    let changeset_writer = FileSystemChangesetIO::new(project.root());
 
     let input = build_input(&args)?;
 

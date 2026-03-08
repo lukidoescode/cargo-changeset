@@ -55,7 +55,7 @@ where
         let project = self.project_provider.discover_project(start_path)?;
         let (root_config, _) = self.project_provider.load_configs(&project)?;
 
-        let changeset_dir = project.root.join(root_config.changeset_dir());
+        let changeset_dir = project.root().join(root_config.changeset_dir());
         let changeset_files = self.changeset_reader.list_changesets(&changeset_dir)?;
 
         let mut changesets = Vec::new();
@@ -74,17 +74,17 @@ where
 
         let plan = VersionPlanner::plan_releases_with_behavior(
             &changesets,
-            &project.packages,
+            project.packages(),
             None,
             root_config.zero_version_behavior(),
         )?;
 
         let (_, unchanged_packages) =
-            VersionPlanner::partition_packages(&changesets, &project.packages);
+            VersionPlanner::partition_packages(&changesets, project.packages());
 
         let packages_with_inherited_versions = self
             .inherited_checker
-            .find_packages_with_inherited_versions(&project.packages)?;
+            .find_packages_with_inherited_versions(project.packages())?;
 
         Ok(StatusOutput {
             changesets,

@@ -1,37 +1,205 @@
+use std::fmt::Debug;
+
 use url::Url;
 
 use crate::error::ChangelogError;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Forge {
-    GitHub,
-    GitLab,
-    Bitbucket,
-    Gitea,
-    SourceHut,
+pub(crate) trait ForgeStrategy: Send + Sync + Debug {
+    fn name(&self) -> &'static str;
+    fn matches_host(&self, host: &str) -> bool;
+    fn comparison_url(
+        &self,
+        base_url: &Url,
+        owner: &str,
+        repo: &str,
+        base_tag: &str,
+        target_tag: &str,
+    ) -> String;
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct RepositoryInfo {
-    pub forge: Forge,
-    pub owner: String,
-    pub repo: String,
-    pub base_url: Url,
+#[derive(Debug)]
+pub(crate) struct GitHub;
+
+impl ForgeStrategy for GitHub {
+    fn name(&self) -> &'static str {
+        "GitHub"
+    }
+
+    fn matches_host(&self, host: &str) -> bool {
+        let host = host.to_ascii_lowercase();
+        host == "github.com" || host.ends_with(".github.com")
+    }
+
+    fn comparison_url(
+        &self,
+        base_url: &Url,
+        owner: &str,
+        repo: &str,
+        base_tag: &str,
+        target_tag: &str,
+    ) -> String {
+        format!("{base_url}{owner}/{repo}/compare/{base_tag}...{target_tag}")
+    }
 }
+
+#[derive(Debug)]
+pub(crate) struct GitLab;
+
+impl ForgeStrategy for GitLab {
+    fn name(&self) -> &'static str {
+        "GitLab"
+    }
+
+    fn matches_host(&self, host: &str) -> bool {
+        let host = host.to_ascii_lowercase();
+        host == "gitlab.com" || host.starts_with("gitlab.") || host.contains(".gitlab.")
+    }
+
+    fn comparison_url(
+        &self,
+        base_url: &Url,
+        owner: &str,
+        repo: &str,
+        base_tag: &str,
+        target_tag: &str,
+    ) -> String {
+        format!("{base_url}{owner}/{repo}/-/compare/{base_tag}...{target_tag}")
+    }
+}
+
+#[derive(Debug)]
+pub(crate) struct Bitbucket;
+
+impl ForgeStrategy for Bitbucket {
+    fn name(&self) -> &'static str {
+        "Bitbucket"
+    }
+
+    fn matches_host(&self, host: &str) -> bool {
+        let host = host.to_ascii_lowercase();
+        host == "bitbucket.org" || host.ends_with(".bitbucket.org")
+    }
+
+    fn comparison_url(
+        &self,
+        base_url: &Url,
+        owner: &str,
+        repo: &str,
+        base_tag: &str,
+        target_tag: &str,
+    ) -> String {
+        format!("{base_url}{owner}/{repo}/branches/compare/{target_tag}..{base_tag}")
+    }
+}
+
+#[derive(Debug)]
+pub(crate) struct Gitea;
+
+impl ForgeStrategy for Gitea {
+    fn name(&self) -> &'static str {
+        "Gitea"
+    }
+
+    fn matches_host(&self, host: &str) -> bool {
+        let host = host.to_ascii_lowercase();
+        host == "codeberg.org" || host.starts_with("gitea.")
+    }
+
+    fn comparison_url(
+        &self,
+        base_url: &Url,
+        owner: &str,
+        repo: &str,
+        base_tag: &str,
+        target_tag: &str,
+    ) -> String {
+        format!("{base_url}{owner}/{repo}/compare/{base_tag}...{target_tag}")
+    }
+}
+
+#[derive(Debug)]
+pub(crate) struct SourceHut;
+
+impl ForgeStrategy for SourceHut {
+    fn name(&self) -> &'static str {
+        "SourceHut"
+    }
+
+    fn matches_host(&self, host: &str) -> bool {
+        let host = host.to_ascii_lowercase();
+        host == "git.sr.ht" || host.ends_with(".sr.ht")
+    }
+
+    fn comparison_url(
+        &self,
+        base_url: &Url,
+        owner: &str,
+        repo: &str,
+        base_tag: &str,
+        target_tag: &str,
+    ) -> String {
+        format!("{base_url}~{owner}/{repo}/log/{base_tag}..{target_tag}")
+    }
+}
+
+static FORGES: &[&dyn ForgeStrategy] = &[&GitHub, &GitLab, &Bitbucket, &Gitea, &SourceHut];
+
+fn detect_forge(host: &str) -> Option<&'static dyn ForgeStrategy> {
+    FORGES.iter().find(|f| f.matches_host(host)).copied()
+}
+
+pub struct RepositoryInfo {
+    forge: Option<&'static dyn ForgeStrategy>,
+    owner: String,
+    repo: String,
+    base_url: Url,
+}
+
+impl std::fmt::Debug for RepositoryInfo {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("RepositoryInfo")
+            .field("forge", &self.forge_name())
+            .field("owner", &self.owner)
+            .field("repo", &self.repo)
+            .field("base_url", &self.base_url)
+            .finish()
+    }
+}
+
+impl Clone for RepositoryInfo {
+    fn clone(&self) -> Self {
+        Self {
+            forge: self.forge,
+            owner: self.owner.clone(),
+            repo: self.repo.clone(),
+            base_url: self.base_url.clone(),
+        }
+    }
+}
+
+impl PartialEq for RepositoryInfo {
+    fn eq(&self, other: &Self) -> bool {
+        self.forge_name() == other.forge_name()
+            && self.owner == other.owner
+            && self.repo == other.repo
+            && self.base_url == other.base_url
+    }
+}
+
+impl Eq for RepositoryInfo {}
 
 impl RepositoryInfo {
     /// # Errors
     ///
-    /// Returns `ChangelogError::UrlParse` if the URL is invalid or missing required path segments.
+    /// Fails if the URL cannot be parsed or is missing required path segments.
     pub fn from_url(url_str: &str) -> Result<Self, ChangelogError> {
         let url = Url::parse(url_str).map_err(|source| ChangelogError::UrlParse {
             url: url_str.to_string(),
             source,
         })?;
 
-        let host = url.host_str().ok_or_else(|| ChangelogError::UrlParse {
+        let host = url.host_str().ok_or_else(|| ChangelogError::MissingHost {
             url: url_str.to_string(),
-            source: url::ParseError::EmptyHost,
         })?;
 
         let forge = detect_forge(host);
@@ -53,46 +221,36 @@ impl RepositoryInfo {
     }
 
     #[must_use]
-    pub fn comparison_url(&self, base_tag: &str, target_tag: &str) -> String {
-        match self.forge {
-            Forge::GitHub | Forge::Gitea => format!(
-                "{}{}/{}/compare/{}...{}",
-                self.base_url, self.owner, self.repo, base_tag, target_tag
-            ),
-            Forge::GitLab => format!(
-                "{}{}/{}/-/compare/{}...{}",
-                self.base_url, self.owner, self.repo, base_tag, target_tag
-            ),
-            Forge::Bitbucket => format!(
-                "{}{}/{}/branches/compare/{}..{}",
-                self.base_url, self.owner, self.repo, target_tag, base_tag
-            ),
-            Forge::SourceHut => format!(
-                "{}~{}/{}/log/{}..{}",
-                self.base_url, self.owner, self.repo, base_tag, target_tag
-            ),
-        }
+    pub fn forge_name(&self) -> &'static str {
+        self.forge.map_or("Unknown", ForgeStrategy::name)
     }
-}
 
-fn detect_forge(host: &str) -> Forge {
-    let host_lower = host.to_lowercase();
+    #[must_use]
+    pub fn owner(&self) -> &str {
+        &self.owner
+    }
 
-    if host_lower == "github.com" || host_lower.ends_with(".github.com") {
-        Forge::GitHub
-    } else if host_lower == "gitlab.com"
-        || host_lower.starts_with("gitlab.")
-        || host_lower.contains(".gitlab.")
-    {
-        Forge::GitLab
-    } else if host_lower == "bitbucket.org" || host_lower.ends_with(".bitbucket.org") {
-        Forge::Bitbucket
-    } else if host_lower == "codeberg.org" || host_lower.starts_with("gitea.") {
-        Forge::Gitea
-    } else if host_lower == "git.sr.ht" || host_lower.ends_with(".sr.ht") {
-        Forge::SourceHut
-    } else {
-        Forge::GitHub
+    #[must_use]
+    pub fn repo(&self) -> &str {
+        &self.repo
+    }
+
+    #[must_use]
+    pub fn base_url(&self) -> &Url {
+        &self.base_url
+    }
+
+    #[must_use]
+    pub fn comparison_url(&self, base_tag: &str, target_tag: &str) -> Option<String> {
+        self.forge.map(|f| {
+            f.comparison_url(
+                &self.base_url,
+                &self.owner,
+                &self.repo,
+                base_tag,
+                target_tag,
+            )
+        })
     }
 }
 
@@ -134,55 +292,58 @@ mod tests {
     #[test]
     fn detect_github_from_url() {
         let info = RepositoryInfo::from_url("https://github.com/owner/repo").expect("should parse");
-        assert_eq!(info.forge, Forge::GitHub);
-        assert_eq!(info.owner, "owner");
-        assert_eq!(info.repo, "repo");
+        assert_eq!(info.forge_name(), "GitHub");
+        assert_eq!(info.owner(), "owner");
+        assert_eq!(info.repo(), "repo");
     }
 
     #[test]
     fn detect_gitlab_from_url() {
         let info = RepositoryInfo::from_url("https://gitlab.com/owner/repo").expect("should parse");
-        assert_eq!(info.forge, Forge::GitLab);
-        assert_eq!(info.owner, "owner");
-        assert_eq!(info.repo, "repo");
+        assert_eq!(info.forge_name(), "GitLab");
+        assert_eq!(info.owner(), "owner");
+        assert_eq!(info.repo(), "repo");
     }
 
     #[test]
     fn detect_bitbucket_from_url() {
         let info =
             RepositoryInfo::from_url("https://bitbucket.org/owner/repo").expect("should parse");
-        assert_eq!(info.forge, Forge::Bitbucket);
-        assert_eq!(info.owner, "owner");
-        assert_eq!(info.repo, "repo");
+        assert_eq!(info.forge_name(), "Bitbucket");
+        assert_eq!(info.owner(), "owner");
+        assert_eq!(info.repo(), "repo");
     }
 
     #[test]
     fn detect_codeberg_as_gitea() {
         let info =
             RepositoryInfo::from_url("https://codeberg.org/owner/repo").expect("should parse");
-        assert_eq!(info.forge, Forge::Gitea);
+        assert_eq!(info.forge_name(), "Gitea");
     }
 
     #[test]
     fn detect_sourcehut_from_url() {
         let info = RepositoryInfo::from_url("https://git.sr.ht/~owner/repo").expect("should parse");
-        assert_eq!(info.forge, Forge::SourceHut);
-        assert_eq!(info.owner, "owner");
-        assert_eq!(info.repo, "repo");
+        assert_eq!(info.forge_name(), "SourceHut");
+        assert_eq!(info.owner(), "owner");
+        assert_eq!(info.repo(), "repo");
     }
 
     #[test]
     fn strip_git_suffix_from_url() {
         let info =
             RepositoryInfo::from_url("https://github.com/owner/repo.git").expect("should parse");
-        assert_eq!(info.repo, "repo");
+        assert_eq!(info.repo(), "repo");
     }
 
     #[test]
     fn github_comparison_url() {
         let info = RepositoryInfo::from_url("https://github.com/owner/repo").expect("should parse");
         let url = info.comparison_url("v1.0.0", "v1.1.0");
-        assert_eq!(url, "https://github.com/owner/repo/compare/v1.0.0...v1.1.0");
+        assert_eq!(
+            url.as_deref(),
+            Some("https://github.com/owner/repo/compare/v1.0.0...v1.1.0")
+        );
     }
 
     #[test]
@@ -190,8 +351,8 @@ mod tests {
         let info = RepositoryInfo::from_url("https://gitlab.com/owner/repo").expect("should parse");
         let url = info.comparison_url("v1.0.0", "v1.1.0");
         assert_eq!(
-            url,
-            "https://gitlab.com/owner/repo/-/compare/v1.0.0...v1.1.0"
+            url.as_deref(),
+            Some("https://gitlab.com/owner/repo/-/compare/v1.0.0...v1.1.0")
         );
     }
 
@@ -201,8 +362,8 @@ mod tests {
             RepositoryInfo::from_url("https://bitbucket.org/owner/repo").expect("should parse");
         let url = info.comparison_url("v1.0.0", "v1.1.0");
         assert_eq!(
-            url,
-            "https://bitbucket.org/owner/repo/branches/compare/v1.1.0..v1.0.0"
+            url.as_deref(),
+            Some("https://bitbucket.org/owner/repo/branches/compare/v1.1.0..v1.0.0")
         );
     }
 
@@ -210,7 +371,10 @@ mod tests {
     fn sourcehut_comparison_url() {
         let info = RepositoryInfo::from_url("https://git.sr.ht/~owner/repo").expect("should parse");
         let url = info.comparison_url("v1.0.0", "v1.1.0");
-        assert_eq!(url, "https://git.sr.ht/~owner/repo/log/v1.0.0..v1.1.0");
+        assert_eq!(
+            url.as_deref(),
+            Some("https://git.sr.ht/~owner/repo/log/v1.0.0..v1.1.0")
+        );
     }
 
     #[test]
@@ -239,16 +403,17 @@ mod tests {
     fn self_hosted_gitlab() {
         let info = RepositoryInfo::from_url("https://gitlab.mycompany.com/team/project")
             .expect("should parse");
-        assert_eq!(info.forge, Forge::GitLab);
-        assert_eq!(info.owner, "team");
-        assert_eq!(info.repo, "project");
+        assert_eq!(info.forge_name(), "GitLab");
+        assert_eq!(info.owner(), "team");
+        assert_eq!(info.repo(), "project");
     }
 
     #[test]
-    fn unknown_host_defaults_to_github() {
+    fn unknown_host_has_no_forge() {
         let info =
             RepositoryInfo::from_url("https://example.com/owner/repo").expect("should parse");
-        assert_eq!(info.forge, Forge::GitHub);
+        assert_eq!(info.forge_name(), "Unknown");
+        assert!(info.comparison_url("v1.0.0", "v1.1.0").is_none());
     }
 
     #[test]
@@ -263,7 +428,9 @@ mod tests {
     #[test]
     fn sourcehut_produces_single_tilde_in_url() {
         let info = RepositoryInfo::from_url("https://git.sr.ht/~owner/repo").expect("should parse");
-        let url = info.comparison_url("v1.0.0", "v1.1.0");
+        let url = info
+            .comparison_url("v1.0.0", "v1.1.0")
+            .expect("sourcehut should have a forge");
 
         assert!(
             url.contains("/~owner/") && !url.contains("/~~"),

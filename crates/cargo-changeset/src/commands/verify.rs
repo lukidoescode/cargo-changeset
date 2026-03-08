@@ -14,8 +14,8 @@ pub(crate) fn run(args: VerifyArgs, start_path: &Path) -> Result<()> {
     let project_provider = FileSystemProjectProvider::new();
     let project = project_provider.discover_project(start_path)?;
 
-    let git_provider = Git2Provider::new();
-    let changeset_reader = FileSystemChangesetIO::new(&project.root);
+    let git_provider = Git2Provider::new(project.root())?;
+    let changeset_reader = FileSystemChangesetIO::new(project.root());
 
     let operation = VerifyOperation::new(project_provider, git_provider, changeset_reader);
 

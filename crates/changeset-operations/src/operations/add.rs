@@ -68,11 +68,11 @@ where
     pub fn execute(&self, start_path: &Path, input: AddInput) -> Result<AddResult> {
         let project = self.project_provider.discover_project(start_path)?;
 
-        if project.packages.is_empty() {
-            return Err(OperationError::EmptyProject(project.root));
+        if project.packages().is_empty() {
+            return Err(OperationError::EmptyProject(project.root().to_path_buf()));
         }
 
-        let packages = match self.select_packages(&project.packages, &input)? {
+        let packages = match self.select_packages(project.packages(), &input)? {
             Some(packages) if packages.is_empty() => return Ok(AddResult::NoPackages),
             Some(packages) => packages,
             None => return Ok(AddResult::Cancelled),

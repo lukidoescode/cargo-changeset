@@ -1,3 +1,4 @@
+pub(crate) mod error_format;
 mod formatter;
 mod plain;
 mod status;

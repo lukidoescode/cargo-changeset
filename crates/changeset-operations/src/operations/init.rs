@@ -6,12 +6,10 @@ use changeset_project::{CargoProject, ProjectKind, RootChangesetConfig};
 
 use crate::Result;
 use crate::traits::{
-    ChangelogSettingsInput, GitSettingsInput, InitInteractionProvider, ManifestWriter,
+    ChangelogSettingsInput, GitSettingsInput, InitInteractionProvider, ManifestMetadataWriter,
     ProjectContext, ProjectProvider, VersionSettingsInput,
 };
 
-/// Input for the init operation.
-///
 /// Configuration sources have the following precedence (highest to lowest):
 /// 1. `defaults: true` - Uses all default values, ignores other fields
 /// 2. Explicit `git_config`, `changelog_config`, `version_config` fields
@@ -24,7 +22,6 @@ pub struct InitInput {
     pub version_config: Option<VersionSettingsInput>,
 }
 
-/// A preview of what the init operation will do, without performing any changes.
 #[derive(Debug)]
 pub struct InitPlan {
     pub changeset_dir: PathBuf,
@@ -89,7 +86,7 @@ where
 impl<P, M, I> InitOperation<P, M, I>
 where
     P: ProjectProvider,
-    M: ManifestWriter,
+    M: ManifestMetadataWriter,
     I: InitInteractionProvider,
 {
     /// Prepares an initialization plan by collecting all configuration without
@@ -104,7 +101,7 @@ where
         let (root_config, _) = self.project_provider.load_configs(&project)?;
 
         let context = ProjectContext {
-            is_single_package: project.kind == ProjectKind::SinglePackage,
+            is_single_package: *project.kind() == ProjectKind::SinglePackage,
         };
         let config = self.build_config(input, context)?;
 
@@ -134,7 +131,7 @@ where
             if plan.config.is_empty() {
                 false
             } else {
-                let manifest_path = project.root.join("Cargo.toml");
+                let manifest_path = project.root().join("Cargo.toml");
                 writer.write_metadata(&manifest_path, plan.metadata_section, &plan.config)?;
                 true
             }
@@ -167,27 +164,7 @@ where
     }
 
     fn build_config(&self, input: &InitInput, context: ProjectContext) -> Result<InitConfig> {
-        if input.defaults {
-            return Ok(build_default_config(context));
-        }
-
-        let mut config = InitConfig::default();
-
-        if let Some(ref git) = input.git_config {
-            config.commit = Some(git.commit);
-            config.tags = Some(git.tags);
-            config.keep_changesets = Some(git.keep_changesets);
-            config.tag_format = Some(git.tag_format);
-        }
-
-        if let Some(ref changelog) = input.changelog_config {
-            config.changelog = Some(changelog.changelog);
-            config.comparison_links = Some(changelog.comparison_links);
-        }
-
-        if let Some(ref version) = input.version_config {
-            config.zero_version_behavior = Some(version.zero_version_behavior);
-        }
+        let mut config = build_config_from_input(input, context);
 
         if config.is_empty() {
             if let Some(ref provider) = self.interaction_provider {
@@ -213,18 +190,17 @@ where
     }
 }
 
-/// Builds an `InitPlan` from project information and configuration.
 fn build_init_plan(
     project: &CargoProject,
     root_config: &RootChangesetConfig,
     config: InitConfig,
 ) -> InitPlan {
     let changeset_dir_path = root_config.changeset_dir();
-    let full_changeset_dir = project.root.join(changeset_dir_path);
+    let full_changeset_dir = project.root().join(changeset_dir_path);
     let dir_exists = full_changeset_dir.exists();
     let gitkeep_exists = full_changeset_dir.join(".gitkeep").exists();
 
-    let metadata_section = match project.kind {
+    let metadata_section = match project.kind() {
         ProjectKind::VirtualWorkspace | ProjectKind::WorkspaceWithRoot => {
             MetadataSection::Workspace
         }
@@ -246,7 +222,7 @@ fn build_init_plan(
 /// - Single package: `version-only` (e.g., `v1.0.0`)
 /// - Workspace: `crate-prefixed` (e.g., `crate-name@1.0.0`)
 #[must_use]
-pub fn build_default_config(context: ProjectContext) -> InitConfig {
+pub(crate) fn build_default_config(context: ProjectContext) -> InitConfig {
     let tag_format = if context.is_single_package {
         changeset_manifest::TagFormat::VersionOnly
     } else {
@@ -264,7 +240,6 @@ pub fn build_default_config(context: ProjectContext) -> InitConfig {
     }
 }
 
-/// Builds an `InitConfig` from the provided input settings.
 #[must_use]
 pub fn build_config_from_input(input: &InitInput, context: ProjectContext) -> InitConfig {
     if input.defaults {

@@ -4,7 +4,7 @@ use changeset_git::{FileChange, FileStatus};
 use changeset_project::map_files_to_packages;
 
 use crate::Result;
-use crate::traits::{ChangesetReader, GitProvider, ProjectProvider};
+use crate::traits::{ChangesetReader, GitDiffProvider, ProjectProvider};
 use crate::verification::rules::{CoverageRule, DeletedChangesetsRule};
 use crate::verification::{VerificationContext, VerificationEngine, VerificationResult};
 
@@ -34,7 +34,7 @@ pub struct VerifyOperation<P, G, R> {
 impl<P, G, R> VerifyOperation<P, G, R>
 where
     P: ProjectProvider,
-    G: GitProvider,
+    G: GitDiffProvider,
     R: ChangesetReader,
 {
     pub fn new(project_provider: P, git_provider: G, changeset_reader: R) -> Self {
@@ -57,7 +57,7 @@ where
         let head_ref = input.head.as_deref().unwrap_or("HEAD");
         let changed_files =
             self.git_provider
-                .changed_files(&project.root, &input.base, head_ref)?;
+                .changed_files(project.root(), &input.base, head_ref)?;
 
         let (changeset_changes, code_changes): (Vec<_>, Vec<_>) = changed_files
             .into_iter()

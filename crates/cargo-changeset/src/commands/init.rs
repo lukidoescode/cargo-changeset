@@ -25,7 +25,7 @@ pub(crate) fn run(args: InitArgs, start_path: &Path) -> Result<()> {
     let (root_config, _) = project_provider.load_configs(&project)?;
 
     let context = ProjectContext {
-        is_single_package: project.kind == ProjectKind::SinglePackage,
+        is_single_package: *project.kind() == ProjectKind::SinglePackage,
     };
 
     let is_interactive = !args.no_interactive && is_terminal_interactive();
@@ -41,11 +41,11 @@ pub(crate) fn run(args: InitArgs, start_path: &Path) -> Result<()> {
     let config = build_config_from_input(&input, context);
 
     let changeset_dir_path = root_config.changeset_dir();
-    let full_changeset_dir = project.root.join(changeset_dir_path);
+    let full_changeset_dir = project.root().join(changeset_dir_path);
     let dir_exists = full_changeset_dir.exists();
     let gitkeep_exists = full_changeset_dir.join(".gitkeep").exists();
 
-    let metadata_section = match project.kind {
+    let metadata_section = match project.kind() {
         ProjectKind::VirtualWorkspace | ProjectKind::WorkspaceWithRoot => {
             changeset_manifest::MetadataSection::Workspace
         }

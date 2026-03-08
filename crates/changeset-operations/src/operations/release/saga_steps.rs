@@ -1,8 +1,32 @@
 use std::marker::PhantomData;
 use std::path::Path;
 
+macro_rules! saga_step_struct {
+    ($name:ident) => {
+        pub struct $name<G, M, RW, S, C> {
+            _marker: PhantomData<(G, M, RW, S, C)>,
+        }
+
+        impl<G, M, RW, S, C> $name<G, M, RW, S, C> {
+            #[must_use]
+            pub fn new() -> Self {
+                Self {
+                    _marker: PhantomData,
+                }
+            }
+        }
+
+        impl<G, M, RW, S, C> Default for $name<G, M, RW, S, C> {
+            fn default() -> Self {
+                Self::new()
+            }
+        }
+    };
+}
+
 use changeset_project::TagFormat;
 use changeset_saga::SagaStep;
+use semver::Version;
 use tracing::debug;
 
 use super::context::ReleaseSagaContext;
@@ -10,35 +34,20 @@ use super::saga_data::{DependencyUpdate, ManifestUpdate, ReleaseSagaData};
 use super::{CommitResult, TagResult};
 use crate::OperationError;
 use crate::traits::{
-    ChangelogWriter, ChangesetReader, ChangesetWriter, GitProvider, ManifestWriter, ReleaseStateIO,
+    ChangelogWriter, ChangesetReader, ChangesetWriter, GitCommitProvider, GitStagingProvider,
+    GitTagProvider, ManifestDependencyWriter, ManifestVersionWriter, ReleaseStateIO,
+    WorkspaceVersionManager,
 };
 
-pub struct WriteManifestVersionsStep<G, M, RW, S, C> {
-    _marker: PhantomData<(G, M, RW, S, C)>,
-}
-
-impl<G, M, RW, S, C> WriteManifestVersionsStep<G, M, RW, S, C> {
-    #[must_use]
-    pub fn new() -> Self {
-        Self {
-            _marker: PhantomData,
-        }
-    }
-}
-
-impl<G, M, RW, S, C> Default for WriteManifestVersionsStep<G, M, RW, S, C> {
-    fn default() -> Self {
-        Self::new()
-    }
-}
+saga_step_struct!(WriteManifestVersionsStep);
 
 impl<G, M, RW, S, C> SagaStep for WriteManifestVersionsStep<G, M, RW, S, C>
 where
-    G: GitProvider + Send + Sync,
-    M: ManifestWriter + Send + Sync,
-    RW: ChangesetReader + ChangesetWriter + Send + Sync,
-    S: ReleaseStateIO + Send + Sync,
-    C: ChangelogWriter + Send + Sync,
+    G: Send + Sync,
+    M: ManifestVersionWriter,
+    RW: Send + Sync,
+    S: Send + Sync,
+    C: Send + Sync,
 {
     type Input = ReleaseSagaData;
     type Output = ReleaseSagaData;
@@ -105,32 +114,15 @@ where
     }
 }
 
-pub struct UpdateDependencyVersionsStep<G, M, RW, S, C> {
-    _marker: PhantomData<(G, M, RW, S, C)>,
-}
-
-impl<G, M, RW, S, C> UpdateDependencyVersionsStep<G, M, RW, S, C> {
-    #[must_use]
-    pub fn new() -> Self {
-        Self {
-            _marker: PhantomData,
-        }
-    }
-}
-
-impl<G, M, RW, S, C> Default for UpdateDependencyVersionsStep<G, M, RW, S, C> {
-    fn default() -> Self {
-        Self::new()
-    }
-}
+saga_step_struct!(UpdateDependencyVersionsStep);
 
 impl<G, M, RW, S, C> SagaStep for UpdateDependencyVersionsStep<G, M, RW, S, C>
 where
-    G: GitProvider + Send + Sync,
-    M: ManifestWriter + Send + Sync,
-    RW: ChangesetReader + ChangesetWriter + Send + Sync,
-    S: ReleaseStateIO + Send + Sync,
-    C: ChangelogWriter + Send + Sync,
+    G: Send + Sync,
+    M: ManifestDependencyWriter,
+    RW: Send + Sync,
+    S: Send + Sync,
+    C: Send + Sync,
 {
     type Input = ReleaseSagaData;
     type Output = ReleaseSagaData;
@@ -215,32 +207,15 @@ where
     }
 }
 
-pub struct RemoveWorkspaceVersionStep<G, M, RW, S, C> {
-    _marker: PhantomData<(G, M, RW, S, C)>,
-}
-
-impl<G, M, RW, S, C> RemoveWorkspaceVersionStep<G, M, RW, S, C> {
-    #[must_use]
-    pub fn new() -> Self {
-        Self {
-            _marker: PhantomData,
-        }
-    }
-}
-
-impl<G, M, RW, S, C> Default for RemoveWorkspaceVersionStep<G, M, RW, S, C> {
-    fn default() -> Self {
-        Self::new()
-    }
-}
+saga_step_struct!(RemoveWorkspaceVersionStep);
 
 impl<G, M, RW, S, C> SagaStep for RemoveWorkspaceVersionStep<G, M, RW, S, C>
 where
-    G: GitProvider + Send + Sync,
-    M: ManifestWriter + Send + Sync,
-    RW: ChangesetReader + ChangesetWriter + Send + Sync,
-    S: ReleaseStateIO + Send + Sync,
-    C: ChangelogWriter + Send + Sync,
+    G: Send + Sync,
+    M: WorkspaceVersionManager,
+    RW: Send + Sync,
+    S: Send + Sync,
+    C: Send + Sync,
 {
     type Input = ReleaseSagaData;
     type Output = ReleaseSagaData;
@@ -285,32 +260,15 @@ where
     }
 }
 
-pub struct MarkChangesetsConsumedStep<G, M, RW, S, C> {
-    _marker: PhantomData<(G, M, RW, S, C)>,
-}
-
-impl<G, M, RW, S, C> MarkChangesetsConsumedStep<G, M, RW, S, C> {
-    #[must_use]
-    pub fn new() -> Self {
-        Self {
-            _marker: PhantomData,
-        }
-    }
-}
-
-impl<G, M, RW, S, C> Default for MarkChangesetsConsumedStep<G, M, RW, S, C> {
-    fn default() -> Self {
-        Self::new()
-    }
-}
+saga_step_struct!(MarkChangesetsConsumedStep);
 
 impl<G, M, RW, S, C> SagaStep for MarkChangesetsConsumedStep<G, M, RW, S, C>
 where
-    G: GitProvider + Send + Sync,
-    M: ManifestWriter + Send + Sync,
-    RW: ChangesetReader + ChangesetWriter + Send + Sync,
-    S: ReleaseStateIO + Send + Sync,
-    C: ChangelogWriter + Send + Sync,
+    G: Send + Sync,
+    M: Send + Sync,
+    RW: ChangesetWriter + Send + Sync,
+    S: Send + Sync,
+    C: Send + Sync,
 {
     type Input = ReleaseSagaData;
     type Output = ReleaseSagaData;
@@ -369,32 +327,15 @@ where
     }
 }
 
-pub struct ClearChangesetsConsumedStep<G, M, RW, S, C> {
-    _marker: PhantomData<(G, M, RW, S, C)>,
-}
-
-impl<G, M, RW, S, C> ClearChangesetsConsumedStep<G, M, RW, S, C> {
-    #[must_use]
-    pub fn new() -> Self {
-        Self {
-            _marker: PhantomData,
-        }
-    }
-}
-
-impl<G, M, RW, S, C> Default for ClearChangesetsConsumedStep<G, M, RW, S, C> {
-    fn default() -> Self {
-        Self::new()
-    }
-}
+saga_step_struct!(ClearChangesetsConsumedStep);
 
 impl<G, M, RW, S, C> SagaStep for ClearChangesetsConsumedStep<G, M, RW, S, C>
 where
-    G: GitProvider + Send + Sync,
-    M: ManifestWriter + Send + Sync,
-    RW: ChangesetReader + ChangesetWriter + Send + Sync,
-    S: ReleaseStateIO + Send + Sync,
-    C: ChangelogWriter + Send + Sync,
+    G: Send + Sync,
+    M: Send + Sync,
+    RW: ChangesetReader + ChangesetWriter,
+    S: Send + Sync,
+    C: Send + Sync,
 {
     type Input = ReleaseSagaData;
     type Output = ReleaseSagaData;
@@ -418,13 +359,12 @@ where
             if !consumed_paths.is_empty() {
                 let mut consumed_files = Vec::new();
                 for path in &consumed_paths {
-                    if let Ok(changeset) = ctx.changeset_rw().read_changeset(path) {
-                        consumed_files.push(super::steps::ChangesetFileState {
-                            path: path.clone(),
-                            original_consumed_status: changeset.consumed_for_prerelease.clone(),
-                            backup: Some(changeset),
-                        });
-                    }
+                    let changeset = ctx.changeset_rw().read_changeset(path)?;
+                    consumed_files.push(super::steps::ChangesetFileState {
+                        path: path.clone(),
+                        original_consumed_status: changeset.consumed_for_prerelease.clone(),
+                        backup: Some(changeset),
+                    });
                 }
 
                 let paths_refs: Vec<&Path> = consumed_paths.iter().map(AsRef::as_ref).collect();
@@ -440,12 +380,13 @@ where
     fn compensate(&self, ctx: &Self::Context, input: Self::Input) -> Result<(), Self::Error> {
         for file_state in &input.consumed_files_cleared {
             if let Some(original_version) = &file_state.original_consumed_status {
-                let version: semver::Version =
+                let version: Version =
                     original_version
                         .parse()
-                        .map_err(|_| OperationError::VersionParse {
+                        .map_err(|source| OperationError::VersionParse {
                             version: original_version.clone(),
                             context: "compensation restore consumed status".to_string(),
+                            source,
                         })?;
                 ctx.changeset_rw().mark_consumed_for_prerelease(
                     &input.changeset_dir,
@@ -462,32 +403,15 @@ where
     }
 }
 
-pub struct DeleteChangesetFilesStep<G, M, RW, S, C> {
-    _marker: PhantomData<(G, M, RW, S, C)>,
-}
-
-impl<G, M, RW, S, C> DeleteChangesetFilesStep<G, M, RW, S, C> {
-    #[must_use]
-    pub fn new() -> Self {
-        Self {
-            _marker: PhantomData,
-        }
-    }
-}
-
-impl<G, M, RW, S, C> Default for DeleteChangesetFilesStep<G, M, RW, S, C> {
-    fn default() -> Self {
-        Self::new()
-    }
-}
+saga_step_struct!(DeleteChangesetFilesStep);
 
 impl<G, M, RW, S, C> SagaStep for DeleteChangesetFilesStep<G, M, RW, S, C>
 where
-    G: GitProvider + Send + Sync,
-    M: ManifestWriter + Send + Sync,
-    RW: ChangesetReader + ChangesetWriter + Send + Sync,
-    S: ReleaseStateIO + Send + Sync,
-    C: ChangelogWriter + Send + Sync,
+    G: GitStagingProvider,
+    M: Send + Sync,
+    RW: ChangesetReader + ChangesetWriter,
+    S: Send + Sync,
+    C: Send + Sync,
 {
     type Input = ReleaseSagaData;
     type Output = ReleaseSagaData;
@@ -509,7 +433,7 @@ where
 
         if should_delete && !input.changeset_files.is_empty() {
             for file_state in &mut input.changeset_files {
-                file_state.backup = ctx.changeset_rw().read_changeset(&file_state.path).ok();
+                file_state.backup = Some(ctx.changeset_rw().read_changeset(&file_state.path)?);
             }
 
             let paths_refs: Vec<&Path> = input
@@ -543,32 +467,15 @@ where
     }
 }
 
-pub struct StageFilesStep<G, M, RW, S, C> {
-    _marker: PhantomData<(G, M, RW, S, C)>,
-}
-
-impl<G, M, RW, S, C> StageFilesStep<G, M, RW, S, C> {
-    #[must_use]
-    pub fn new() -> Self {
-        Self {
-            _marker: PhantomData,
-        }
-    }
-}
-
-impl<G, M, RW, S, C> Default for StageFilesStep<G, M, RW, S, C> {
-    fn default() -> Self {
-        Self::new()
-    }
-}
+saga_step_struct!(StageFilesStep);
 
 impl<G, M, RW, S, C> SagaStep for StageFilesStep<G, M, RW, S, C>
 where
-    G: GitProvider + Send + Sync,
-    M: ManifestWriter + Send + Sync,
-    RW: ChangesetReader + ChangesetWriter + Send + Sync,
-    S: ReleaseStateIO + Send + Sync,
-    C: ChangelogWriter + Send + Sync,
+    G: GitStagingProvider,
+    M: Send + Sync,
+    RW: Send + Sync,
+    S: Send + Sync,
+    C: Send + Sync,
 {
     type Input = ReleaseSagaData;
     type Output = ReleaseSagaData;
@@ -675,11 +582,11 @@ impl<G, M, RW, S, C> CreateCommitStep<G, M, RW, S, C> {
 
 impl<G, M, RW, S, C> SagaStep for CreateCommitStep<G, M, RW, S, C>
 where
-    G: GitProvider + Send + Sync,
-    M: ManifestWriter + Send + Sync,
-    RW: ChangesetReader + ChangesetWriter + Send + Sync,
-    S: ReleaseStateIO + Send + Sync,
-    C: ChangelogWriter + Send + Sync,
+    G: GitCommitProvider,
+    M: Send + Sync,
+    RW: Send + Sync,
+    S: Send + Sync,
+    C: Send + Sync,
 {
     type Input = ReleaseSagaData;
     type Output = ReleaseSagaData;
@@ -737,15 +644,24 @@ impl<G, M, RW, S, C> CreateTagsStep<G, M, RW, S, C> {
             _marker: PhantomData,
         }
     }
+
+    fn format_tag_name(&self, release_name: &str, version: &Version) -> String {
+        let use_prefix = self.use_crate_prefix || self.tag_format == TagFormat::CratePrefixed;
+        if use_prefix {
+            format!("{release_name}@v{version}")
+        } else {
+            format!("v{version}")
+        }
+    }
 }
 
 impl<G, M, RW, S, C> SagaStep for CreateTagsStep<G, M, RW, S, C>
 where
-    G: GitProvider + Send + Sync,
-    M: ManifestWriter + Send + Sync,
-    RW: ChangesetReader + ChangesetWriter + Send + Sync,
-    S: ReleaseStateIO + Send + Sync,
-    C: ChangelogWriter + Send + Sync,
+    G: GitTagProvider,
+    M: Send + Sync,
+    RW: Send + Sync,
+    S: Send + Sync,
+    C: Send + Sync,
 {
     type Input = ReleaseSagaData;
     type Output = ReleaseSagaData;
@@ -765,17 +681,11 @@ where
             return Ok(input);
         }
 
-        let use_prefix = self.use_crate_prefix || self.tag_format == TagFormat::CratePrefixed;
-
         let mut tags = Vec::new();
         let mut created_tag_names: Vec<String> = Vec::new();
 
         for release in &input.planned_releases {
-            let tag_name = if use_prefix {
-                format!("{}@v{}", release.name, release.new_version)
-            } else {
-                format!("v{}", release.new_version)
-            };
+            let tag_name = self.format_tag_name(&release.name, &release.new_version);
 
             let tag_message = format!("Release {} v{}", release.name, release.new_version);
 
@@ -810,15 +720,9 @@ where
             return Ok(());
         }
 
-        let use_prefix = self.use_crate_prefix || self.tag_format == TagFormat::CratePrefixed;
-
         let mut failed_tags = Vec::new();
         for release in &input.planned_releases {
-            let tag_name = if use_prefix {
-                format!("{}@v{}", release.name, release.new_version)
-            } else {
-                format!("v{}", release.new_version)
-            };
+            let tag_name = self.format_tag_name(&release.name, &release.new_version);
             if ctx
                 .git_provider()
                 .delete_tag(ctx.project_root(), &tag_name)
@@ -840,32 +744,15 @@ where
     }
 }
 
-pub struct UpdateReleaseStateStep<G, M, RW, S, C> {
-    _marker: PhantomData<(G, M, RW, S, C)>,
-}
-
-impl<G, M, RW, S, C> UpdateReleaseStateStep<G, M, RW, S, C> {
-    #[must_use]
-    pub fn new() -> Self {
-        Self {
-            _marker: PhantomData,
-        }
-    }
-}
-
-impl<G, M, RW, S, C> Default for UpdateReleaseStateStep<G, M, RW, S, C> {
-    fn default() -> Self {
-        Self::new()
-    }
-}
+saga_step_struct!(UpdateReleaseStateStep);
 
 impl<G, M, RW, S, C> SagaStep for UpdateReleaseStateStep<G, M, RW, S, C>
 where
-    G: GitProvider + Send + Sync,
-    M: ManifestWriter + Send + Sync,
-    RW: ChangesetReader + ChangesetWriter + Send + Sync,
-    S: ReleaseStateIO + Send + Sync,
-    C: ChangelogWriter + Send + Sync,
+    G: Send + Sync,
+    M: Send + Sync,
+    RW: Send + Sync,
+    S: ReleaseStateIO,
+    C: Send + Sync,
 {
     type Input = ReleaseSagaData;
     type Output = ReleaseSagaData;
@@ -917,32 +804,15 @@ where
     }
 }
 
-pub struct RestoreChangelogsStep<G, M, RW, S, C> {
-    _marker: PhantomData<(G, M, RW, S, C)>,
-}
-
-impl<G, M, RW, S, C> RestoreChangelogsStep<G, M, RW, S, C> {
-    #[must_use]
-    pub fn new() -> Self {
-        Self {
-            _marker: PhantomData,
-        }
-    }
-}
-
-impl<G, M, RW, S, C> Default for RestoreChangelogsStep<G, M, RW, S, C> {
-    fn default() -> Self {
-        Self::new()
-    }
-}
+saga_step_struct!(RestoreChangelogsStep);
 
 impl<G, M, RW, S, C> SagaStep for RestoreChangelogsStep<G, M, RW, S, C>
 where
-    G: GitProvider + Send + Sync,
-    M: ManifestWriter + Send + Sync,
-    RW: ChangesetReader + ChangesetWriter + Send + Sync,
-    S: ReleaseStateIO + Send + Sync,
-    C: ChangelogWriter + Send + Sync,
+    G: Send + Sync,
+    M: Send + Sync,
+    RW: Send + Sync,
+    S: Send + Sync,
+    C: ChangelogWriter,
 {
     type Input = ReleaseSagaData;
     type Output = ReleaseSagaData;

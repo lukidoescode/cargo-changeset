@@ -165,7 +165,7 @@ fn run_release(
     let changeset_io = FileSystemChangesetIO::new(dir.path());
     let manifest_writer = FileSystemManifestWriter::new();
     let changelog_writer = FileSystemChangelogWriter::new();
-    let git_provider = Git2Provider::new();
+    let git_provider = Git2Provider::new(dir.path()).expect("should canonicalize temp dir");
     let release_state_io = FileSystemReleaseStateIO::new();
 
     let operation = ReleaseOperation::new(
@@ -176,17 +176,13 @@ fn run_release(
         git_provider,
         release_state_io,
     );
-    let input = ReleaseInput {
-        dry_run,
-        convert_inherited,
-        no_commit: true,
-        no_tags: true,
-        keep_changesets: true,
-        force: false,
-        per_package_config: HashMap::new(),
-        global_prerelease: None,
-        graduate_all: false,
-    };
+    let input = ReleaseInput::builder()
+        .dry_run(dry_run)
+        .convert_inherited(convert_inherited)
+        .no_commit(true)
+        .no_tags(true)
+        .keep_changesets(true)
+        .build();
 
     operation.execute(dir.path(), &input)
 }
@@ -570,7 +566,7 @@ fn run_release_with_git(
     let changeset_reader = FileSystemChangesetIO::new(dir.path());
     let manifest_writer = FileSystemManifestWriter::new();
     let changelog_writer = FileSystemChangelogWriter::new();
-    let git_provider = Git2Provider::new();
+    let git_provider = Git2Provider::new(dir.path()).expect("should canonicalize temp dir");
     let release_state_io = FileSystemReleaseStateIO::new();
 
     let operation = ReleaseOperation::new(
@@ -581,17 +577,11 @@ fn run_release_with_git(
         git_provider,
         release_state_io,
     );
-    let input = ReleaseInput {
-        dry_run: false,
-        convert_inherited: false,
-        no_commit,
-        no_tags,
-        keep_changesets,
-        force: false,
-        per_package_config: HashMap::new(),
-        global_prerelease: None,
-        graduate_all: false,
-    };
+    let input = ReleaseInput::builder()
+        .no_commit(no_commit)
+        .no_tags(no_tags)
+        .keep_changesets(keep_changesets)
+        .build();
 
     operation.execute(dir.path(), &input)
 }
@@ -861,7 +851,7 @@ fn run_release_with_prerelease(
     let changeset_io = FileSystemChangesetIO::new(dir.path());
     let manifest_writer = FileSystemManifestWriter::new();
     let changelog_writer = FileSystemChangelogWriter::new();
-    let git_provider = Git2Provider::new();
+    let git_provider = Git2Provider::new(dir.path()).expect("should canonicalize temp dir");
     let release_state_io = FileSystemReleaseStateIO::new();
 
     let operation = ReleaseOperation::new(
@@ -872,17 +862,12 @@ fn run_release_with_prerelease(
         git_provider,
         release_state_io,
     );
-    let input = ReleaseInput {
-        dry_run: false,
-        convert_inherited: false,
-        no_commit: true,
-        no_tags: true,
-        keep_changesets: true,
-        force: false,
-        per_package_config: HashMap::new(),
-        global_prerelease: prerelease,
-        graduate_all: false,
-    };
+    let input = ReleaseInput::builder()
+        .no_commit(true)
+        .no_tags(true)
+        .keep_changesets(true)
+        .global_prerelease(prerelease)
+        .build();
 
     operation.execute(dir.path(), &input)
 }
@@ -1349,7 +1334,7 @@ fn run_release_with_config(
     let changeset_io = FileSystemChangesetIO::new(dir.path());
     let manifest_writer = FileSystemManifestWriter::new();
     let changelog_writer = FileSystemChangelogWriter::new();
-    let git_provider = Git2Provider::new();
+    let git_provider = Git2Provider::new(dir.path()).expect("should canonicalize temp dir");
     let release_state_io = FileSystemReleaseStateIO::new();
 
     let operation = ReleaseOperation::new(
@@ -1360,17 +1345,14 @@ fn run_release_with_config(
         git_provider,
         release_state_io,
     );
-    let input = ReleaseInput {
-        dry_run: false,
-        convert_inherited: false,
-        no_commit: true,
-        no_tags: true,
-        keep_changesets: true,
-        force: false,
-        per_package_config,
-        global_prerelease,
-        graduate_all,
-    };
+    let input = ReleaseInput::builder()
+        .no_commit(true)
+        .no_tags(true)
+        .keep_changesets(true)
+        .per_package_config(per_package_config)
+        .global_prerelease(global_prerelease)
+        .graduate_all(graduate_all)
+        .build();
 
     operation.execute(dir.path(), &input)
 }

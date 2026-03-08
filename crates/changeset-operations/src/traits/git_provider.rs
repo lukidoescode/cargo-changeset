@@ -4,74 +4,80 @@ use changeset_git::{CommitInfo, FileChange, TagInfo};
 
 use crate::Result;
 
-pub trait GitProvider: Send + Sync {
+pub trait FullGitProvider:
+    GitDiffProvider + GitStatusProvider + GitStagingProvider + GitCommitProvider + GitTagProvider
+{
+}
+impl<
+    T: GitDiffProvider + GitStatusProvider + GitStagingProvider + GitCommitProvider + GitTagProvider,
+> FullGitProvider for T
+{
+}
+
+pub trait GitDiffProvider: Send + Sync {
     /// # Errors
     ///
-    /// Returns an error if the repository cannot be opened or diff fails.
+    /// Propagates repository errors.
     fn changed_files(&self, project_root: &Path, base: &str, head: &str)
     -> Result<Vec<FileChange>>;
+}
 
+pub trait GitStatusProvider: Send + Sync {
     /// # Errors
     ///
-    /// Returns an error if the repository cannot be opened or status check fails.
+    /// Propagates repository errors.
     fn is_working_tree_clean(&self, project_root: &Path) -> Result<bool>;
 
     /// # Errors
     ///
-    /// Returns an error if the repository cannot be opened or HEAD is detached.
+    /// Propagates repository errors.
     fn current_branch(&self, project_root: &Path) -> Result<String>;
 
     /// # Errors
     ///
-    /// Returns an error if staging any of the files fails.
+    /// Propagates repository errors.
+    fn remote_url(&self, project_root: &Path) -> Result<Option<String>>;
+}
+
+pub trait GitStagingProvider: Send + Sync {
+    /// # Errors
+    ///
+    /// Propagates repository errors.
     fn stage_files(&self, project_root: &Path, paths: &[&Path]) -> Result<()>;
 
+    /// Fail-fast: if any file does not exist or cannot be deleted,
+    /// returns an error immediately and no further files are processed.
+    ///
     /// # Errors
     ///
-    /// Returns an error if the commit cannot be created.
+    /// Propagates repository errors.
+    fn delete_files(&self, project_root: &Path, paths: &[&Path]) -> Result<()>;
+}
+
+pub trait GitCommitProvider: Send + Sync {
+    /// # Errors
+    ///
+    /// Propagates repository errors.
     fn commit(&self, project_root: &Path, message: &str) -> Result<CommitInfo>;
 
+    /// Soft reset to HEAD~1, undoing the last commit while keeping changes staged.
+    ///
     /// # Errors
     ///
-    /// Returns an error if the tag cannot be created or already exists.
+    /// Propagates repository errors.
+    fn reset_to_parent(&self, project_root: &Path) -> Result<()>;
+}
+
+pub trait GitTagProvider: Send + Sync {
+    /// # Errors
+    ///
+    /// Propagates repository errors.
     fn create_tag(&self, project_root: &Path, tag_name: &str, message: &str) -> Result<TagInfo>;
 
-    /// # Errors
-    ///
-    /// Returns an error if the repository cannot be opened.
-    fn remote_url(&self, project_root: &Path) -> Result<Option<String>>;
-
-    /// Deletes files from the filesystem and stages the deletions in git.
-    ///
-    /// This is a fail-fast operation: if any file does not exist or cannot be deleted,
-    /// an error is returned immediately and no further files are processed.
+    /// Returns `Ok(true)` if deleted, `Ok(false)` if not found.
     ///
     /// # Errors
     ///
-    /// Returns an error if:
-    /// - Any file in `paths` does not exist
-    /// - Any file cannot be deleted (permissions, in use, etc.)
-    /// - The git index cannot be updated to stage the deletion
-    fn delete_files(&self, project_root: &Path, paths: &[&Path]) -> Result<()>;
-
-    /// Deletes a tag by name.
-    ///
-    /// Returns `Ok(true)` if the tag was deleted, `Ok(false)` if the tag was not found.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the delete operation fails for reasons other than "not found".
+    /// Propagates repository errors.
     fn delete_tag(&self, project_root: &Path, tag_name: &str) -> Result<bool>;
-
-    /// Performs a soft reset to the parent of HEAD (HEAD~1).
-    ///
-    /// This undoes the last commit while keeping changes staged.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if:
-    /// - HEAD cannot be resolved
-    /// - HEAD has no parent (initial commit)
-    /// - The reset operation fails
-    fn reset_to_parent(&self, project_root: &Path) -> Result<()>;
 }

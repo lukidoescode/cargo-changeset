@@ -44,6 +44,13 @@ pub enum OperationError {
         source: std::io::Error,
     },
 
+    #[error("failed to read changelog file '{path}'")]
+    ChangelogFileRead {
+        path: PathBuf,
+        #[source]
+        source: std::io::Error,
+    },
+
     #[error("failed to parse changeset file '{path}'")]
     ChangesetParse {
         path: PathBuf,
@@ -56,6 +63,16 @@ pub enum OperationError {
 
     #[error("failed to list changeset files in '{path}'")]
     ChangesetList {
+        path: PathBuf,
+        #[source]
+        source: std::io::Error,
+    },
+
+    #[error("project root mismatch: provider configured for '{}' but called with '{}'", expected.display(), actual.display())]
+    ProjectRootMismatch { expected: PathBuf, actual: PathBuf },
+
+    #[error("failed to canonicalize project root '{}'", path.display())]
+    ProjectRootCanonicalize {
         path: PathBuf,
         #[source]
         source: std::io::Error,
@@ -93,6 +110,9 @@ pub enum OperationError {
 
     #[error("comparison links enabled but no repository URL available")]
     ComparisonLinksRequired,
+
+    #[error("comparison links enabled but repository URL could not be parsed")]
+    ComparisonLinksUrlParse(#[source] changeset_changelog::ChangelogError),
 
     #[error("working tree has uncommitted changes; commit or stash them, or use --no-commit")]
     DirtyWorkingTree,
@@ -138,10 +158,40 @@ pub enum OperationError {
     ValidationFailed(#[from] crate::operations::ValidationErrors),
 
     #[error("failed to parse version '{version}' during {context}")]
-    VersionParse { version: String, context: String },
+    VersionParse {
+        version: String,
+        context: String,
+        #[source]
+        source: semver::Error,
+    },
 
     #[error("failed to delete {} tag(s) during compensation: {}", failed_tags.len(), failed_tags.join(", "))]
     TagDeletionFailed { failed_tags: Vec<String> },
+
+    #[error("package '{name}' not found in workspace")]
+    PackageNotFound { name: String },
+
+    #[error("cannot graduate package '{package}' with prerelease version '{version}'")]
+    CannotGraduatePrerelease {
+        package: String,
+        version: semver::Version,
+    },
+
+    #[error("cannot graduate package '{package}' with stable version '{version}' (>= 1.0.0)")]
+    CannotGraduateStable {
+        package: String,
+        version: semver::Version,
+    },
+
+    #[error("invalid pre-release format '{input}' (expected 'crate:tag')")]
+    InvalidPrereleaseFormat { input: String },
+
+    #[error("invalid prerelease tag '{tag}'")]
+    InvalidPrereleaseTag {
+        tag: String,
+        #[source]
+        source: changeset_core::PrereleaseSpecParseError,
+    },
 
     #[error("release saga failed at step '{step}'")]
     SagaFailed {
@@ -161,6 +211,17 @@ pub enum OperationError {
 }
 
 pub type Result<T> = std::result::Result<T, OperationError>;
+
+/// # Errors
+///
+/// Returns [`OperationError::InvalidPrereleaseTag`] when `tag` cannot be parsed.
+pub fn parse_prerelease_tag(tag: &str) -> Result<changeset_core::PrereleaseSpec> {
+    tag.parse()
+        .map_err(|source| OperationError::InvalidPrereleaseTag {
+            tag: tag.to_string(),
+            source,
+        })
+}
 
 impl From<SagaError<OperationError>> for OperationError {
     fn from(err: SagaError<OperationError>) -> Self {
@@ -188,8 +249,8 @@ impl From<SagaError<OperationError>> for OperationError {
                     compensation_failures,
                 }
             }
-            _ => Self::SagaFailed {
-                step: "unknown".to_string(),
+            other => Self::SagaFailed {
+                step: other.to_string(),
                 source: Box::new(Self::Cancelled),
             },
         }
@@ -227,5 +288,42 @@ mod tests {
         let err = OperationError::Cancelled;
 
         assert!(err.to_string().contains("cancelled"));
+    }
+
+    #[test]
+    fn project_root_canonicalize_error_includes_path() {
+        let err = OperationError::ProjectRootCanonicalize {
+            path: PathBuf::from("/some/path"),
+            source: std::io::Error::other("test"),
+        };
+        assert!(err.to_string().contains("/some/path"));
+    }
+
+    #[test]
+    fn version_parse_error_includes_version_and_context() {
+        let err = OperationError::VersionParse {
+            version: "not-a-version".to_string(),
+            context: "test context".to_string(),
+            source: "bad".parse::<semver::Version>().expect_err("should fail"),
+        };
+        assert!(err.to_string().contains("not-a-version"));
+        assert!(err.to_string().contains("test context"));
+    }
+
+    #[test]
+    fn parse_prerelease_tag_succeeds_for_valid_tag() {
+        let spec = parse_prerelease_tag("alpha").expect("should parse valid tag");
+
+        assert_eq!(spec.identifier(), "alpha");
+    }
+
+    #[test]
+    fn parse_prerelease_tag_returns_error_for_invalid_tag() {
+        let err = parse_prerelease_tag("bad.tag").expect_err("should fail for invalid tag");
+
+        assert!(matches!(
+            err,
+            OperationError::InvalidPrereleaseTag { ref tag, .. } if tag == "bad.tag"
+        ));
     }
 }

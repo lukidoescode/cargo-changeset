@@ -44,21 +44,6 @@ pub enum CliError {
         "changeset files were deleted in this branch (use --allow-deleted-changesets to bypass)"
     )]
     ChangesetDeleted { paths: Vec<PathBuf> },
-
-    #[error("invalid prerelease tag '{tag}'")]
-    InvalidPrereleaseTag { tag: String },
-
-    #[error("invalid pre-release format '{input}' (expected 'crate:tag')")]
-    InvalidPrereleaseFormat { input: String },
-
-    #[error("package '{name}' not found in workspace")]
-    PackageNotFound { name: String },
-
-    #[error("cannot graduate package '{package}' with prerelease version '{version}'")]
-    CannotGraduatePrerelease { package: String, version: String },
-
-    #[error("cannot graduate package '{package}' with stable version '{version}' (>= 1.0.0)")]
-    CannotGraduateStable { package: String, version: String },
 }
 
 pub type Result<T> = std::result::Result<T, CliError>;
@@ -149,57 +134,5 @@ mod tests {
         let cli_err: CliError = op_err.into();
 
         assert!(matches!(cli_err, CliError::Operation(_)));
-    }
-
-    #[test]
-    fn invalid_prerelease_format_error_includes_input() {
-        let err = CliError::InvalidPrereleaseFormat {
-            input: "no-colon".to_string(),
-        };
-
-        let msg = err.to_string();
-
-        assert!(msg.contains("no-colon"));
-        assert!(msg.contains("crate:tag"));
-    }
-
-    #[test]
-    fn package_not_found_error_includes_name() {
-        let err = CliError::PackageNotFound {
-            name: "missing-crate".to_string(),
-        };
-
-        let msg = err.to_string();
-
-        assert!(msg.contains("missing-crate"));
-        assert!(msg.contains("not found"));
-    }
-
-    #[test]
-    fn cannot_graduate_prerelease_error_includes_package_and_version() {
-        let err = CliError::CannotGraduatePrerelease {
-            package: "my-crate".to_string(),
-            version: "0.1.0-alpha.1".to_string(),
-        };
-
-        let msg = err.to_string();
-
-        assert!(msg.contains("my-crate"));
-        assert!(msg.contains("0.1.0-alpha.1"));
-        assert!(msg.contains("prerelease"));
-    }
-
-    #[test]
-    fn cannot_graduate_stable_error_includes_package_and_version() {
-        let err = CliError::CannotGraduateStable {
-            package: "stable-crate".to_string(),
-            version: "1.2.3".to_string(),
-        };
-
-        let msg = err.to_string();
-
-        assert!(msg.contains("stable-crate"));
-        assert!(msg.contains("1.2.3"));
-        assert!(msg.contains("stable"));
     }
 }

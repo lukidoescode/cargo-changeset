@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, RwLock};
 
@@ -15,11 +15,32 @@ use semver::Version;
 use crate::Result;
 use crate::traits::{
     BumpSelection, CategorySelection, ChangelogSettingsInput, ChangelogWriteResult,
-    ChangelogWriter, ChangesetReader, ChangesetWriter, DescriptionInput, GitProvider,
-    GitSettingsInput, InheritedVersionChecker, InitInteractionProvider, InteractionProvider,
-    ManifestWriter, PackageSelection, ProjectContext, ProjectProvider, ReleaseStateIO,
-    VersionSettingsInput,
+    ChangelogWriter, ChangesetReader, ChangesetWriter, DescriptionInput, GitCommitProvider,
+    GitDiffProvider, GitSettingsInput, GitStagingProvider, GitStatusProvider, GitTagProvider,
+    GraduationAction, GraduationInteractionProvider, InheritedVersionChecker,
+    InitInteractionProvider, InteractionProvider, ManifestDependencyWriter, ManifestMetadataWriter,
+    ManifestVersionWriter, MenuSelection, PackageSelection, PrereleaseAction,
+    PrereleaseInteractionProvider, ProjectContext, ProjectProvider, ReleaseStateIO,
+    VersionSettingsInput, WorkspaceVersionManager,
 };
+
+macro_rules! impl_arc_delegation {
+    (
+        impl $trait_name:ident for Arc<$type:ty> {
+            $(
+                fn $method:ident(&self $(, $arg:ident: $arg_ty:ty)*) -> $ret:ty;
+            )*
+        }
+    ) => {
+        impl $trait_name for Arc<$type> {
+            $(
+                fn $method(&self $(, $arg: $arg_ty)*) -> $ret {
+                    (**self).$method($($arg),*)
+                }
+            )*
+        }
+    };
+}
 
 pub struct MockProjectProvider {
     project: CargoProject,
@@ -30,7 +51,7 @@ pub struct MockProjectProvider {
 impl MockProjectProvider {
     #[must_use]
     pub fn new(project: CargoProject) -> Self {
-        let changeset_dir = project.root.join(".changeset");
+        let changeset_dir = project.root().join(".changeset");
         Self {
             project,
             changeset_dir,
@@ -41,7 +62,11 @@ impl MockProjectProvider {
     #[must_use]
     pub fn with_changeset_dir(mut self, dir: PathBuf) -> Self {
         if let Some(parent) = dir.parent() {
-            self.project.root = parent.to_path_buf();
+            self.project = CargoProject::new(
+                parent.to_path_buf(),
+                self.project.kind().clone(),
+                self.project.packages().to_vec(),
+            );
         }
         self.changeset_dir = dir;
         self
@@ -49,7 +74,11 @@ impl MockProjectProvider {
 
     #[must_use]
     pub fn with_project_root(mut self, root: PathBuf) -> Self {
-        self.project.root = root;
+        self.project = CargoProject::new(
+            root,
+            self.project.kind().clone(),
+            self.project.packages().to_vec(),
+        );
         self
     }
 
@@ -65,15 +94,15 @@ impl MockProjectProvider {
     #[must_use]
     pub fn single_package(name: &str, version: &str) -> Self {
         let root = PathBuf::from("/mock/project");
-        let project = CargoProject {
-            root: root.clone(),
-            kind: ProjectKind::SinglePackage,
-            packages: vec![PackageInfo {
+        let project = CargoProject::new(
+            root.clone(),
+            ProjectKind::SinglePackage,
+            vec![PackageInfo {
                 name: name.to_string(),
                 version: version.parse().expect("valid version"),
                 path: root.clone(),
             }],
-        };
+        );
         Self::new(project)
     }
 
@@ -92,11 +121,7 @@ impl MockProjectProvider {
             })
             .collect();
 
-        let project = CargoProject {
-            root,
-            kind: ProjectKind::VirtualWorkspace,
-            packages: pkg_infos,
-        };
+        let project = CargoProject::new(root, ProjectKind::VirtualWorkspace, pkg_infos);
         Self::new(project)
     }
 }
@@ -287,44 +312,21 @@ impl ChangesetWriter for MockChangesetReader {
     }
 }
 
-impl ChangesetReader for Arc<MockChangesetReader> {
-    fn read_changeset(&self, path: &Path) -> Result<Changeset> {
-        (**self).read_changeset(path)
-    }
-
-    fn list_changesets(&self, changeset_dir: &Path) -> Result<Vec<PathBuf>> {
-        (**self).list_changesets(changeset_dir)
-    }
-
-    fn list_consumed_changesets(&self, changeset_dir: &Path) -> Result<Vec<PathBuf>> {
-        (**self).list_consumed_changesets(changeset_dir)
+impl_arc_delegation! {
+    impl ChangesetReader for Arc<MockChangesetReader> {
+        fn read_changeset(&self, path: &Path) -> Result<Changeset>;
+        fn list_changesets(&self, changeset_dir: &Path) -> Result<Vec<PathBuf>>;
+        fn list_consumed_changesets(&self, changeset_dir: &Path) -> Result<Vec<PathBuf>>;
     }
 }
 
-impl ChangesetWriter for Arc<MockChangesetReader> {
-    fn write_changeset(&self, changeset_dir: &Path, changeset: &Changeset) -> Result<String> {
-        (**self).write_changeset(changeset_dir, changeset)
-    }
-
-    fn restore_changeset(&self, path: &Path, changeset: &Changeset) -> Result<()> {
-        (**self).restore_changeset(path, changeset)
-    }
-
-    fn filename_exists(&self, changeset_dir: &Path, filename: &str) -> bool {
-        (**self).filename_exists(changeset_dir, filename)
-    }
-
-    fn mark_consumed_for_prerelease(
-        &self,
-        changeset_dir: &Path,
-        paths: &[&Path],
-        version: &Version,
-    ) -> Result<()> {
-        (**self).mark_consumed_for_prerelease(changeset_dir, paths, version)
-    }
-
-    fn clear_consumed_for_prerelease(&self, changeset_dir: &Path, paths: &[&Path]) -> Result<()> {
-        (**self).clear_consumed_for_prerelease(changeset_dir, paths)
+impl_arc_delegation! {
+    impl ChangesetWriter for Arc<MockChangesetReader> {
+        fn write_changeset(&self, changeset_dir: &Path, changeset: &Changeset) -> Result<String>;
+        fn restore_changeset(&self, path: &Path, changeset: &Changeset) -> Result<()>;
+        fn filename_exists(&self, changeset_dir: &Path, filename: &str) -> bool;
+        fn mark_consumed_for_prerelease(&self, changeset_dir: &Path, paths: &[&Path], version: &Version) -> Result<()>;
+        fn clear_consumed_for_prerelease(&self, changeset_dir: &Path, paths: &[&Path]) -> Result<()>;
     }
 }
 
@@ -398,21 +400,25 @@ impl ChangesetWriter for MockChangesetWriter {
     }
 }
 
+struct MockGitState {
+    staged_files: Vec<PathBuf>,
+    commits: Vec<String>,
+    tags_created: Vec<(String, String)>,
+    deleted_files: Vec<PathBuf>,
+    deleted_tags: Vec<String>,
+    reset_count: usize,
+    fail_on_commit: bool,
+    fail_on_create_tag: bool,
+    fail_on_create_tag_nth: Option<usize>,
+    fail_on_stage_files: bool,
+}
+
 pub struct MockGitProvider {
     changed_files: Vec<FileChange>,
     clean: bool,
     branch: String,
     remote_url: Option<String>,
-    staged_files: Mutex<Vec<PathBuf>>,
-    commits: Mutex<Vec<String>>,
-    tags_created: Mutex<Vec<(String, String)>>,
-    deleted_files: Mutex<Vec<PathBuf>>,
-    deleted_tags: Mutex<Vec<String>>,
-    reset_count: Mutex<usize>,
-    fail_on_commit: Mutex<bool>,
-    fail_on_create_tag: Mutex<bool>,
-    fail_on_create_tag_nth: Mutex<Option<usize>>,
-    fail_on_stage_files: Mutex<bool>,
+    state: Mutex<MockGitState>,
 }
 
 impl MockGitProvider {
@@ -423,16 +429,18 @@ impl MockGitProvider {
             clean: true,
             branch: "main".to_string(),
             remote_url: None,
-            staged_files: Mutex::new(Vec::new()),
-            commits: Mutex::new(Vec::new()),
-            tags_created: Mutex::new(Vec::new()),
-            deleted_files: Mutex::new(Vec::new()),
-            deleted_tags: Mutex::new(Vec::new()),
-            reset_count: Mutex::new(0),
-            fail_on_commit: Mutex::new(false),
-            fail_on_create_tag: Mutex::new(false),
-            fail_on_create_tag_nth: Mutex::new(None),
-            fail_on_stage_files: Mutex::new(false),
+            state: Mutex::new(MockGitState {
+                staged_files: Vec::new(),
+                commits: Vec::new(),
+                tags_created: Vec::new(),
+                deleted_files: Vec::new(),
+                deleted_tags: Vec::new(),
+                reset_count: 0,
+                fail_on_commit: false,
+                fail_on_create_tag: false,
+                fail_on_create_tag_nth: None,
+                fail_on_stage_files: false,
+            }),
         }
     }
 
@@ -465,7 +473,11 @@ impl MockGitProvider {
     /// Panics if the internal mutex is poisoned.
     #[must_use]
     pub fn staged_files(&self) -> Vec<PathBuf> {
-        self.staged_files.lock().expect("lock poisoned").clone()
+        self.state
+            .lock()
+            .expect("lock poisoned")
+            .staged_files
+            .clone()
     }
 
     /// # Panics
@@ -473,7 +485,7 @@ impl MockGitProvider {
     /// Panics if the internal mutex is poisoned.
     #[must_use]
     pub fn commits(&self) -> Vec<String> {
-        self.commits.lock().expect("lock poisoned").clone()
+        self.state.lock().expect("lock poisoned").commits.clone()
     }
 
     /// # Panics
@@ -481,7 +493,11 @@ impl MockGitProvider {
     /// Panics if the internal mutex is poisoned.
     #[must_use]
     pub fn tags_created(&self) -> Vec<(String, String)> {
-        self.tags_created.lock().expect("lock poisoned").clone()
+        self.state
+            .lock()
+            .expect("lock poisoned")
+            .tags_created
+            .clone()
     }
 
     /// # Panics
@@ -489,7 +505,11 @@ impl MockGitProvider {
     /// Panics if the internal mutex is poisoned.
     #[must_use]
     pub fn deleted_files(&self) -> Vec<PathBuf> {
-        self.deleted_files.lock().expect("lock poisoned").clone()
+        self.state
+            .lock()
+            .expect("lock poisoned")
+            .deleted_files
+            .clone()
     }
 
     /// # Panics
@@ -497,7 +517,11 @@ impl MockGitProvider {
     /// Panics if the internal mutex is poisoned.
     #[must_use]
     pub fn deleted_tags(&self) -> Vec<String> {
-        self.deleted_tags.lock().expect("lock poisoned").clone()
+        self.state
+            .lock()
+            .expect("lock poisoned")
+            .deleted_tags
+            .clone()
     }
 
     /// # Panics
@@ -505,35 +529,41 @@ impl MockGitProvider {
     /// Panics if the internal mutex is poisoned.
     #[must_use]
     pub fn reset_count(&self) -> usize {
-        *self.reset_count.lock().expect("lock poisoned")
+        self.state.lock().expect("lock poisoned").reset_count
     }
 
     /// # Panics
     ///
     /// Panics if the internal mutex is poisoned.
     pub fn set_fail_on_commit(&self, fail: bool) {
-        *self.fail_on_commit.lock().expect("lock poisoned") = fail;
+        self.state.lock().expect("lock poisoned").fail_on_commit = fail;
     }
 
     /// # Panics
     ///
     /// Panics if the internal mutex is poisoned.
     pub fn set_fail_on_create_tag(&self, fail: bool) {
-        *self.fail_on_create_tag.lock().expect("lock poisoned") = fail;
+        self.state.lock().expect("lock poisoned").fail_on_create_tag = fail;
     }
 
     /// # Panics
     ///
     /// Panics if the internal mutex is poisoned.
     pub fn set_fail_on_create_tag_nth(&self, n: usize) {
-        *self.fail_on_create_tag_nth.lock().expect("lock poisoned") = Some(n);
+        self.state
+            .lock()
+            .expect("lock poisoned")
+            .fail_on_create_tag_nth = Some(n);
     }
 
     /// # Panics
     ///
     /// Panics if the internal mutex is poisoned.
     pub fn set_fail_on_stage_files(&self, fail: bool) {
-        *self.fail_on_stage_files.lock().expect("lock poisoned") = fail;
+        self.state
+            .lock()
+            .expect("lock poisoned")
+            .fail_on_stage_files = fail;
     }
 }
 
@@ -543,7 +573,7 @@ impl Default for MockGitProvider {
     }
 }
 
-impl GitProvider for MockGitProvider {
+impl GitDiffProvider for MockGitProvider {
     fn changed_files(
         &self,
         _project_root: &Path,
@@ -552,7 +582,9 @@ impl GitProvider for MockGitProvider {
     ) -> Result<Vec<FileChange>> {
         Ok(self.changed_files.clone())
     }
+}
 
+impl GitStatusProvider for MockGitProvider {
     fn is_working_tree_clean(&self, _project_root: &Path) -> Result<bool> {
         Ok(self.clean)
     }
@@ -561,44 +593,67 @@ impl GitProvider for MockGitProvider {
         Ok(self.branch.clone())
     }
 
+    fn remote_url(&self, _project_root: &Path) -> Result<Option<String>> {
+        Ok(self.remote_url.clone())
+    }
+}
+
+impl GitStagingProvider for MockGitProvider {
     fn stage_files(&self, _project_root: &Path, paths: &[&Path]) -> Result<()> {
-        if *self.fail_on_stage_files.lock().expect("lock poisoned") {
+        let mut state = self.state.lock().expect("lock poisoned");
+        if state.fail_on_stage_files {
             return Err(crate::OperationError::Io(std::io::Error::other(
                 "mock stage files failure",
             )));
         }
-        self.staged_files
-            .lock()
-            .expect("lock poisoned")
+        state
+            .staged_files
             .extend(paths.iter().map(|p| p.to_path_buf()));
         Ok(())
     }
 
+    fn delete_files(&self, _project_root: &Path, paths: &[&Path]) -> Result<()> {
+        self.state
+            .lock()
+            .expect("lock poisoned")
+            .deleted_files
+            .extend(paths.iter().map(|p| p.to_path_buf()));
+        Ok(())
+    }
+}
+
+impl GitCommitProvider for MockGitProvider {
     fn commit(&self, _project_root: &Path, message: &str) -> Result<CommitInfo> {
-        if *self.fail_on_commit.lock().expect("lock poisoned") {
+        let mut state = self.state.lock().expect("lock poisoned");
+        if state.fail_on_commit {
             return Err(crate::OperationError::Io(std::io::Error::other(
                 "mock commit failure",
             )));
         }
-        self.commits
-            .lock()
-            .expect("lock poisoned")
-            .push(message.to_string());
+        state.commits.push(message.to_string());
         Ok(CommitInfo {
             sha: "abc123def456".to_string(),
             message: message.to_string(),
         })
     }
 
+    fn reset_to_parent(&self, _project_root: &Path) -> Result<()> {
+        self.state.lock().expect("lock poisoned").reset_count += 1;
+        Ok(())
+    }
+}
+
+impl GitTagProvider for MockGitProvider {
     fn create_tag(&self, _project_root: &Path, tag_name: &str, message: &str) -> Result<TagInfo> {
-        if *self.fail_on_create_tag.lock().expect("lock poisoned") {
+        let mut state = self.state.lock().expect("lock poisoned");
+        if state.fail_on_create_tag {
             return Err(crate::OperationError::Io(std::io::Error::other(
                 "mock create tag failure",
             )));
         }
 
-        let current_count = self.tags_created.lock().expect("lock poisoned").len();
-        if let Some(n) = *self.fail_on_create_tag_nth.lock().expect("lock poisoned") {
+        let current_count = state.tags_created.len();
+        if let Some(n) = state.fail_on_create_tag_nth {
             if current_count == n {
                 return Err(crate::OperationError::Io(std::io::Error::other(
                     "mock create tag failure (nth)",
@@ -606,9 +661,8 @@ impl GitProvider for MockGitProvider {
             }
         }
 
-        self.tags_created
-            .lock()
-            .expect("lock poisoned")
+        state
+            .tags_created
             .push((tag_name.to_string(), message.to_string()));
         Ok(TagInfo {
             name: tag_name.to_string(),
@@ -616,76 +670,48 @@ impl GitProvider for MockGitProvider {
         })
     }
 
-    fn remote_url(&self, _project_root: &Path) -> Result<Option<String>> {
-        Ok(self.remote_url.clone())
-    }
-
-    fn delete_files(&self, _project_root: &Path, paths: &[&Path]) -> Result<()> {
-        self.deleted_files
-            .lock()
-            .expect("lock poisoned")
-            .extend(paths.iter().map(|p| p.to_path_buf()));
-        Ok(())
-    }
-
     fn delete_tag(&self, _project_root: &Path, tag_name: &str) -> Result<bool> {
-        self.deleted_tags
+        self.state
             .lock()
             .expect("lock poisoned")
+            .deleted_tags
             .push(tag_name.to_string());
         Ok(true)
     }
+}
 
-    fn reset_to_parent(&self, _project_root: &Path) -> Result<()> {
-        *self.reset_count.lock().expect("lock poisoned") += 1;
-        Ok(())
+impl_arc_delegation! {
+    impl GitDiffProvider for Arc<MockGitProvider> {
+        fn changed_files(&self, project_root: &Path, base: &str, head: &str) -> Result<Vec<FileChange>>;
     }
 }
 
-impl GitProvider for Arc<MockGitProvider> {
-    fn changed_files(
-        &self,
-        project_root: &Path,
-        base: &str,
-        head: &str,
-    ) -> Result<Vec<FileChange>> {
-        (**self).changed_files(project_root, base, head)
+impl_arc_delegation! {
+    impl GitStatusProvider for Arc<MockGitProvider> {
+        fn is_working_tree_clean(&self, project_root: &Path) -> Result<bool>;
+        fn current_branch(&self, project_root: &Path) -> Result<String>;
+        fn remote_url(&self, project_root: &Path) -> Result<Option<String>>;
     }
+}
 
-    fn is_working_tree_clean(&self, project_root: &Path) -> Result<bool> {
-        (**self).is_working_tree_clean(project_root)
+impl_arc_delegation! {
+    impl GitStagingProvider for Arc<MockGitProvider> {
+        fn stage_files(&self, project_root: &Path, paths: &[&Path]) -> Result<()>;
+        fn delete_files(&self, project_root: &Path, paths: &[&Path]) -> Result<()>;
     }
+}
 
-    fn current_branch(&self, project_root: &Path) -> Result<String> {
-        (**self).current_branch(project_root)
+impl_arc_delegation! {
+    impl GitCommitProvider for Arc<MockGitProvider> {
+        fn commit(&self, project_root: &Path, message: &str) -> Result<CommitInfo>;
+        fn reset_to_parent(&self, project_root: &Path) -> Result<()>;
     }
+}
 
-    fn stage_files(&self, project_root: &Path, paths: &[&Path]) -> Result<()> {
-        (**self).stage_files(project_root, paths)
-    }
-
-    fn commit(&self, project_root: &Path, message: &str) -> Result<CommitInfo> {
-        (**self).commit(project_root, message)
-    }
-
-    fn create_tag(&self, project_root: &Path, tag_name: &str, message: &str) -> Result<TagInfo> {
-        (**self).create_tag(project_root, tag_name, message)
-    }
-
-    fn remote_url(&self, project_root: &Path) -> Result<Option<String>> {
-        (**self).remote_url(project_root)
-    }
-
-    fn delete_files(&self, project_root: &Path, paths: &[&Path]) -> Result<()> {
-        (**self).delete_files(project_root, paths)
-    }
-
-    fn delete_tag(&self, project_root: &Path, tag_name: &str) -> Result<bool> {
-        (**self).delete_tag(project_root, tag_name)
-    }
-
-    fn reset_to_parent(&self, project_root: &Path) -> Result<()> {
-        (**self).reset_to_parent(project_root)
+impl_arc_delegation! {
+    impl GitTagProvider for Arc<MockGitProvider> {
+        fn create_tag(&self, project_root: &Path, tag_name: &str, message: &str) -> Result<TagInfo>;
+        fn delete_tag(&self, project_root: &Path, tag_name: &str) -> Result<bool>;
     }
 }
 
@@ -783,27 +809,33 @@ pub fn make_changeset(package_name: &str, bump: BumpType, summary: &str) -> Chan
     }
 }
 
+struct MockManifestState {
+    written_versions: Vec<(PathBuf, Version)>,
+    dependency_version_updates: Vec<(PathBuf, String, Version)>,
+    dependency_update_returns_true: bool,
+    removed_workspace_version: bool,
+    workspace_version: Option<Version>,
+    written_metadata: Vec<(PathBuf, MetadataSection, InitConfig)>,
+}
+
 pub struct MockManifestWriter {
-    written_versions: Mutex<Vec<(PathBuf, Version)>>,
-    dependency_version_updates: Mutex<Vec<(PathBuf, String, Version)>>,
-    dependency_update_returns_true: Mutex<bool>,
+    state: Mutex<MockManifestState>,
     inherited_paths: HashSet<PathBuf>,
-    removed_workspace_version: Mutex<bool>,
-    workspace_version: Mutex<Option<Version>>,
-    written_metadata: Mutex<Vec<(PathBuf, MetadataSection, InitConfig)>>,
 }
 
 impl MockManifestWriter {
     #[must_use]
     pub fn new() -> Self {
         Self {
-            written_versions: Mutex::new(Vec::new()),
-            dependency_version_updates: Mutex::new(Vec::new()),
-            dependency_update_returns_true: Mutex::new(false),
+            state: Mutex::new(MockManifestState {
+                written_versions: Vec::new(),
+                dependency_version_updates: Vec::new(),
+                dependency_update_returns_true: false,
+                removed_workspace_version: false,
+                workspace_version: None,
+                written_metadata: Vec::new(),
+            }),
             inherited_paths: HashSet::new(),
-            removed_workspace_version: Mutex::new(false),
-            workspace_version: Mutex::new(None),
-            written_metadata: Mutex::new(Vec::new()),
         }
     }
 
@@ -818,10 +850,10 @@ impl MockManifestWriter {
     /// Panics if the internal mutex is poisoned.
     #[must_use]
     pub fn with_dependency_updates_returning_true(self) -> Self {
-        *self
-            .dependency_update_returns_true
+        self.state
             .lock()
-            .expect("lock poisoned") = true;
+            .expect("lock poisoned")
+            .dependency_update_returns_true = true;
         self
     }
 
@@ -830,9 +862,10 @@ impl MockManifestWriter {
     /// Panics if the internal mutex is poisoned.
     #[must_use]
     pub fn dependency_version_updates(&self) -> Vec<(PathBuf, String, Version)> {
-        self.dependency_version_updates
+        self.state
             .lock()
             .expect("lock poisoned")
+            .dependency_version_updates
             .clone()
     }
 
@@ -841,7 +874,7 @@ impl MockManifestWriter {
     /// Panics if the internal mutex is poisoned.
     #[must_use]
     pub fn with_workspace_version(self, version: Version) -> Self {
-        *self.workspace_version.lock().expect("lock poisoned") = Some(version);
+        self.state.lock().expect("lock poisoned").workspace_version = Some(version);
         self
     }
 
@@ -850,7 +883,11 @@ impl MockManifestWriter {
     /// Panics if the internal mutex is poisoned.
     #[must_use]
     pub fn written_versions(&self) -> Vec<(PathBuf, Version)> {
-        self.written_versions.lock().expect("lock poisoned").clone()
+        self.state
+            .lock()
+            .expect("lock poisoned")
+            .written_versions
+            .clone()
     }
 
     /// # Panics
@@ -858,10 +895,10 @@ impl MockManifestWriter {
     /// Panics if the internal mutex is poisoned.
     #[must_use]
     pub fn workspace_version_removed(&self) -> bool {
-        *self
-            .removed_workspace_version
+        self.state
             .lock()
             .expect("lock poisoned")
+            .removed_workspace_version
     }
 
     /// # Panics
@@ -869,9 +906,10 @@ impl MockManifestWriter {
     /// Panics if the internal mutex is poisoned.
     #[must_use]
     pub fn get_workspace_version(&self) -> Option<Version> {
-        self.workspace_version
+        self.state
             .lock()
             .expect("lock poisoned")
+            .workspace_version
             .clone()
     }
 
@@ -880,7 +918,11 @@ impl MockManifestWriter {
     /// Panics if the internal mutex is poisoned.
     #[must_use]
     pub fn written_metadata(&self) -> Vec<(PathBuf, MetadataSection, InitConfig)> {
-        self.written_metadata.lock().expect("lock poisoned").clone()
+        self.state
+            .lock()
+            .expect("lock poisoned")
+            .written_metadata
+            .clone()
     }
 }
 
@@ -896,126 +938,112 @@ impl InheritedVersionChecker for MockManifestWriter {
     }
 }
 
-impl ManifestWriter for MockManifestWriter {
+impl ManifestVersionWriter for MockManifestWriter {
     fn write_version(&self, manifest_path: &Path, new_version: &Version) -> Result<()> {
-        self.written_versions
+        self.state
             .lock()
             .expect("lock poisoned")
+            .written_versions
             .push((manifest_path.to_path_buf(), new_version.clone()));
-        Ok(())
-    }
-
-    fn remove_workspace_version(&self, _manifest_path: &Path) -> Result<()> {
-        *self
-            .removed_workspace_version
-            .lock()
-            .expect("lock poisoned") = true;
-        *self.workspace_version.lock().expect("lock poisoned") = None;
-        Ok(())
-    }
-
-    fn read_workspace_version(&self, _manifest_path: &Path) -> Result<Option<Version>> {
-        Ok(self
-            .workspace_version
-            .lock()
-            .expect("lock poisoned")
-            .clone())
-    }
-
-    fn write_workspace_version(&self, _manifest_path: &Path, version: &Version) -> Result<()> {
-        *self.workspace_version.lock().expect("lock poisoned") = Some(version.clone());
-        *self
-            .removed_workspace_version
-            .lock()
-            .expect("lock poisoned") = false;
         Ok(())
     }
 
     fn verify_version(&self, _manifest_path: &Path, _expected: &Version) -> Result<()> {
         Ok(())
     }
+}
 
-    fn write_metadata(
-        &self,
-        manifest_path: &Path,
-        section: MetadataSection,
-        config: &InitConfig,
-    ) -> Result<()> {
-        self.written_metadata.lock().expect("lock poisoned").push((
-            manifest_path.to_path_buf(),
-            section,
-            config.clone(),
-        ));
-        Ok(())
-    }
-
+impl ManifestDependencyWriter for MockManifestWriter {
     fn update_dependency_version(
         &self,
         manifest_path: &Path,
         dependency_name: &str,
         new_version: &Version,
     ) -> Result<bool> {
-        let returns_true = *self
-            .dependency_update_returns_true
-            .lock()
-            .expect("lock poisoned");
+        let mut state = self.state.lock().expect("lock poisoned");
+        let returns_true = state.dependency_update_returns_true;
         if returns_true {
-            self.dependency_version_updates
-                .lock()
-                .expect("lock poisoned")
-                .push((
-                    manifest_path.to_path_buf(),
-                    dependency_name.to_string(),
-                    new_version.clone(),
-                ));
+            state.dependency_version_updates.push((
+                manifest_path.to_path_buf(),
+                dependency_name.to_string(),
+                new_version.clone(),
+            ));
         }
         Ok(returns_true)
     }
 }
 
-impl InheritedVersionChecker for Arc<MockManifestWriter> {
-    fn has_inherited_version(&self, manifest_path: &Path) -> Result<bool> {
-        (**self).has_inherited_version(manifest_path)
+impl WorkspaceVersionManager for MockManifestWriter {
+    fn read_workspace_version(&self, _manifest_path: &Path) -> Result<Option<Version>> {
+        Ok(self
+            .state
+            .lock()
+            .expect("lock poisoned")
+            .workspace_version
+            .clone())
+    }
+
+    fn remove_workspace_version(&self, _manifest_path: &Path) -> Result<()> {
+        let mut state = self.state.lock().expect("lock poisoned");
+        state.removed_workspace_version = true;
+        state.workspace_version = None;
+        Ok(())
+    }
+
+    fn write_workspace_version(&self, _manifest_path: &Path, version: &Version) -> Result<()> {
+        let mut state = self.state.lock().expect("lock poisoned");
+        state.workspace_version = Some(version.clone());
+        state.removed_workspace_version = false;
+        Ok(())
     }
 }
 
-impl ManifestWriter for Arc<MockManifestWriter> {
-    fn write_version(&self, manifest_path: &Path, new_version: &Version) -> Result<()> {
-        (**self).write_version(manifest_path, new_version)
-    }
-
-    fn remove_workspace_version(&self, manifest_path: &Path) -> Result<()> {
-        (**self).remove_workspace_version(manifest_path)
-    }
-
-    fn read_workspace_version(&self, manifest_path: &Path) -> Result<Option<Version>> {
-        (**self).read_workspace_version(manifest_path)
-    }
-
-    fn write_workspace_version(&self, manifest_path: &Path, version: &Version) -> Result<()> {
-        (**self).write_workspace_version(manifest_path, version)
-    }
-
-    fn verify_version(&self, manifest_path: &Path, expected: &Version) -> Result<()> {
-        (**self).verify_version(manifest_path, expected)
-    }
-
+impl ManifestMetadataWriter for MockManifestWriter {
     fn write_metadata(
         &self,
         manifest_path: &Path,
         section: MetadataSection,
         config: &InitConfig,
     ) -> Result<()> {
-        (**self).write_metadata(manifest_path, section, config)
+        self.state
+            .lock()
+            .expect("lock poisoned")
+            .written_metadata
+            .push((manifest_path.to_path_buf(), section, config.clone()));
+        Ok(())
     }
+}
 
-    fn update_dependency_version(
-        &self,
-        manifest_path: &Path,
-        dependency_name: &str,
-        new_version: &Version,
-    ) -> Result<bool> {
-        (**self).update_dependency_version(manifest_path, dependency_name, new_version)
+impl_arc_delegation! {
+    impl InheritedVersionChecker for Arc<MockManifestWriter> {
+        fn has_inherited_version(&self, manifest_path: &Path) -> Result<bool>;
+    }
+}
+
+impl_arc_delegation! {
+    impl ManifestVersionWriter for Arc<MockManifestWriter> {
+        fn write_version(&self, manifest_path: &Path, new_version: &Version) -> Result<()>;
+        fn verify_version(&self, manifest_path: &Path, expected: &Version) -> Result<()>;
+    }
+}
+
+impl_arc_delegation! {
+    impl ManifestDependencyWriter for Arc<MockManifestWriter> {
+        fn update_dependency_version(&self, manifest_path: &Path, dependency_name: &str, new_version: &Version) -> Result<bool>;
+    }
+}
+
+impl_arc_delegation! {
+    impl WorkspaceVersionManager for Arc<MockManifestWriter> {
+        fn read_workspace_version(&self, manifest_path: &Path) -> Result<Option<Version>>;
+        fn remove_workspace_version(&self, manifest_path: &Path) -> Result<()>;
+        fn write_workspace_version(&self, manifest_path: &Path, version: &Version) -> Result<()>;
+    }
+}
+
+impl_arc_delegation! {
+    impl ManifestMetadataWriter for Arc<MockManifestWriter> {
+        fn write_metadata(&self, manifest_path: &Path, section: MetadataSection, config: &InitConfig) -> Result<()>;
     }
 }
 
@@ -1097,27 +1125,12 @@ impl ChangelogWriter for MockChangelogWriter {
     }
 }
 
-impl ChangelogWriter for Arc<MockChangelogWriter> {
-    fn write_release(
-        &self,
-        changelog_path: &Path,
-        release: &VersionRelease,
-        repo_info: Option<&RepositoryInfo>,
-        previous_version: Option<&str>,
-    ) -> Result<ChangelogWriteResult> {
-        (**self).write_release(changelog_path, release, repo_info, previous_version)
-    }
-
-    fn changelog_exists(&self, path: &Path) -> bool {
-        (**self).changelog_exists(path)
-    }
-
-    fn restore_changelog(&self, path: &Path, content: &str) -> Result<()> {
-        (**self).restore_changelog(path, content)
-    }
-
-    fn delete_changelog(&self, path: &Path) -> Result<()> {
-        (**self).delete_changelog(path)
+impl_arc_delegation! {
+    impl ChangelogWriter for Arc<MockChangelogWriter> {
+        fn write_release(&self, changelog_path: &Path, release: &VersionRelease, repo_info: Option<&RepositoryInfo>, previous_version: Option<&str>) -> Result<ChangelogWriteResult>;
+        fn changelog_exists(&self, path: &Path) -> bool;
+        fn restore_changelog(&self, path: &Path, content: &str) -> Result<()>;
+        fn delete_changelog(&self, path: &Path) -> Result<()>;
     }
 }
 
@@ -1246,21 +1259,12 @@ impl ReleaseStateIO for MockReleaseStateIO {
     }
 }
 
-impl ReleaseStateIO for Arc<MockReleaseStateIO> {
-    fn load_prerelease_state(&self, changeset_dir: &Path) -> Result<Option<PrereleaseState>> {
-        (**self).load_prerelease_state(changeset_dir)
-    }
-
-    fn save_prerelease_state(&self, changeset_dir: &Path, state: &PrereleaseState) -> Result<()> {
-        (**self).save_prerelease_state(changeset_dir, state)
-    }
-
-    fn load_graduation_state(&self, changeset_dir: &Path) -> Result<Option<GraduationState>> {
-        (**self).load_graduation_state(changeset_dir)
-    }
-
-    fn save_graduation_state(&self, changeset_dir: &Path, state: &GraduationState) -> Result<()> {
-        (**self).save_graduation_state(changeset_dir, state)
+impl_arc_delegation! {
+    impl ReleaseStateIO for Arc<MockReleaseStateIO> {
+        fn load_prerelease_state(&self, changeset_dir: &Path) -> Result<Option<PrereleaseState>>;
+        fn save_prerelease_state(&self, changeset_dir: &Path, state: &PrereleaseState) -> Result<()>;
+        fn load_graduation_state(&self, changeset_dir: &Path) -> Result<Option<GraduationState>>;
+        fn save_graduation_state(&self, changeset_dir: &Path, state: &GraduationState) -> Result<()>;
     }
 }
 
@@ -1363,20 +1367,215 @@ impl InitInteractionProvider for MockInitInteractionProvider {
     }
 }
 
-impl InitInteractionProvider for Arc<MockInitInteractionProvider> {
-    fn configure_git_settings(&self, context: ProjectContext) -> Result<Option<GitSettingsInput>> {
-        (**self).configure_git_settings(context)
+impl_arc_delegation! {
+    impl InitInteractionProvider for Arc<MockInitInteractionProvider> {
+        fn configure_git_settings(&self, context: ProjectContext) -> Result<Option<GitSettingsInput>>;
+        fn configure_changelog_settings(&self, context: ProjectContext) -> Result<Option<ChangelogSettingsInput>>;
+        fn configure_version_settings(&self) -> Result<Option<VersionSettingsInput>>;
+    }
+}
+
+pub struct MockManageInteractionProvider {
+    prerelease_actions: Mutex<VecDeque<MenuSelection<PrereleaseAction>>>,
+    graduation_actions: Mutex<VecDeque<MenuSelection<GraduationAction>>>,
+    package_selections: Mutex<VecDeque<MenuSelection<usize>>>,
+    graduation_selections: Mutex<VecDeque<MenuSelection<usize>>>,
+    remove_prerelease_selections: Mutex<VecDeque<MenuSelection<usize>>>,
+    remove_graduation_selections: Mutex<VecDeque<MenuSelection<usize>>>,
+    prerelease_tags: Mutex<VecDeque<String>>,
+}
+
+impl MockManageInteractionProvider {
+    #[must_use]
+    pub fn new() -> Self {
+        Self {
+            prerelease_actions: Mutex::new(VecDeque::new()),
+            graduation_actions: Mutex::new(VecDeque::new()),
+            package_selections: Mutex::new(VecDeque::new()),
+            graduation_selections: Mutex::new(VecDeque::new()),
+            remove_prerelease_selections: Mutex::new(VecDeque::new()),
+            remove_graduation_selections: Mutex::new(VecDeque::new()),
+            prerelease_tags: Mutex::new(VecDeque::new()),
+        }
     }
 
-    fn configure_changelog_settings(
+    /// # Panics
+    ///
+    /// Panics if the internal mutex is poisoned.
+    #[must_use]
+    pub fn with_prerelease_actions(self, actions: Vec<MenuSelection<PrereleaseAction>>) -> Self {
+        *self.prerelease_actions.lock().expect("lock poisoned") = actions.into();
+        self
+    }
+
+    /// # Panics
+    ///
+    /// Panics if the internal mutex is poisoned.
+    #[must_use]
+    pub fn with_graduation_actions(self, actions: Vec<MenuSelection<GraduationAction>>) -> Self {
+        *self.graduation_actions.lock().expect("lock poisoned") = actions.into();
+        self
+    }
+
+    /// # Panics
+    ///
+    /// Panics if the internal mutex is poisoned.
+    #[must_use]
+    pub fn with_package_selections(self, selections: Vec<MenuSelection<usize>>) -> Self {
+        *self.package_selections.lock().expect("lock poisoned") = selections.into();
+        self
+    }
+
+    /// # Panics
+    ///
+    /// Panics if the internal mutex is poisoned.
+    #[must_use]
+    pub fn with_graduation_selections(self, selections: Vec<MenuSelection<usize>>) -> Self {
+        *self.graduation_selections.lock().expect("lock poisoned") = selections.into();
+        self
+    }
+
+    /// # Panics
+    ///
+    /// Panics if the internal mutex is poisoned.
+    #[must_use]
+    pub fn with_remove_prerelease_selections(self, selections: Vec<MenuSelection<usize>>) -> Self {
+        *self
+            .remove_prerelease_selections
+            .lock()
+            .expect("lock poisoned") = selections.into();
+        self
+    }
+
+    /// # Panics
+    ///
+    /// Panics if the internal mutex is poisoned.
+    #[must_use]
+    pub fn with_remove_graduation_selections(self, selections: Vec<MenuSelection<usize>>) -> Self {
+        *self
+            .remove_graduation_selections
+            .lock()
+            .expect("lock poisoned") = selections.into();
+        self
+    }
+
+    /// # Panics
+    ///
+    /// Panics if the internal mutex is poisoned.
+    #[must_use]
+    pub fn with_prerelease_tags(self, tags: Vec<String>) -> Self {
+        *self.prerelease_tags.lock().expect("lock poisoned") = tags.into();
+        self
+    }
+}
+
+impl Default for MockManageInteractionProvider {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl PrereleaseInteractionProvider for MockManageInteractionProvider {
+    fn select_prerelease_action(&self) -> Result<MenuSelection<PrereleaseAction>> {
+        Ok(self
+            .prerelease_actions
+            .lock()
+            .expect("lock poisoned")
+            .pop_front()
+            .expect(
+                "mock prerelease action queue exhausted — test did not provide enough responses",
+            ))
+    }
+
+    fn select_package_for_prerelease(
         &self,
-        context: ProjectContext,
-    ) -> Result<Option<ChangelogSettingsInput>> {
-        (**self).configure_changelog_settings(context)
+        _available: &[&PackageInfo],
+    ) -> Result<MenuSelection<usize>> {
+        Ok(self
+            .package_selections
+            .lock()
+            .expect("lock poisoned")
+            .pop_front()
+            .expect(
+                "mock package selection queue exhausted — test did not provide enough responses",
+            ))
     }
 
-    fn configure_version_settings(&self) -> Result<Option<VersionSettingsInput>> {
-        (**self).configure_version_settings()
+    fn get_prerelease_tag(&self) -> Result<String> {
+        Ok(self
+            .prerelease_tags
+            .lock()
+            .expect("lock poisoned")
+            .pop_front()
+            .expect("mock prerelease tag queue exhausted — test did not provide enough responses"))
+    }
+
+    fn select_package_to_remove_prerelease(
+        &self,
+        _items: &[(&str, &str)],
+    ) -> Result<MenuSelection<usize>> {
+        Ok(self
+            .remove_prerelease_selections
+            .lock()
+            .expect("lock poisoned")
+            .pop_front()
+            .expect("mock remove prerelease selection queue exhausted — test did not provide enough responses"))
+    }
+}
+
+impl GraduationInteractionProvider for MockManageInteractionProvider {
+    fn select_graduation_action(&self) -> Result<MenuSelection<GraduationAction>> {
+        Ok(self
+            .graduation_actions
+            .lock()
+            .expect("lock poisoned")
+            .pop_front()
+            .expect(
+                "mock graduation action queue exhausted — test did not provide enough responses",
+            ))
+    }
+
+    fn select_package_for_graduation(
+        &self,
+        _eligible: &[&PackageInfo],
+    ) -> Result<MenuSelection<usize>> {
+        Ok(self
+            .graduation_selections
+            .lock()
+            .expect("lock poisoned")
+            .pop_front()
+            .expect(
+                "mock graduation selection queue exhausted — test did not provide enough responses",
+            ))
+    }
+
+    fn select_package_to_remove_graduation(
+        &self,
+        _items: &[String],
+    ) -> Result<MenuSelection<usize>> {
+        Ok(self
+            .remove_graduation_selections
+            .lock()
+            .expect("lock poisoned")
+            .pop_front()
+            .expect("mock remove graduation selection queue exhausted — test did not provide enough responses"))
+    }
+}
+
+impl_arc_delegation! {
+    impl PrereleaseInteractionProvider for Arc<MockManageInteractionProvider> {
+        fn select_prerelease_action(&self) -> Result<MenuSelection<PrereleaseAction>>;
+        fn select_package_for_prerelease(&self, available: &[&PackageInfo]) -> Result<MenuSelection<usize>>;
+        fn get_prerelease_tag(&self) -> Result<String>;
+        fn select_package_to_remove_prerelease(&self, items: &[(&str, &str)]) -> Result<MenuSelection<usize>>;
+    }
+}
+
+impl_arc_delegation! {
+    impl GraduationInteractionProvider for Arc<MockManageInteractionProvider> {
+        fn select_graduation_action(&self) -> Result<MenuSelection<GraduationAction>>;
+        fn select_package_for_graduation(&self, eligible: &[&PackageInfo]) -> Result<MenuSelection<usize>>;
+        fn select_package_to_remove_graduation(&self, items: &[String]) -> Result<MenuSelection<usize>>;
     }
 }
 

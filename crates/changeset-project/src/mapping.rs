@@ -54,11 +54,11 @@ pub fn map_files_to_packages<S: BuildHasher>(
     package_configs: &HashMap<String, PackageChangesetConfig, S>,
 ) -> FileMapping {
     let mut packages_with_depth: Vec<PackageWithDepth> = project
-        .packages
+        .packages()
         .iter()
         .map(|p| {
             // Fallback to full path if strip_prefix fails (shouldn't happen in practice)
-            let relative_path = p.path.strip_prefix(&project.root).unwrap_or(&p.path);
+            let relative_path = p.path.strip_prefix(project.root()).unwrap_or(&p.path);
             PackageWithDepth {
                 package: p.clone(),
                 depth: calculate_path_depth(relative_path),
@@ -81,7 +81,7 @@ pub fn map_files_to_packages<S: BuildHasher>(
         let abs_file = if file.is_absolute() {
             file.clone()
         } else {
-            project.root.join(file)
+            project.root().join(file)
         };
 
         let mut matched = false;
@@ -114,7 +114,7 @@ pub fn map_files_to_packages<S: BuildHasher>(
     }
 
     let package_files: Vec<PackageFiles> = project
-        .packages
+        .packages()
         .iter()
         .map(|p| PackageFiles {
             package: p.clone(),
@@ -144,11 +144,7 @@ mod tests {
     }
 
     fn make_project(root: PathBuf, packages: Vec<PackageInfo>) -> CargoProject {
-        CargoProject {
-            root,
-            kind: ProjectKind::VirtualWorkspace,
-            packages,
-        }
+        CargoProject::new(root, ProjectKind::VirtualWorkspace, packages)
     }
 
     #[test]

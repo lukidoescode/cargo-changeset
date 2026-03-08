@@ -1,15 +1,13 @@
-use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use changeset_changelog::{ChangelogLocation, ComparisonLinksSetting, RepositoryInfo};
-use changeset_core::{PackageInfo, PrereleaseSpec};
-use changeset_project::{GraduationState, ProjectKind, TagFormat};
+use changeset_core::PackageInfo;
+use changeset_project::{ProjectKind, TagFormat};
 use changeset_saga::SagaBuilder;
 use chrono::Local;
 use indexmap::IndexMap;
-use semver::Version;
 
+use super::classifiers::{self, EarlyReturnDecision};
 use super::context::ReleaseSagaContext;
 use super::saga_data::{ReleaseSagaData, SagaReleaseOptions};
 use super::saga_steps::{
@@ -17,148 +15,26 @@ use super::saga_steps::{
     MarkChangesetsConsumedStep, RemoveWorkspaceVersionStep, RestoreChangelogsStep, StageFilesStep,
     UpdateDependencyVersionsStep, UpdateReleaseStateStep, WriteManifestVersionsStep,
 };
+use super::types::{
+    ChangelogUpdate, GitOptions, PrepareResult, ReleaseClassification, ReleaseContext,
+    ReleaseInput, ReleaseOutcome, ReleaseOutput, ReleasePlan,
+};
 use super::validator::{ReleaseCliInput, ReleaseValidator};
 use crate::Result;
 use crate::error::OperationError;
 use crate::operations::changelog_aggregation::ChangesetAggregator;
 use crate::planner::VersionPlanner;
 use crate::traits::{
-    ChangelogWriter, ChangesetReader, ChangesetWriter, GitProvider, ManifestWriter,
+    ChangelogWriter, ChangesetReader, ChangesetWriter, FullGitProvider, FullManifestWriter,
     ProjectProvider, ReleaseStateIO,
 };
-use crate::types::{PackageReleaseConfig, PackageVersion};
-
-pub struct ReleaseInput {
-    pub dry_run: bool,
-    pub convert_inherited: bool,
-    pub no_commit: bool,
-    pub no_tags: bool,
-    pub keep_changesets: bool,
-    pub force: bool,
-    /// Per-package release configuration from CLI (merged with TOML state at execution).
-    pub per_package_config: HashMap<String, PackageReleaseConfig>,
-    /// Global prerelease tag (applies to all packages without specific config).
-    pub global_prerelease: Option<PrereleaseSpec>,
-    /// Whether `--graduate` was passed without specific crates (single-package mode).
-    pub graduate_all: bool,
-}
-
-#[derive(Debug, Clone)]
-pub struct ChangelogUpdate {
-    pub path: PathBuf,
-    pub package: Option<String>,
-    pub version: Version,
-    pub created: bool,
-}
-
-#[derive(Debug, Clone)]
-pub struct CommitResult {
-    pub sha: String,
-    pub message: String,
-}
-
-#[derive(Debug, Clone)]
-pub struct TagResult {
-    pub name: String,
-    pub target_sha: String,
-}
-
-#[derive(Debug, Clone, Default)]
-pub struct GitOperationResult {
-    pub commit: Option<CommitResult>,
-    pub tags_created: Vec<TagResult>,
-    pub changesets_deleted: Vec<PathBuf>,
-}
-
-#[derive(Debug, Clone)]
-pub struct ReleaseOutput {
-    pub planned_releases: Vec<PackageVersion>,
-    pub unchanged_packages: Vec<String>,
-    pub changesets_consumed: Vec<PathBuf>,
-    pub changelog_updates: Vec<ChangelogUpdate>,
-    pub git_result: Option<GitOperationResult>,
-}
-
-#[derive(Debug)]
-pub enum ReleaseOutcome {
-    DryRun(ReleaseOutput),
-    Executed(ReleaseOutput),
-    NoChangesets,
-}
-
-struct GitOptions {
-    should_commit: bool,
-    should_create_tags: bool,
-    should_delete_changesets: bool,
-}
-
-struct ReleaseContext {
-    project: changeset_project::CargoProject,
-    root_config: changeset_project::RootChangesetConfig,
-    changeset_dir: PathBuf,
-    changeset_files: Vec<PathBuf>,
-    prerelease_state: Option<changeset_project::PrereleaseState>,
-    graduation_state: Option<GraduationState>,
-    per_package_config: HashMap<String, PackageReleaseConfig>,
-    is_prerelease_graduation: bool,
-    is_graduating: bool,
-    is_prerelease_release: bool,
-    git_options: GitOptions,
-    inherited_packages: Vec<String>,
-    early_return: Option<Result<ReleaseOutcome>>,
-}
-
-struct ReleasePlan {
-    output: ReleaseOutput,
-    planned_releases: Vec<PackageVersion>,
-    package_lookup: IndexMap<String, PackageInfo>,
-    changelog_backups: Vec<super::steps::ChangelogFileState>,
-}
-
-fn find_previous_tag(planned_releases: &[PackageVersion]) -> Option<String> {
-    let first_release = planned_releases.first()?;
-    let previous_version = &first_release.current_version;
-    Some(previous_version.to_string())
-}
-
-fn is_any_prerelease_configured(
-    input: &ReleaseInput,
-    per_package_config: &HashMap<String, PackageReleaseConfig>,
-) -> bool {
-    input.global_prerelease.is_some() || per_package_config.values().any(|c| c.prerelease.is_some())
-}
-
-fn is_prerelease_graduation(
-    packages: &[PackageInfo],
-    per_package_config: &HashMap<String, PackageReleaseConfig>,
-) -> bool {
-    if per_package_config.values().any(|c| c.prerelease.is_some()) {
-        return false;
-    }
-    packages
-        .iter()
-        .any(|p| changeset_version::is_prerelease(&p.version))
-}
-
-fn is_zero_graduation(
-    packages: &[PackageInfo],
-    input: &ReleaseInput,
-    per_package_config: &HashMap<String, PackageReleaseConfig>,
-) -> bool {
-    let has_graduation = input.graduate_all || per_package_config.values().any(|c| c.graduate_zero);
-    if !has_graduation {
-        return false;
-    }
-    packages
-        .iter()
-        .any(|p| changeset_version::is_zero_version(&p.version))
-}
+use crate::types::PackageVersion;
 
 pub struct ReleaseOperation<P, RW, M, C, G, S> {
     project_provider: P,
     changeset_io: Arc<RW>,
     manifest_writer: Arc<M>,
-    changelog_writer: C,
+    changelog_writer: Arc<C>,
     git_provider: Arc<G>,
     release_state_io: Arc<S>,
 }
@@ -178,9 +54,9 @@ impl<P, RW, M, C, G, S> ReleaseOperation<P, RW, M, C, G, S>
 where
     P: ProjectProvider,
     RW: ChangesetReader + ChangesetWriter + Send + Sync + 'static,
-    M: ManifestWriter + Send + Sync + 'static,
-    C: ChangelogWriter + Clone + Send + Sync + 'static,
-    G: GitProvider + Send + Sync + 'static,
+    M: FullManifestWriter + Send + Sync + 'static,
+    C: ChangelogWriter + Send + Sync + 'static,
+    G: FullGitProvider + Send + Sync + 'static,
     S: ReleaseStateIO + Send + Sync + 'static,
 {
     pub fn new(
@@ -195,202 +71,55 @@ where
             project_provider,
             changeset_io: Arc::new(changeset_io),
             manifest_writer: Arc::new(manifest_writer),
-            changelog_writer,
+            changelog_writer: Arc::new(changelog_writer),
             git_provider: Arc::new(git_provider),
             release_state_io: Arc::new(release_state_io),
         }
     }
 
-    fn find_packages_with_inherited_versions(
-        &self,
-        packages: &[PackageInfo],
-    ) -> Result<Vec<String>> {
-        self.manifest_writer
-            .find_packages_with_inherited_versions(packages)
-    }
-
-    fn detect_repository_info(&self, project_root: &Path) -> Option<RepositoryInfo> {
-        let url = self.git_provider.remote_url(project_root).ok()??;
-        RepositoryInfo::from_url(&url).ok()
-    }
-
     fn capture_changelog_state(
         &self,
         project_root: &Path,
-        changelog_config: &changeset_changelog::ChangelogConfig,
+        strategy: &dyn super::changelog_strategy::ChangelogHandler,
         planned_releases: &[PackageVersion],
         package_lookup: &IndexMap<String, PackageInfo>,
-    ) -> Result<Vec<super::steps::ChangelogFileState>> {
-        use super::steps::ChangelogFileState;
-        let mut backups = Vec::new();
-
-        match changelog_config.changelog {
-            ChangelogLocation::Root => {
-                let changelog_path = project_root.join("CHANGELOG.md");
-                let max_version = planned_releases
-                    .iter()
-                    .map(|r| &r.new_version)
-                    .max()
-                    .cloned();
-
-                if let Some(version) = max_version {
-                    let file_existed = self.changelog_writer.changelog_exists(&changelog_path);
-                    let original_content = if file_existed {
-                        Some(std::fs::read_to_string(&changelog_path).map_err(|e| {
-                            OperationError::ChangesetFileRead {
-                                path: changelog_path.clone(),
-                                source: e,
-                            }
-                        })?)
-                    } else {
-                        None
-                    };
-
-                    backups.push(ChangelogFileState {
-                        path: changelog_path,
-                        version,
-                        package: None,
-                        original_content,
-                        file_existed,
-                    });
-                }
-            }
-            ChangelogLocation::PerPackage => {
-                for release in planned_releases {
-                    if let Some(pkg) = package_lookup.get(&release.name) {
-                        let changelog_path = pkg.path.join("CHANGELOG.md");
-                        let file_existed = self.changelog_writer.changelog_exists(&changelog_path);
-                        let original_content = if file_existed {
-                            Some(std::fs::read_to_string(&changelog_path).map_err(|e| {
-                                OperationError::ChangesetFileRead {
-                                    path: changelog_path.clone(),
-                                    source: e,
-                                }
-                            })?)
-                        } else {
-                            None
-                        };
-
-                        backups.push(ChangelogFileState {
-                            path: changelog_path,
-                            version: release.new_version.clone(),
-                            package: Some(release.name.clone()),
-                            original_content,
-                            file_existed,
-                        });
-                    }
-                }
-            }
-        }
-
-        Ok(backups)
+    ) -> Result<Vec<super::types::ChangelogFileState>> {
+        let ctx = super::changelog_strategy::ChangelogCaptureContext {
+            project_root,
+            planned_releases,
+            package_lookup,
+            changelog_writer: self.changelog_writer.as_ref(),
+        };
+        strategy.capture_state(&ctx)
     }
 
     fn generate_changelog_updates(
         &self,
         project_root: &Path,
         changelog_config: &changeset_changelog::ChangelogConfig,
+        strategy: &dyn super::changelog_strategy::ChangelogHandler,
         aggregator: &ChangesetAggregator,
         planned_releases: &[PackageVersion],
         package_lookup: &IndexMap<String, PackageInfo>,
     ) -> Result<Vec<ChangelogUpdate>> {
         let today = Local::now().date_naive();
-        let repo_info = self.resolve_repo_info(project_root, changelog_config)?;
-        let mut changelog_updates = Vec::new();
-
-        match changelog_config.changelog {
-            ChangelogLocation::Root => {
-                let changelog_path = project_root.join("CHANGELOG.md");
-                let max_version = planned_releases
-                    .iter()
-                    .map(|r| &r.new_version)
-                    .max()
-                    .cloned();
-
-                if let Some(version) = max_version {
-                    let packages: Vec<_> = planned_releases
-                        .iter()
-                        .map(|r| (r.name.clone(), r.new_version.clone()))
-                        .collect();
-
-                    if let Some(release) = aggregator.build_root_release(&version, today, &packages)
-                    {
-                        let previous_tag = find_previous_tag(planned_releases);
-
-                        let result = self.changelog_writer.write_release(
-                            &changelog_path,
-                            &release,
-                            repo_info.as_ref(),
-                            previous_tag.as_deref(),
-                        )?;
-
-                        changelog_updates.push(ChangelogUpdate {
-                            path: result.path,
-                            package: None,
-                            version,
-                            created: result.created,
-                        });
-                    }
-                }
-            }
-            ChangelogLocation::PerPackage => {
-                for release in planned_releases {
-                    if let Some(pkg) = package_lookup.get(&release.name) {
-                        let changelog_path = pkg.path.join("CHANGELOG.md");
-
-                        if let Some(version_release) = aggregator.build_package_release(
-                            &release.name,
-                            &release.new_version,
-                            today,
-                        ) {
-                            let previous_version = release.current_version.to_string();
-
-                            let result = self.changelog_writer.write_release(
-                                &changelog_path,
-                                &version_release,
-                                repo_info.as_ref(),
-                                Some(&previous_version),
-                            )?;
-
-                            changelog_updates.push(ChangelogUpdate {
-                                path: result.path,
-                                package: Some(release.name.clone()),
-                                version: release.new_version.clone(),
-                                created: result.created,
-                            });
-                        }
-                    }
-                }
-            }
-        }
-
-        Ok(changelog_updates)
+        let repo_info = super::loading::resolve_repo_info(
+            self.git_provider.as_ref(),
+            project_root,
+            changelog_config,
+        )?;
+        let ctx = super::changelog_strategy::ChangelogGenerateContext {
+            project_root,
+            aggregator,
+            planned_releases,
+            package_lookup,
+            repo_info: repo_info.as_ref(),
+            today,
+            changelog_writer: self.changelog_writer.as_ref(),
+        };
+        strategy.generate_updates(&ctx)
     }
 
-    fn resolve_repo_info(
-        &self,
-        project_root: &Path,
-        changelog_config: &changeset_changelog::ChangelogConfig,
-    ) -> Result<Option<RepositoryInfo>> {
-        match changelog_config.comparison_links {
-            ComparisonLinksSetting::Disabled => Ok(None),
-            ComparisonLinksSetting::Auto => Ok(self.detect_repository_info(project_root)),
-            ComparisonLinksSetting::Enabled => {
-                let repo_info = self.detect_repository_info(project_root);
-                if repo_info.is_none() {
-                    return Err(OperationError::ComparisonLinksRequired);
-                }
-                Ok(repo_info)
-            }
-        }
-    }
-
-    /// Validates that the working tree is clean when committing is enabled.
-    ///
-    /// # Errors
-    ///
-    /// Returns `OperationError::DirtyWorkingTree` if the working tree has uncommitted
-    /// changes and committing is enabled.
     fn validate_working_tree(
         &self,
         project_root: &Path,
@@ -406,18 +135,14 @@ where
         Ok(())
     }
 
-    /// Checks for packages with inherited versions and validates the convert flag.
-    ///
-    /// # Errors
-    ///
-    /// Returns `OperationError::InheritedVersionsRequireConvert` if packages use
-    /// inherited versions and the convert flag is not set.
     fn check_inherited_versions(
         &self,
         packages: &[PackageInfo],
         convert_inherited: bool,
     ) -> Result<Vec<String>> {
-        let inherited_packages = self.find_packages_with_inherited_versions(packages)?;
+        let inherited_packages = self
+            .manifest_writer
+            .find_packages_with_inherited_versions(packages)?;
         if !inherited_packages.is_empty() && !convert_inherited {
             return Err(OperationError::InheritedVersionsRequireConvert {
                 packages: inherited_packages,
@@ -426,62 +151,19 @@ where
         Ok(inherited_packages)
     }
 
-    /// Loads changesets from the changeset directory and populates the aggregator.
-    ///
     /// # Errors
     ///
-    /// Returns an error if changeset files cannot be read or parsed.
-    fn load_changesets(
-        &self,
-        changeset_dir: &Path,
-        changeset_files: &[PathBuf],
-    ) -> Result<(Vec<changeset_core::Changeset>, ChangesetAggregator)> {
-        let mut changesets = Vec::new();
-        let mut aggregator = ChangesetAggregator::new();
-
-        for path in changeset_files {
-            let changeset = self.changeset_io.read_changeset(path)?;
-            aggregator.add_changeset(&changeset);
-            changesets.push(changeset);
-        }
-
-        let consumed_paths = self.changeset_io.list_consumed_changesets(changeset_dir)?;
-        for path in &consumed_paths {
-            let changeset = self.changeset_io.read_changeset(path)?;
-            aggregator.add_changeset(&changeset);
-        }
-
-        Ok((changesets, aggregator))
-    }
-
-    fn collect_unchanged_packages(
-        packages: &[PackageInfo],
-        planned_releases: &[PackageVersion],
-    ) -> Vec<String> {
-        let packages_with_releases: std::collections::HashSet<_> =
-            planned_releases.iter().map(|r| r.name.clone()).collect();
-
-        packages
-            .iter()
-            .filter(|p| !packages_with_releases.contains(&p.name))
-            .map(|p| p.name.clone())
-            .collect()
-    }
-
-    /// # Errors
-    ///
-    /// Returns an error if the project cannot be discovered, changeset files
-    /// cannot be read, or manifest updates fail.
+    /// Propagates errors from project discovery, changeset parsing, version
+    /// planning, changelog generation, and git operations.
     pub fn execute(&self, start_path: &Path, input: &ReleaseInput) -> Result<ReleaseOutcome> {
-        let context = self.prepare_release_context(start_path, input)?;
+        let context = match self.prepare_release_context(start_path, input)? {
+            PrepareResult::Ready(ctx) => ctx,
+            PrepareResult::EarlyReturn(outcome) => return Ok(outcome),
+        };
 
-        if let Some(early_return) = context.early_return {
-            return early_return;
-        }
+        let plan = self.plan_release(&context, input.dry_run())?;
 
-        let plan = self.plan_release(&context, input.dry_run)?;
-
-        if input.dry_run {
+        if input.dry_run() {
             return Ok(ReleaseOutcome::DryRun(plan.output));
         }
 
@@ -492,11 +174,11 @@ where
         &self,
         start_path: &Path,
         input: &ReleaseInput,
-    ) -> Result<ReleaseContext> {
+    ) -> Result<PrepareResult> {
         let project = self.project_provider.discover_project(start_path)?;
         let (root_config, _) = self.project_provider.load_configs(&project)?;
 
-        let changeset_dir = project.root.join(root_config.changeset_dir());
+        let changeset_dir = project.root().join(root_config.changeset_dir());
         let changeset_files = self.changeset_io.list_changesets(&changeset_dir)?;
 
         let prerelease_state = self
@@ -506,39 +188,52 @@ where
             .release_state_io
             .load_graduation_state(&changeset_dir)?;
 
-        let cli_input = Self::build_cli_input(input);
+        let cli_input = ReleaseCliInput::from(input);
         let validated_config = ReleaseValidator::validate(
             &cli_input,
             prerelease_state.as_ref(),
             graduation_state.as_ref(),
-            &project.packages,
-            &project.kind,
-        )
-        .map_err(OperationError::ValidationFailed)?;
+            project.packages(),
+            project.kind(),
+        )?;
 
-        let per_package_config = validated_config.per_package;
+        let per_package_config = validated_config.into_per_package();
 
         let is_prerelease_graduation =
-            is_prerelease_graduation(&project.packages, &per_package_config);
-        let is_zero_graduation = is_zero_graduation(&project.packages, input, &per_package_config);
+            classifiers::is_prerelease_graduation(project.packages(), &per_package_config);
+        let is_zero_graduation =
+            classifiers::is_zero_graduation(project.packages(), input, &per_package_config);
         let is_graduating = is_prerelease_graduation || is_zero_graduation;
 
-        let early_return =
-            Self::check_early_return(&changeset_files, is_graduating, input, &per_package_config);
+        match classifiers::check_early_return(
+            &changeset_files,
+            is_graduating,
+            input,
+            &per_package_config,
+        ) {
+            EarlyReturnDecision::NoChangesets => {
+                return Ok(PrepareResult::EarlyReturn(ReleaseOutcome::NoChangesets));
+            }
+            EarlyReturnDecision::ForceRequired => {
+                return Err(OperationError::NoChangesetsWithoutForce);
+            }
+            EarlyReturnDecision::Continue => {}
+        }
 
         let git_config = root_config.git_config();
         let git_options = GitOptions {
-            should_commit: !input.no_commit && git_config.commit(),
-            should_create_tags: !input.no_tags && git_config.tags(),
-            should_delete_changesets: !input.keep_changesets && !git_config.keep_changesets(),
+            should_commit: !input.no_commit() && git_config.commit(),
+            should_create_tags: !input.no_tags() && git_config.tags(),
+            should_delete_changesets: !input.keep_changesets() && !git_config.keep_changesets(),
         };
-        let is_prerelease_release = is_any_prerelease_configured(input, &per_package_config);
+        let is_prerelease_release =
+            classifiers::is_any_prerelease_configured(input, &per_package_config);
 
-        self.validate_working_tree(&project.root, git_options.should_commit, input.dry_run)?;
+        self.validate_working_tree(project.root(), git_options.should_commit, input.dry_run())?;
         let inherited_packages =
-            self.check_inherited_versions(&project.packages, input.convert_inherited)?;
+            self.check_inherited_versions(project.packages(), input.convert_inherited())?;
 
-        Ok(ReleaseContext {
+        Ok(PrepareResult::Ready(ReleaseContext {
             project,
             root_config,
             changeset_dir,
@@ -546,40 +241,29 @@ where
             prerelease_state,
             graduation_state,
             per_package_config,
-            is_prerelease_graduation,
-            is_graduating,
-            is_prerelease_release,
+            classification: ReleaseClassification {
+                is_prerelease_graduation,
+                is_graduating,
+                is_prerelease_release,
+            },
             git_options,
             inherited_packages,
-            early_return,
-        })
-    }
-
-    fn check_early_return(
-        changeset_files: &[PathBuf],
-        is_graduating: bool,
-        input: &ReleaseInput,
-        per_package_config: &HashMap<String, PackageReleaseConfig>,
-    ) -> Option<Result<ReleaseOutcome>> {
-        if changeset_files.is_empty() && !is_graduating {
-            if is_any_prerelease_configured(input, per_package_config) && !input.force {
-                return Some(Err(OperationError::NoChangesetsWithoutForce));
-            }
-            return Some(Ok(ReleaseOutcome::NoChangesets));
-        }
-        None
+        }))
     }
 
     fn plan_release(&self, context: &ReleaseContext, dry_run: bool) -> Result<ReleasePlan> {
-        let (changesets, aggregator) =
-            self.load_changesets(&context.changeset_dir, &context.changeset_files)?;
+        let (changesets, aggregator) = super::loading::load_changesets(
+            self.changeset_io.as_ref(),
+            &context.changeset_dir,
+            &context.changeset_files,
+        )?;
 
-        let planned_releases = if context.is_prerelease_graduation {
-            VersionPlanner::plan_graduation(&context.project.packages)?.releases
+        let planned_releases = if context.classification.is_prerelease_graduation {
+            VersionPlanner::plan_graduation(context.project.packages())?.releases
         } else {
             VersionPlanner::plan_releases_per_package(
                 &changesets,
-                &context.project.packages,
+                context.project.packages(),
                 &context.per_package_config,
                 context.root_config.zero_version_behavior(),
             )?
@@ -588,26 +272,30 @@ where
 
         let package_lookup: IndexMap<_, _> = context
             .project
-            .packages
+            .packages()
             .iter()
             .map(|p| (p.name.clone(), p.clone()))
             .collect();
 
         let unchanged_packages =
-            Self::collect_unchanged_packages(&context.project.packages, &planned_releases);
+            classifiers::collect_unchanged_packages(context.project.packages(), &planned_releases);
 
         let (changelog_updates, changelog_backups) = if dry_run {
             (Vec::new(), Vec::new())
         } else {
+            let strategy = super::changelog_strategy::strategy_for(
+                context.root_config.changelog_config().changelog(),
+            );
             let backups = self.capture_changelog_state(
-                &context.project.root,
-                context.root_config.changelog_config(),
+                context.project.root(),
+                strategy.as_ref(),
                 &planned_releases,
                 &package_lookup,
             )?;
             let updates = self.generate_changelog_updates(
-                &context.project.root,
+                context.project.root(),
                 context.root_config.changelog_config(),
+                strategy.as_ref(),
                 &aggregator,
                 &planned_releases,
                 &package_lookup,
@@ -616,7 +304,7 @@ where
         };
 
         let output = ReleaseOutput {
-            planned_releases: planned_releases.clone(),
+            planned_releases,
             unchanged_packages,
             changesets_consumed: context.changeset_files.clone(),
             changelog_updates,
@@ -625,7 +313,6 @@ where
 
         Ok(ReleasePlan {
             output,
-            planned_releases,
             package_lookup,
             changelog_backups,
         })
@@ -644,16 +331,16 @@ where
 
         let saga_data = ReleaseSagaData::new(
             context.changeset_dir.clone(),
-            context.project.root.join("Cargo.toml"),
-            plan.planned_releases.clone(),
+            context.project.root().join("Cargo.toml"),
+            plan.output.planned_releases.clone(),
             package_paths,
             plan.output.changelog_updates.clone(),
             context.changeset_files.clone(),
         )
         .with_options(SagaReleaseOptions {
-            is_prerelease_release: context.is_prerelease_release,
-            is_graduating: context.is_graduating,
-            is_prerelease_graduation: context.is_prerelease_graduation,
+            is_prerelease_release: context.classification.is_prerelease_release,
+            is_graduating: context.classification.is_graduating,
+            is_prerelease_graduation: context.classification.is_prerelease_graduation,
             should_commit: context.git_options.should_commit,
             should_create_tags: context.git_options.should_create_tags,
             should_delete_changesets: context.git_options.should_delete_changesets,
@@ -671,18 +358,11 @@ where
         }))
     }
 
-    #[allow(clippy::items_after_statements)]
     fn execute_release_saga(
         &self,
         context: &ReleaseContext,
         saga_data: ReleaseSagaData,
     ) -> Result<ReleaseSagaData> {
-        let git_config = context.root_config.git_config();
-        let use_crate_prefix = match &context.project.kind {
-            ProjectKind::SinglePackage => git_config.tag_format() == TagFormat::CratePrefixed,
-            ProjectKind::VirtualWorkspace | ProjectKind::WorkspaceWithRoot => true,
-        };
-
         type RestoreChangelogs<G, M, RW, S, CW> = RestoreChangelogsStep<G, M, RW, S, CW>;
         type WriteManifests<G, M, RW, S, CW> = WriteManifestVersionsStep<G, M, RW, S, CW>;
         type UpdateDeps<G, M, RW, S, CW> = UpdateDependencyVersionsStep<G, M, RW, S, CW>;
@@ -694,6 +374,12 @@ where
         type Commit<G, M, RW, S, CW> = CreateCommitStep<G, M, RW, S, CW>;
         type Tags<G, M, RW, S, CW> = CreateTagsStep<G, M, RW, S, CW>;
         type UpdateState<G, M, RW, S, CW> = UpdateReleaseStateStep<G, M, RW, S, CW>;
+
+        let git_config = context.root_config.git_config();
+        let use_crate_prefix = match context.project.kind() {
+            ProjectKind::SinglePackage => git_config.tag_format() == TagFormat::CratePrefixed,
+            ProjectKind::VirtualWorkspace | ProjectKind::WorkspaceWithRoot => true,
+        };
 
         let saga = SagaBuilder::new()
             .first_step(RestoreChangelogs::<G, M, RW, S, C>::new())
@@ -715,7 +401,7 @@ where
             .then(UpdateState::<G, M, RW, S, C>::new())
             .build();
 
-        let saga_context = self.create_saga_context(&context.project.root);
+        let saga_context = self.create_saga_context(context.project.root());
         saga.execute(&saga_context, saga_data).map_err(Into::into)
     }
 
@@ -726,31 +412,8 @@ where
             Arc::clone(&self.manifest_writer),
             Arc::clone(&self.changeset_io),
             Arc::clone(&self.release_state_io),
-            Arc::new(self.changelog_writer.clone()),
+            Arc::clone(&self.changelog_writer),
         )
-    }
-
-    fn build_cli_input(input: &ReleaseInput) -> ReleaseCliInput {
-        ReleaseCliInput {
-            cli_prerelease: input
-                .per_package_config
-                .iter()
-                .filter_map(|(name, config)| {
-                    config
-                        .prerelease
-                        .as_ref()
-                        .map(|spec| (name.clone(), spec.clone()))
-                })
-                .collect(),
-            global_prerelease: input.global_prerelease.clone(),
-            cli_graduate: input
-                .per_package_config
-                .iter()
-                .filter(|(_, config)| config.graduate_zero)
-                .map(|(name, _)| name.clone())
-                .collect(),
-            graduate_all: input.graduate_all,
-        }
     }
 }
 
@@ -761,20 +424,15 @@ mod tests {
         MockChangelogWriter, MockChangesetReader, MockGitProvider, MockManifestWriter,
         MockProjectProvider, MockReleaseStateIO, make_changeset,
     };
-    use changeset_core::BumpType;
+    use changeset_core::{BumpType, PrereleaseSpec};
 
     fn default_input() -> ReleaseInput {
-        ReleaseInput {
-            dry_run: true,
-            convert_inherited: false,
-            no_commit: true,
-            no_tags: true,
-            keep_changesets: true,
-            force: false,
-            per_package_config: HashMap::new(),
-            global_prerelease: None,
-            graduate_all: false,
-        }
+        ReleaseInput::builder()
+            .dry_run(true)
+            .no_commit(true)
+            .no_tags(true)
+            .keep_changesets(true)
+            .build()
     }
 
     fn make_operation<P, RW, M>(
@@ -785,7 +443,7 @@ mod tests {
     where
         P: ProjectProvider,
         RW: ChangesetReader + ChangesetWriter + Send + Sync + 'static,
-        M: ManifestWriter + Send + Sync + 'static,
+        M: FullManifestWriter + Send + Sync + 'static,
     {
         ReleaseOperation::new(
             project_provider,
@@ -980,17 +638,11 @@ mod tests {
         let manifest_writer = MockManifestWriter::new();
 
         let operation = make_operation(project_provider, changeset_reader, manifest_writer);
-        let input = ReleaseInput {
-            dry_run: false,
-            convert_inherited: false,
-            no_commit: true,
-            no_tags: true,
-            keep_changesets: true,
-            force: false,
-            per_package_config: HashMap::new(),
-            global_prerelease: None,
-            graduate_all: false,
-        };
+        let input = ReleaseInput::builder()
+            .no_commit(true)
+            .no_tags(true)
+            .keep_changesets(true)
+            .build();
 
         let result = operation
             .execute(Path::new("/any"), &input)
@@ -1017,17 +669,11 @@ mod tests {
             MockGitProvider::new(),
             MockReleaseStateIO::new(),
         );
-        let input = ReleaseInput {
-            dry_run: false,
-            convert_inherited: false,
-            no_commit: true,
-            no_tags: true,
-            keep_changesets: true,
-            force: false,
-            per_package_config: HashMap::new(),
-            global_prerelease: None,
-            graduate_all: false,
-        };
+        let input = ReleaseInput::builder()
+            .no_commit(true)
+            .no_tags(true)
+            .keep_changesets(true)
+            .build();
 
         let ReleaseOutcome::Executed(output) = operation
             .execute(Path::new("/any"), &input)
@@ -1055,17 +701,11 @@ mod tests {
             .with_inherited(vec![PathBuf::from("/mock/project/Cargo.toml")]);
 
         let operation = make_operation(project_provider, changeset_reader, manifest_writer);
-        let input = ReleaseInput {
-            dry_run: false,
-            convert_inherited: false,
-            no_commit: true,
-            no_tags: true,
-            keep_changesets: true,
-            force: false,
-            per_package_config: HashMap::new(),
-            global_prerelease: None,
-            graduate_all: false,
-        };
+        let input = ReleaseInput::builder()
+            .no_commit(true)
+            .no_tags(true)
+            .keep_changesets(true)
+            .build();
 
         let result = operation.execute(Path::new("/any"), &input);
 
@@ -1085,17 +725,12 @@ mod tests {
             .with_inherited(vec![PathBuf::from("/mock/project/Cargo.toml")]);
 
         let operation = make_operation(project_provider, changeset_reader, manifest_writer);
-        let input = ReleaseInput {
-            dry_run: false,
-            convert_inherited: true,
-            no_commit: true,
-            no_tags: true,
-            keep_changesets: true,
-            force: false,
-            per_package_config: HashMap::new(),
-            global_prerelease: None,
-            graduate_all: false,
-        };
+        let input = ReleaseInput::builder()
+            .convert_inherited(true)
+            .no_commit(true)
+            .no_tags(true)
+            .keep_changesets(true)
+            .build();
 
         let result = operation.execute(Path::new("/any"), &input);
 
@@ -1123,17 +758,12 @@ mod tests {
             MockGitProvider::new(),
             MockReleaseStateIO::new(),
         );
-        let input = ReleaseInput {
-            dry_run: false,
-            convert_inherited: true,
-            no_commit: true,
-            no_tags: true,
-            keep_changesets: true,
-            force: false,
-            per_package_config: HashMap::new(),
-            global_prerelease: None,
-            graduate_all: false,
-        };
+        let input = ReleaseInput::builder()
+            .convert_inherited(true)
+            .no_commit(true)
+            .no_tags(true)
+            .keep_changesets(true)
+            .build();
 
         let ReleaseOutcome::Executed(_) = operation
             .execute(Path::new("/any"), &input)
@@ -1165,17 +795,10 @@ mod tests {
             git_provider,
             MockReleaseStateIO::new(),
         );
-        let input = ReleaseInput {
-            dry_run: false,
-            convert_inherited: false,
-            no_commit: false,
-            no_tags: true,
-            keep_changesets: true,
-            force: false,
-            per_package_config: HashMap::new(),
-            global_prerelease: None,
-            graduate_all: false,
-        };
+        let input = ReleaseInput::builder()
+            .no_tags(true)
+            .keep_changesets(true)
+            .build();
 
         let result = operation.execute(Path::new("/any"), &input);
 
@@ -1199,17 +822,11 @@ mod tests {
             git_provider,
             MockReleaseStateIO::new(),
         );
-        let input = ReleaseInput {
-            dry_run: false,
-            convert_inherited: false,
-            no_commit: true,
-            no_tags: true,
-            keep_changesets: true,
-            force: false,
-            per_package_config: HashMap::new(),
-            global_prerelease: None,
-            graduate_all: false,
-        };
+        let input = ReleaseInput::builder()
+            .no_commit(true)
+            .no_tags(true)
+            .keep_changesets(true)
+            .build();
 
         let result = operation.execute(Path::new("/any"), &input);
 
@@ -1233,17 +850,7 @@ mod tests {
             git_provider,
             MockReleaseStateIO::new(),
         );
-        let input = ReleaseInput {
-            dry_run: true,
-            convert_inherited: false,
-            no_commit: false,
-            no_tags: false,
-            keep_changesets: false,
-            force: false,
-            per_package_config: HashMap::new(),
-            global_prerelease: None,
-            graduate_all: false,
-        };
+        let input = ReleaseInput::builder().dry_run(true).build();
 
         let result = operation.execute(Path::new("/any"), &input);
 
@@ -1269,17 +876,10 @@ mod tests {
             Arc::clone(&git_provider),
             MockReleaseStateIO::new(),
         );
-        let input = ReleaseInput {
-            dry_run: false,
-            convert_inherited: false,
-            no_commit: false,
-            no_tags: true,
-            keep_changesets: true,
-            force: false,
-            per_package_config: HashMap::new(),
-            global_prerelease: None,
-            graduate_all: false,
-        };
+        let input = ReleaseInput::builder()
+            .no_tags(true)
+            .keep_changesets(true)
+            .build();
 
         let ReleaseOutcome::Executed(output) = operation
             .execute(Path::new("/any"), &input)
@@ -1317,17 +917,7 @@ mod tests {
             Arc::clone(&git_provider),
             MockReleaseStateIO::new(),
         );
-        let input = ReleaseInput {
-            dry_run: false,
-            convert_inherited: false,
-            no_commit: false,
-            no_tags: false,
-            keep_changesets: true,
-            force: false,
-            per_package_config: HashMap::new(),
-            global_prerelease: None,
-            graduate_all: false,
-        };
+        let input = ReleaseInput::builder().keep_changesets(true).build();
 
         let ReleaseOutcome::Executed(output) = operation
             .execute(Path::new("/any"), &input)
@@ -1363,17 +953,10 @@ mod tests {
             Arc::clone(&git_provider),
             MockReleaseStateIO::new(),
         );
-        let input = ReleaseInput {
-            dry_run: false,
-            convert_inherited: false,
-            no_commit: false,
-            no_tags: true,
-            keep_changesets: true,
-            force: false,
-            per_package_config: HashMap::new(),
-            global_prerelease: None,
-            graduate_all: false,
-        };
+        let input = ReleaseInput::builder()
+            .no_tags(true)
+            .keep_changesets(true)
+            .build();
 
         let ReleaseOutcome::Executed(output) = operation
             .execute(Path::new("/any"), &input)
@@ -1406,17 +989,7 @@ mod tests {
             Arc::clone(&git_provider),
             MockReleaseStateIO::new(),
         );
-        let input = ReleaseInput {
-            dry_run: false,
-            convert_inherited: false,
-            no_commit: false,
-            no_tags: false,
-            keep_changesets: true,
-            force: false,
-            per_package_config: HashMap::new(),
-            global_prerelease: None,
-            graduate_all: false,
-        };
+        let input = ReleaseInput::builder().keep_changesets(true).build();
 
         let ReleaseOutcome::Executed(output) = operation
             .execute(Path::new("/any"), &input)
@@ -1452,17 +1025,10 @@ mod tests {
             Arc::clone(&git_provider),
             MockReleaseStateIO::new(),
         );
-        let input = ReleaseInput {
-            dry_run: false,
-            convert_inherited: false,
-            no_commit: true,
-            no_tags: true,
-            keep_changesets: false,
-            force: false,
-            per_package_config: HashMap::new(),
-            global_prerelease: None,
-            graduate_all: false,
-        };
+        let input = ReleaseInput::builder()
+            .no_commit(true)
+            .no_tags(true)
+            .build();
 
         let ReleaseOutcome::Executed(output) = operation
             .execute(Path::new("/any"), &input)
@@ -1498,17 +1064,11 @@ mod tests {
             Arc::clone(&git_provider),
             MockReleaseStateIO::new(),
         );
-        let input = ReleaseInput {
-            dry_run: false,
-            convert_inherited: false,
-            no_commit: true,
-            no_tags: true,
-            keep_changesets: true,
-            force: false,
-            per_package_config: HashMap::new(),
-            global_prerelease: None,
-            graduate_all: false,
-        };
+        let input = ReleaseInput::builder()
+            .no_commit(true)
+            .no_tags(true)
+            .keep_changesets(true)
+            .build();
 
         let ReleaseOutcome::Executed(output) = operation
             .execute(Path::new("/any"), &input)
@@ -1546,17 +1106,7 @@ mod tests {
             Arc::clone(&git_provider),
             MockReleaseStateIO::new(),
         );
-        let input = ReleaseInput {
-            dry_run: false,
-            convert_inherited: false,
-            no_commit: false,
-            no_tags: true,
-            keep_changesets: false,
-            force: false,
-            per_package_config: HashMap::new(),
-            global_prerelease: None,
-            graduate_all: false,
-        };
+        let input = ReleaseInput::builder().no_tags(true).build();
 
         let _ = operation
             .execute(Path::new("/any"), &input)
@@ -1596,17 +1146,10 @@ mod tests {
             Arc::clone(&git_provider),
             MockReleaseStateIO::new(),
         );
-        let input = ReleaseInput {
-            dry_run: false,
-            convert_inherited: false,
-            no_commit: false,
-            no_tags: true,
-            keep_changesets: true,
-            force: false,
-            per_package_config: HashMap::new(),
-            global_prerelease: None,
-            graduate_all: false,
-        };
+        let input = ReleaseInput::builder()
+            .no_tags(true)
+            .keep_changesets(true)
+            .build();
 
         let ReleaseOutcome::Executed(output) = operation
             .execute(Path::new("/any"), &input)
@@ -1647,17 +1190,12 @@ mod tests {
             MockGitProvider::new(),
             MockReleaseStateIO::new(),
         );
-        let input = ReleaseInput {
-            dry_run: false,
-            convert_inherited: false,
-            no_commit: true,
-            no_tags: true,
-            keep_changesets: true,
-            force: false,
-            per_package_config: HashMap::new(),
-            global_prerelease: Some(PrereleaseSpec::Alpha),
-            graduate_all: false,
-        };
+        let input = ReleaseInput::builder()
+            .no_commit(true)
+            .no_tags(true)
+            .keep_changesets(true)
+            .global_prerelease(Some(PrereleaseSpec::Alpha))
+            .build();
 
         let result = operation
             .execute(Path::new("/any"), &input)
@@ -1683,17 +1221,12 @@ mod tests {
         let manifest_writer = MockManifestWriter::new();
 
         let operation = make_operation(project_provider, changeset_reader, manifest_writer);
-        let input = ReleaseInput {
-            dry_run: false,
-            convert_inherited: false,
-            no_commit: true,
-            no_tags: true,
-            keep_changesets: true,
-            force: false,
-            per_package_config: HashMap::new(),
-            global_prerelease: Some(PrereleaseSpec::Alpha),
-            graduate_all: false,
-        };
+        let input = ReleaseInput::builder()
+            .no_commit(true)
+            .no_tags(true)
+            .keep_changesets(true)
+            .global_prerelease(Some(PrereleaseSpec::Alpha))
+            .build();
 
         let result = operation.execute(Path::new("/any"), &input);
 
@@ -1710,17 +1243,13 @@ mod tests {
         let manifest_writer = MockManifestWriter::new();
 
         let operation = make_operation(project_provider, changeset_reader, manifest_writer);
-        let input = ReleaseInput {
-            dry_run: false,
-            convert_inherited: false,
-            no_commit: true,
-            no_tags: true,
-            keep_changesets: true,
-            force: true,
-            per_package_config: HashMap::new(),
-            global_prerelease: Some(PrereleaseSpec::Alpha),
-            graduate_all: false,
-        };
+        let input = ReleaseInput::builder()
+            .no_commit(true)
+            .no_tags(true)
+            .keep_changesets(true)
+            .force(true)
+            .global_prerelease(Some(PrereleaseSpec::Alpha))
+            .build();
 
         let result = operation
             .execute(Path::new("/any"), &input)
@@ -1754,17 +1283,11 @@ mod tests {
             MockGitProvider::new(),
             MockReleaseStateIO::new(),
         );
-        let input = ReleaseInput {
-            dry_run: false,
-            convert_inherited: false,
-            no_commit: true,
-            no_tags: true,
-            keep_changesets: true,
-            force: false,
-            per_package_config: HashMap::new(),
-            global_prerelease: None,
-            graduate_all: false,
-        };
+        let input = ReleaseInput::builder()
+            .no_commit(true)
+            .no_tags(true)
+            .keep_changesets(true)
+            .build();
 
         let result = operation
             .execute(Path::new("/any"), &input)
@@ -1805,17 +1328,11 @@ mod tests {
             MockGitProvider::new(),
             MockReleaseStateIO::new(),
         );
-        let input = ReleaseInput {
-            dry_run: false,
-            convert_inherited: false,
-            no_commit: true,
-            no_tags: true,
-            keep_changesets: true,
-            force: false,
-            per_package_config: HashMap::new(),
-            global_prerelease: None,
-            graduate_all: false,
-        };
+        let input = ReleaseInput::builder()
+            .no_commit(true)
+            .no_tags(true)
+            .keep_changesets(true)
+            .build();
 
         let result = operation
             .execute(Path::new("/any"), &input)
@@ -1863,17 +1380,11 @@ mod tests {
             MockGitProvider::new(),
             MockReleaseStateIO::new(),
         );
-        let input = ReleaseInput {
-            dry_run: false,
-            convert_inherited: false,
-            no_commit: true,
-            no_tags: true,
-            keep_changesets: true,
-            force: false,
-            per_package_config: HashMap::new(),
-            global_prerelease: None,
-            graduate_all: false,
-        };
+        let input = ReleaseInput::builder()
+            .no_commit(true)
+            .no_tags(true)
+            .keep_changesets(true)
+            .build();
 
         let result = operation
             .execute(Path::new("/any"), &input)
@@ -1920,17 +1431,12 @@ mod tests {
             MockGitProvider::new(),
             MockReleaseStateIO::new(),
         );
-        let input = ReleaseInput {
-            dry_run: false,
-            convert_inherited: false,
-            no_commit: true,
-            no_tags: true,
-            keep_changesets: true,
-            force: false,
-            per_package_config: HashMap::new(),
-            global_prerelease: Some(PrereleaseSpec::Beta),
-            graduate_all: false,
-        };
+        let input = ReleaseInput::builder()
+            .no_commit(true)
+            .no_tags(true)
+            .keep_changesets(true)
+            .global_prerelease(Some(PrereleaseSpec::Beta))
+            .build();
 
         let result = operation
             .execute(Path::new("/any"), &input)
@@ -1968,17 +1474,11 @@ mod tests {
             Arc::clone(&git_provider),
             MockReleaseStateIO::new(),
         );
-        let input = ReleaseInput {
-            dry_run: false,
-            convert_inherited: false,
-            no_commit: true,
-            no_tags: true,
-            keep_changesets: false,
-            force: false,
-            per_package_config: HashMap::new(),
-            global_prerelease: None,
-            graduate_all: true,
-        };
+        let input = ReleaseInput::builder()
+            .no_commit(true)
+            .no_tags(true)
+            .graduate_all(true)
+            .build();
 
         let ReleaseOutcome::Executed(output) = operation
             .execute(Path::new("/any"), &input)
@@ -2034,17 +1534,10 @@ mod tests {
             Arc::clone(&git_provider),
             MockReleaseStateIO::new(),
         );
-        let input = ReleaseInput {
-            dry_run: false,
-            convert_inherited: false,
-            no_commit: true,
-            no_tags: true,
-            keep_changesets: false,
-            force: false,
-            per_package_config: HashMap::new(),
-            global_prerelease: None,
-            graduate_all: false,
-        };
+        let input = ReleaseInput::builder()
+            .no_commit(true)
+            .no_tags(true)
+            .build();
 
         let ReleaseOutcome::Executed(output) = operation
             .execute(Path::new("/any"), &input)
@@ -2096,17 +1589,11 @@ mod tests {
             MockGitProvider::new(),
             Arc::clone(&release_state_io),
         );
-        let input = ReleaseInput {
-            dry_run: false,
-            convert_inherited: false,
-            no_commit: true,
-            no_tags: true,
-            keep_changesets: true,
-            force: false,
-            per_package_config: HashMap::new(),
-            global_prerelease: None,
-            graduate_all: false,
-        };
+        let input = ReleaseInput::builder()
+            .no_commit(true)
+            .no_tags(true)
+            .keep_changesets(true)
+            .build();
 
         let ReleaseOutcome::Executed(output) = operation
             .execute(Path::new("/any"), &input)
@@ -2147,17 +1634,12 @@ mod tests {
             MockGitProvider::new(),
             Arc::clone(&release_state_io),
         );
-        let input = ReleaseInput {
-            dry_run: false,
-            convert_inherited: false,
-            no_commit: true,
-            no_tags: true,
-            keep_changesets: true,
-            force: false,
-            per_package_config: HashMap::new(),
-            global_prerelease: Some(PrereleaseSpec::Beta),
-            graduate_all: false,
-        };
+        let input = ReleaseInput::builder()
+            .no_commit(true)
+            .no_tags(true)
+            .keep_changesets(true)
+            .global_prerelease(Some(PrereleaseSpec::Beta))
+            .build();
 
         let ReleaseOutcome::Executed(output) = operation
             .execute(Path::new("/any"), &input)
@@ -2198,17 +1680,11 @@ mod tests {
             MockGitProvider::new(),
             Arc::clone(&release_state_io),
         );
-        let input = ReleaseInput {
-            dry_run: false,
-            convert_inherited: false,
-            no_commit: true,
-            no_tags: true,
-            keep_changesets: true,
-            force: false,
-            per_package_config: HashMap::new(),
-            global_prerelease: None,
-            graduate_all: false,
-        };
+        let input = ReleaseInput::builder()
+            .no_commit(true)
+            .no_tags(true)
+            .keep_changesets(true)
+            .build();
 
         let ReleaseOutcome::Executed(output) = operation
             .execute(Path::new("/any"), &input)
@@ -2240,17 +1716,12 @@ mod tests {
         let manifest_writer = MockManifestWriter::new();
 
         let operation = make_operation(project_provider, changeset_reader, manifest_writer);
-        let input = ReleaseInput {
-            dry_run: false,
-            convert_inherited: false,
-            no_commit: true,
-            no_tags: true,
-            keep_changesets: true,
-            force: false,
-            per_package_config: HashMap::new(),
-            global_prerelease: None,
-            graduate_all: true,
-        };
+        let input = ReleaseInput::builder()
+            .no_commit(true)
+            .no_tags(true)
+            .keep_changesets(true)
+            .graduate_all(true)
+            .build();
 
         let ReleaseOutcome::Executed(output) = operation
             .execute(Path::new("/any"), &input)
@@ -2292,17 +1763,11 @@ mod tests {
             MockGitProvider::new(),
             Arc::clone(&release_state_io),
         );
-        let input = ReleaseInput {
-            dry_run: false,
-            convert_inherited: false,
-            no_commit: true,
-            no_tags: true,
-            keep_changesets: true,
-            force: false,
-            per_package_config: HashMap::new(),
-            global_prerelease: None,
-            graduate_all: false,
-        };
+        let input = ReleaseInput::builder()
+            .no_commit(true)
+            .no_tags(true)
+            .keep_changesets(true)
+            .build();
 
         let ReleaseOutcome::Executed(output) = operation
             .execute(Path::new("/any"), &input)
@@ -2351,17 +1816,11 @@ mod tests {
             MockGitProvider::new(),
             Arc::clone(&release_state_io),
         );
-        let input = ReleaseInput {
-            dry_run: false,
-            convert_inherited: false,
-            no_commit: true,
-            no_tags: true,
-            keep_changesets: true,
-            force: false,
-            per_package_config: HashMap::new(),
-            global_prerelease: None,
-            graduate_all: false,
-        };
+        let input = ReleaseInput::builder()
+            .no_commit(true)
+            .no_tags(true)
+            .keep_changesets(true)
+            .build();
 
         let ReleaseOutcome::Executed(output) = operation
             .execute(Path::new("/any"), &input)
@@ -2410,17 +1869,10 @@ mod tests {
             git_provider,
             MockReleaseStateIO::new(),
         );
-        let input = ReleaseInput {
-            dry_run: false,
-            convert_inherited: false,
-            no_commit: false,
-            no_tags: true,
-            keep_changesets: true,
-            force: false,
-            per_package_config: HashMap::new(),
-            global_prerelease: None,
-            graduate_all: false,
-        };
+        let input = ReleaseInput::builder()
+            .no_tags(true)
+            .keep_changesets(true)
+            .build();
 
         let result = operation.execute(Path::new("/any"), &input);
 
@@ -2468,17 +1920,7 @@ mod tests {
             Arc::clone(&git_provider),
             Arc::new(MockReleaseStateIO::new()),
         );
-        let input = ReleaseInput {
-            dry_run: false,
-            convert_inherited: false,
-            no_commit: false,
-            no_tags: false,
-            keep_changesets: true,
-            force: false,
-            per_package_config: HashMap::new(),
-            global_prerelease: None,
-            graduate_all: false,
-        };
+        let input = ReleaseInput::builder().keep_changesets(true).build();
 
         let result = operation.execute(Path::new("/any"), &input);
         assert!(result.is_ok(), "release should succeed");
@@ -2505,17 +1947,7 @@ mod tests {
             git_provider,
             MockReleaseStateIO::new(),
         );
-        let input = ReleaseInput {
-            dry_run: false,
-            convert_inherited: false,
-            no_commit: false,
-            no_tags: false,
-            keep_changesets: true,
-            force: false,
-            per_package_config: HashMap::new(),
-            global_prerelease: None,
-            graduate_all: false,
-        };
+        let input = ReleaseInput::builder().keep_changesets(true).build();
 
         let result = operation.execute(Path::new("/any"), &input);
 

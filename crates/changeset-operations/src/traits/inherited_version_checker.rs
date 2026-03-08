@@ -4,16 +4,15 @@ use changeset_core::PackageInfo;
 
 use crate::Result;
 
-/// Checks whether packages use inherited workspace versions.
 pub trait InheritedVersionChecker: Send + Sync {
     /// # Errors
     ///
-    /// Returns an error if the manifest cannot be read.
+    /// Propagates manifest read errors.
     fn has_inherited_version(&self, manifest_path: &Path) -> Result<bool>;
 
     /// # Errors
     ///
-    /// Returns an error if any manifest cannot be read.
+    /// Propagates manifest read errors.
     fn find_packages_with_inherited_versions(
         &self,
         packages: &[PackageInfo],
