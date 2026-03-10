@@ -77,6 +77,17 @@ jobs:
             exit 1
           fi
 
+      - name: Test verify — with GIT_FETCH env vars
+        run: |
+          cd .github/test-fixtures/workspace
+          git checkout feature/covered-change
+
+          docker run --rm \
+            -v "$(pwd):/workspace" -w /workspace \
+            -e GIT_FETCH_CHANGESET_BASE=main \
+            -e GIT_FETCH_REMOTE=origin \
+            cargo-changeset-test verify --base main --quiet
+
       - name: Test release — dry-run
         run: |
           cd .github/test-fixtures/workspace

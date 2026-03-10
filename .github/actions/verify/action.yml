@@ -13,6 +13,9 @@ inputs:
 runs:
   using: "docker"
   image: "docker://ghcr.io/lukidoescode/cargo-changeset:latest"
+  env:
+    GIT_FETCH_CHANGESET_BASE: ${{ inputs.base }}
+    GIT_FETCH_REMOTE: "origin"
   args:
     - "verify"
     - "--base"
