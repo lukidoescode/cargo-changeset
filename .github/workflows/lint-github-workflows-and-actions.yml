@@ -1,4 +1,5 @@
-name: Lint Workflows
+---
+name: Lint Workflows and Actions
 
 on:
   push:
@@ -8,7 +9,7 @@ on:
 
 jobs:
   actionlint:
-    name: Lint workflows
+    name: Lint workflows (actionlint)
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -23,11 +24,11 @@ jobs:
         shell: bash
 
       - name: Run actionlint
-        run: ${{ steps.get_actionlint.outputs.executable }} -color # zizmor: ignore[template-injection]
+        run: ${{ steps.get_actionlint.outputs.executable }} -color  # zizmor: ignore[template-injection]
         shell: bash
 
   zizmor:
-    name: Security audit workflows
+    name: Security audit workflows and actions (zizmor)
     runs-on: ubuntu-latest
     permissions:
       security-events: write
