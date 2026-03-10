@@ -9,15 +9,21 @@ inputs:
     description: "Base branch to compare against"
     required: false
     default: "main"
+  cargo-changeset-version:
+    description: "Docker image tag for cargo-changeset"
+    required: false
+    default: "latest"
 
 runs:
-  using: "docker"
-  image: "docker://ghcr.io/lukidoescode/cargo-changeset:latest"
-  env:
-    GIT_FETCH_CHANGESET_BASE: ${{ inputs.base }}
-    GIT_FETCH_REMOTE: "origin"
-  args:
-    - "verify"
-    - "--base"
-    - ${{ inputs.base }}
-    - "--quiet"
+  using: "composite"
+  steps:
+    - name: Run cargo-changeset verify
+      shell: bash
+      env:
+        INPUT_BASE: ${{ inputs.base }}
+        INPUT_VERSION: ${{ inputs.cargo-changeset-version }}
+      run: |
+        docker run --rm \
+          -v "$(pwd):/workspace" -w /workspace \
+          "ghcr.io/lukidoescode/cargo-changeset:${INPUT_VERSION}" \
+          verify --base "$INPUT_BASE" --quiet

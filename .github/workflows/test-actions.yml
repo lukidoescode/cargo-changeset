@@ -1,0 +1,165 @@
+name: Test Actions
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "Dockerfile"
+      - "docker/**"
+      - ".dockerignore"
+      - ".github/workflows/test-actions.yml"
+      - ".github/actions/**"
+      - ".github/test-fixtures/**"
+      - "crates/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+  pull_request:
+    branches: [main]
+    paths:
+      - "Dockerfile"
+      - "docker/**"
+      - ".dockerignore"
+      - ".github/workflows/test-actions.yml"
+      - ".github/actions/**"
+      - ".github/test-fixtures/**"
+      - "crates/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+
+permissions:
+  contents: read
+
+jobs:
+  test-verify-action:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Build and tag Docker image
+        run: |
+          docker build -t ghcr.io/lukidoescode/cargo-changeset:latest .
+
+      - name: Prepare workspace from test fixture
+        run: |
+          cp -r .github/test-fixtures/workspace/* .
+          cp -r .github/test-fixtures/workspace/.changeset .
+          rm -rf .git
+          git init --initial-branch=main
+          git config user.name "Test"
+          git config user.email "test@test.com"
+          git add -A
+          git commit -m "Initial commit"
+
+      - name: Create feature branch with covered changeset
+        run: |
+          git checkout -b feature/covered-change
+          echo "// change" >> crates/crate-a/src/lib.rs
+          mkdir -p .changeset/changesets
+          printf -- '---\n"crate-a": patch\n---\n\nCovered change for crate-a.\n' > .changeset/changesets/cover-crate-a.md
+          git add -A && git commit -m "Change to crate-a with changeset"
+
+      - name: Test verify action — success
+        uses: ./.github/actions/verify
+        with:
+          base: main
+
+      - name: Create branch with uncovered change
+        run: |
+          git checkout -b feature/uncovered-change main
+          echo "// uncovered" >> crates/crate-b/src/lib.rs
+          git add -A && git commit -m "Uncovered change to crate-b"
+
+      - name: Test verify action — failure
+        id: verify-fail
+        uses: ./.github/actions/verify
+        continue-on-error: true
+        with:
+          base: main
+
+      - name: Assert verify failed
+        run: |
+          if [ "${{ steps.verify-fail.outcome }}" != "failure" ]; then
+            echo "ERROR: verify should have failed but got outcome=${{ steps.verify-fail.outcome }}"
+            exit 1
+          fi
+
+  test-release-action:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Build and tag Docker image
+        run: |
+          docker build -t ghcr.io/lukidoescode/cargo-changeset:latest .
+
+      - name: Prepare workspace from test fixture
+        run: |
+          cp -r .github/test-fixtures/workspace/* .
+          cp -r .github/test-fixtures/workspace/.changeset .
+          rm -rf .git
+          git init --initial-branch=main
+          git config user.name "Test"
+          git config user.email "test@test.com"
+          git add -A
+          git commit -m "Initial commit"
+
+      - name: Merge a changeset into main
+        run: |
+          git checkout -b feature/add-changeset
+          mkdir -p .changeset/changesets
+          printf -- '---\n"crate-a": patch\n---\n\nTest release change.\n' > .changeset/changesets/release-test.md
+          git add -A && git commit -m "Add changeset"
+          git checkout main
+          git merge --no-ff feature/add-changeset -m "Merge changeset"
+
+      - name: Test release action — dry-run
+        uses: ./.github/actions/release
+        with:
+          dry-run: "true"
+
+      - name: Assert no files were modified
+        run: |
+          if [ -n "$(git status --porcelain)" ]; then
+            echo "ERROR: dry-run should not modify files"
+            git status
+            exit 1
+          fi
+
+      - name: Test release action — identity missing
+        id: release-no-identity
+        continue-on-error: true
+        run: |
+          git config --unset user.name
+          git config --unset user.email
+        # Run the action's identity check inline since we can't unset config
+        # between uses steps without it being reset
+
+      - name: Run release without identity
+        id: release-fail
+        uses: ./.github/actions/release
+        continue-on-error: true
+        with:
+          dry-run: "true"
+
+      - name: Assert release failed without identity
+        run: |
+          if [ "${{ steps.release-fail.outcome }}" != "failure" ]; then
+            echo "ERROR: release should have failed without git identity but got outcome=${{ steps.release-fail.outcome }}"
+            exit 1
+          fi
+
+      - name: Restore git identity
+        run: |
+          git config user.name "Test"
+          git config user.email "test@test.com"
+
+      - name: Test release action — with flags
+        uses: ./.github/actions/release
+        with:
+          dry-run: "true"
+          keep-changesets: "true"
+          no-tags: "true"
