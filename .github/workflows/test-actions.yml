@@ -81,9 +81,11 @@ jobs:
           base: main
 
       - name: Assert verify failed
+        env:
+          OUTCOME: ${{ steps.verify-fail.outcome }}
         run: |
-          if [ "${{ steps.verify-fail.outcome }}" != "failure" ]; then
-            echo "ERROR: verify should have failed but got outcome=${{ steps.verify-fail.outcome }}"
+          if [ "$OUTCOME" != "failure" ]; then
+            echo "ERROR: verify should have failed but got outcome=$OUTCOME"
             exit 1
           fi
 
@@ -150,9 +152,11 @@ jobs:
           dry-run: "true"
 
       - name: Assert release failed without identity
+        env:
+          OUTCOME: ${{ steps.release-fail.outcome }}
         run: |
-          if [ "${{ steps.release-fail.outcome }}" != "failure" ]; then
-            echo "ERROR: release should have failed without git identity but got outcome=${{ steps.release-fail.outcome }}"
+          if [ "$OUTCOME" != "failure" ]; then
+            echo "ERROR: release should have failed without git identity but got outcome=$OUTCOME"
             exit 1
           fi
 
