@@ -40,12 +40,14 @@ jobs:
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
       - name: Cache cargo-changeset binary
+        id: cache
         uses: actions/cache@v4
         with:
           path: ~/.cargo/bin/cargo-changeset
           key: cargo-changeset-${{ runner.os }}-0.1.0
 
       - name: Install cargo-changeset
+        if: steps.cache.outputs.cache-hit != 'true'
         run: cargo install cargo-changeset --version 0.1.0
 
       - name: Build release flags

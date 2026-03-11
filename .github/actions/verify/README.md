@@ -5,7 +5,7 @@ A composite GitHub Action that runs `cargo changeset verify` using the `cargo-ch
 ## Prerequisites
 
 - **Checkout**: Use `actions/checkout@v4` so the repository is available.
-- **Base branch available**: The base branch (default `main`) must be fetchable. For pull request workflows, `actions/checkout@v4` handles this automatically.
+- **Git fetch**: The action automatically fetches the base branch from `origin` and compares against `origin/<base>`. No manual fetch step is needed.
 
 ## Inputs
 

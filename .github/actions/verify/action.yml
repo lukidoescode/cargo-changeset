@@ -17,6 +17,12 @@ inputs:
 runs:
   using: "composite"
   steps:
+    - name: Fetch base ref
+      shell: bash
+      env:
+        INPUT_BASE: ${{ inputs.base }}
+      run: git fetch origin "${INPUT_BASE}"
+
     - name: Run cargo-changeset verify
       shell: bash
       env:
@@ -26,4 +32,4 @@ runs:
         docker run --rm \
           -v "$(pwd):/workspace" -w /workspace \
           "ghcr.io/lukidoescode/cargo-changeset:${INPUT_VERSION}" \
-          verify --base "$INPUT_BASE" --quiet
+          verify --base "origin/$INPUT_BASE" --quiet

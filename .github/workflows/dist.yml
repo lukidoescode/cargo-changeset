@@ -58,8 +58,7 @@ jobs:
       - name: Extract version from tag
         id: version
         shell: bash
-        run: echo "version=$(echo "$GITHUB_REF_NAME" | sed 's/cargo-changeset@v//')"
-          >> "$GITHUB_OUTPUT"
+        run: echo "version=${GITHUB_REF_NAME#cargo-changeset@v}" >> "$GITHUB_OUTPUT"
 
       - name: Package binary (Unix)
         if: ${{ matrix.archive_ext == 'tar.gz' }}
@@ -105,8 +104,7 @@ jobs:
 
       - name: Extract version from tag
         id: version
-        run: echo "version=$(echo "$GITHUB_REF_NAME" | sed 's/cargo-changeset@v//')"
-          >> "$GITHUB_OUTPUT"
+        run: echo "version=${GITHUB_REF_NAME#cargo-changeset@v}" >> "$GITHUB_OUTPUT"
 
       - name: Download all artifacts
         uses: actions/download-artifact@v4
