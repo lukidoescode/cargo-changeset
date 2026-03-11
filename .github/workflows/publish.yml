@@ -20,7 +20,7 @@ jobs:
 
       - name: Parse crate name from tag
         id: crate
-        run: echo "name=$(echo "$GITHUB_REF_NAME" | sed 's/@v.*//')" >> "$GITHUB_OUTPUT"
+        run: echo "name=${GITHUB_REF_NAME%@v*}" >> "$GITHUB_OUTPUT"
 
       - name: Publish with retry
         env:
