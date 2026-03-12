@@ -46,20 +46,26 @@ impl VersionPlanner {
     ) -> Result<ReleasePlan, VersionError> {
         let package_lookup: IndexMap<_, _> = packages.iter().map(|p| (p.name.clone(), p)).collect();
         let bumps_by_package = Self::aggregate_bumps(changesets);
+        let graduates = Self::collect_graduates(changesets);
 
         let mut releases = Vec::new();
         let mut unknown_packages = Vec::new();
 
         for (name, bumps) in &bumps_by_package {
             let bump_type = max_bump_type(bumps);
+            let should_graduate = graduates.contains(name);
 
-            if bump_type.is_none() && prerelease.is_none() {
+            if Self::should_skip_package(bump_type, prerelease, should_graduate) {
                 continue;
             }
 
             if let Some(pkg) = package_lookup.get(name) {
                 let new_version = calculate_new_version(&pkg.version, bump_type, prerelease)?;
-                let effective_bump = bump_type.unwrap_or(BumpType::Patch);
+                let effective_bump = if should_graduate {
+                    BumpType::Major
+                } else {
+                    bump_type.unwrap_or(BumpType::Patch)
+                };
                 releases.push(PackageVersion {
                     name: name.clone(),
                     current_version: pkg.version.clone(),
@@ -125,11 +131,16 @@ impl VersionPlanner {
             let bump_type = max_bump_type(bumps);
             let should_graduate = graduates.contains(name);
 
-            if bump_type.is_none() && prerelease.is_none() && !should_graduate {
+            if Self::should_skip_package(bump_type, prerelease, should_graduate) {
                 continue;
             }
 
             if let Some(pkg) = package_lookup.get(name) {
+                let effective_bump = if should_graduate {
+                    BumpType::Major
+                } else {
+                    bump_type.unwrap_or(BumpType::Patch)
+                };
                 let new_version = calculate_new_version_with_zero_behavior(
                     &pkg.version,
                     bump_type,
@@ -137,7 +148,6 @@ impl VersionPlanner {
                     zero_behavior,
                     should_graduate,
                 )?;
-                let effective_bump = bump_type.unwrap_or(BumpType::Patch);
                 releases.push(PackageVersion {
                     name: name.clone(),
                     current_version: pkg.version.clone(),
@@ -219,11 +229,16 @@ impl VersionPlanner {
             let should_graduate =
                 config.is_some_and(|c| c.graduate_zero) || changeset_graduates.contains(name);
 
-            if bump_type.is_none() && prerelease.is_none() && !should_graduate {
+            if Self::should_skip_package(bump_type, prerelease, should_graduate) {
                 continue;
             }
 
             if let Some(pkg) = package_lookup.get(name) {
+                let effective_bump = if should_graduate {
+                    BumpType::Major
+                } else {
+                    bump_type.unwrap_or(BumpType::Patch)
+                };
                 let new_version = calculate_new_version_with_zero_behavior(
                     &pkg.version,
                     bump_type,
@@ -231,7 +246,6 @@ impl VersionPlanner {
                     zero_behavior,
                     should_graduate,
                 )?;
-                let effective_bump = bump_type.unwrap_or(BumpType::Patch);
                 releases.push(PackageVersion {
                     name: name.clone(),
                     current_version: pkg.version.clone(),
@@ -273,6 +287,15 @@ impl VersionPlanner {
             releases,
             unknown_packages,
         })
+    }
+
+    fn should_skip_package(
+        bump_type: Option<BumpType>,
+        prerelease: Option<&PrereleaseSpec>,
+        should_graduate: bool,
+    ) -> bool {
+        let is_noop_or_absent = bump_type.is_none() || bump_type.is_some_and(|b| b.is_noop());
+        is_noop_or_absent && prerelease.is_none() && !should_graduate
     }
 
     fn collect_graduates(changesets: &[Changeset]) -> HashSet<String> {
@@ -722,6 +745,25 @@ mod tests {
                 "0.2.0-alpha.1".parse::<Version>().expect("valid")
             );
         }
+
+        #[test]
+        fn auto_promote_none_bump_excludes_package() {
+            let packages = vec![make_package("my-crate", "0.1.2")];
+            let changesets = vec![make_changeset("my-crate", BumpType::None, "internal")];
+
+            let plan = VersionPlanner::plan_releases_with_behavior(
+                &changesets,
+                &packages,
+                None,
+                ZeroVersionBehavior::AutoPromoteOnMajor,
+            )
+            .expect("plan_releases_with_behavior");
+
+            assert!(
+                plan.releases.is_empty(),
+                "package with only None bumps should not appear in releases"
+            );
+        }
     }
 
     mod zero_graduation_tests {
@@ -873,6 +915,68 @@ mod tests {
                 .find(|r| r.name == "regular")
                 .expect("regular should be in releases");
             assert_eq!(regular.new_version, Version::new(0, 4, 0));
+        }
+    }
+
+    mod graduation_with_none_bump {
+        use super::*;
+
+        fn make_graduating_changeset(package_name: &str, bump: BumpType) -> Changeset {
+            Changeset {
+                summary: "Graduate to 1.0".to_string(),
+                releases: vec![PackageRelease {
+                    name: package_name.to_string(),
+                    bump_type: bump,
+                }],
+                category: ChangeCategory::Changed,
+                consumed_for_prerelease: None,
+                graduate: true,
+            }
+        }
+
+        #[test]
+        fn graduate_field_with_none_bump_still_graduates() {
+            let packages = vec![make_package("my-crate", "0.5.3")];
+            let changesets = vec![make_graduating_changeset("my-crate", BumpType::None)];
+
+            let plan = VersionPlanner::plan_releases_with_behavior(
+                &changesets,
+                &packages,
+                None,
+                ZeroVersionBehavior::EffectiveMinor,
+            )
+            .expect("plan_releases_with_behavior");
+
+            assert_eq!(plan.releases.len(), 1);
+            let release = &plan.releases[0];
+            assert_eq!(release.new_version, Version::new(1, 0, 0));
+        }
+
+        #[test]
+        fn per_package_graduate_with_none_bump_still_graduates() {
+            let packages = vec![make_package("my-crate", "0.5.3")];
+            let changesets = vec![make_graduating_changeset("my-crate", BumpType::None)];
+
+            let mut config = HashMap::new();
+            config.insert(
+                "my-crate".to_string(),
+                PackageReleaseConfig {
+                    prerelease: None,
+                    graduate_zero: true,
+                },
+            );
+
+            let plan = VersionPlanner::plan_releases_per_package(
+                &changesets,
+                &packages,
+                &config,
+                ZeroVersionBehavior::EffectiveMinor,
+            )
+            .expect("plan_releases_per_package");
+
+            assert_eq!(plan.releases.len(), 1);
+            let release = &plan.releases[0];
+            assert_eq!(release.new_version, Version::new(1, 0, 0));
         }
     }
 
@@ -1529,6 +1633,85 @@ mod tests {
                 plan.unknown_packages.is_empty(),
                 "config for nonexistent packages does not add to unknown_packages"
             );
+        }
+    }
+
+    mod none_bump_type {
+        use super::*;
+
+        #[test]
+        fn all_none_bumps_exclude_package_from_releases() {
+            let packages = vec![make_package("my-crate", "1.0.0")];
+            let changesets = vec![make_changeset("my-crate", BumpType::None, "internal")];
+
+            let plan =
+                VersionPlanner::plan_releases(&changesets, &packages).expect("should succeed");
+
+            assert!(
+                plan.releases.is_empty(),
+                "package with only None bumps should not appear in releases"
+            );
+        }
+
+        #[test]
+        fn none_bumps_still_tracked_in_aggregate() {
+            let changesets = vec![make_changeset("my-crate", BumpType::None, "internal")];
+
+            let bumps = VersionPlanner::aggregate_bumps(&changesets);
+
+            assert!(bumps.contains_key("my-crate"));
+            assert_eq!(bumps["my-crate"], vec![BumpType::None]);
+        }
+
+        #[test]
+        fn mixed_none_and_patch_uses_patch() {
+            let packages = vec![make_package("my-crate", "1.0.0")];
+            let changesets = vec![
+                make_changeset("my-crate", BumpType::None, "internal"),
+                make_changeset("my-crate", BumpType::Patch, "fix bug"),
+            ];
+
+            let plan =
+                VersionPlanner::plan_releases(&changesets, &packages).expect("should succeed");
+
+            assert_eq!(plan.releases.len(), 1);
+            assert_eq!(plan.releases[0].bump_type, BumpType::Patch);
+            assert_eq!(
+                plan.releases[0].new_version,
+                Version::parse("1.0.1").expect("valid version")
+            );
+        }
+
+        #[test]
+        fn all_none_excluded_from_behavior_plan() {
+            let packages = vec![make_package("my-crate", "0.1.0")];
+            let changesets = vec![make_changeset("my-crate", BumpType::None, "internal")];
+
+            let plan = VersionPlanner::plan_releases_with_behavior(
+                &changesets,
+                &packages,
+                None,
+                ZeroVersionBehavior::EffectiveMinor,
+            )
+            .expect("should succeed");
+
+            assert!(plan.releases.is_empty());
+        }
+
+        #[test]
+        fn all_none_excluded_from_per_package_plan() {
+            let packages = vec![make_package("my-crate", "1.0.0")];
+            let changesets = vec![make_changeset("my-crate", BumpType::None, "internal")];
+
+            let plan = VersionPlanner::plan_releases_per_package(
+                &changesets,
+                &packages,
+                &HashMap::new(),
+                ZeroVersionBehavior::EffectiveMinor,
+            )
+            .expect("should succeed");
+
+            assert!(plan.releases.is_empty());
         }
     }
 }

@@ -31,7 +31,7 @@ impl PlainTextStatusFormatter {
             let bump_detail = Self::format_bump_detail(status, &release.name);
 
             output.push_str(&format!(
-                "  {}: {} -> {} ({:?}){}\n",
+                "  {}: {} -> {} ({}){}\n",
                 release.name,
                 release.current_version,
                 release.new_version,
@@ -52,8 +52,20 @@ impl PlainTextStatusFormatter {
 
         let mut sorted_bumps: Vec<_> = bumps.iter().collect();
         sorted_bumps.sort();
-        let bump_strs: Vec<_> = sorted_bumps.iter().map(|b| format!("{b:?}")).collect();
+        let bump_strs: Vec<_> = sorted_bumps.iter().map(|b| format!("{b}")).collect();
         format!(" (from: {})", bump_strs.join(", "))
+    }
+
+    fn format_none_bump_packages(output: &mut String, status: &StatusOutput) {
+        if status.none_bump_packages.is_empty() {
+            return;
+        }
+
+        output.push('\n');
+        output.push_str("Packages with no version bump:\n");
+        for name in &status.none_bump_packages {
+            output.push_str(&format!("  {name} (none)\n"));
+        }
     }
 
     fn format_unchanged_packages(output: &mut String, status: &StatusOutput) {
@@ -83,7 +95,7 @@ impl PlainTextStatusFormatter {
     fn format_summary(output: &mut String, status: &StatusOutput) {
         output.push('\n');
         output.push_str(&format!(
-            "Summary: {} changeset(s), {} package(s) affected\n",
+            "Summary: {} changeset(s), {} package(s) to release\n",
             status.changesets.len(),
             status.projected_releases.len()
         ));
@@ -148,6 +160,7 @@ impl StatusFormatter for PlainTextStatusFormatter {
             Self::format_changesets(&mut output, status);
             Self::format_consumed_prerelease_changesets(&mut output, status);
             Self::format_projected_releases(&mut output, status);
+            Self::format_none_bump_packages(&mut output, status);
             Self::format_unchanged_packages(&mut output, status);
             Self::format_unknown_packages(&mut output, status);
             Self::format_summary(&mut output, status);
@@ -173,6 +186,7 @@ mod tests {
             changeset_files: Vec::new(),
             projected_releases: Vec::new(),
             bumps_by_package: IndexMap::new(),
+            none_bump_packages: Vec::new(),
             unchanged_packages: Vec::new(),
             packages_with_inherited_versions: Vec::new(),
             unknown_packages: Vec::new(),
@@ -273,8 +287,8 @@ mod tests {
         assert!(result.contains("Pending changesets: 1"));
         assert!(result.contains("fix-bug.md"));
         assert!(result.contains("Projected releases:"));
-        assert!(result.contains("my-crate: 1.0.0 -> 1.0.1 (Patch)"));
-        assert!(result.contains("Summary: 1 changeset(s), 1 package(s) affected"));
+        assert!(result.contains("my-crate: 1.0.0 -> 1.0.1 (patch)"));
+        assert!(result.contains("Summary: 1 changeset(s), 1 package(s) to release"));
     }
 
     #[test]
@@ -314,7 +328,7 @@ mod tests {
 
         let result = formatter.format_status(&status);
 
-        assert!(result.contains("my-crate: 1.0.0 -> 1.1.0 (Minor) (from: Patch, Minor)"));
+        assert!(result.contains("my-crate: 1.0.0 -> 1.1.0 (minor) (from: patch, minor)"));
     }
 
     #[test]
@@ -434,9 +448,9 @@ mod tests {
         let result = formatter.format_status(&status);
 
         assert!(result.contains("Pending changesets: 2"));
-        assert!(result.contains("crate-a: 1.0.0 -> 1.0.1 (Patch)"));
-        assert!(result.contains("crate-b: 2.0.0 -> 2.1.0 (Minor)"));
-        assert!(result.contains("Summary: 2 changeset(s), 2 package(s) affected"));
+        assert!(result.contains("crate-a: 1.0.0 -> 1.0.1 (patch)"));
+        assert!(result.contains("crate-b: 2.0.0 -> 2.1.0 (minor)"));
+        assert!(result.contains("Summary: 2 changeset(s), 2 package(s) to release"));
     }
 
     #[test]
@@ -492,7 +506,7 @@ mod tests {
 
         assert!(result.contains("Pending changesets: 1"));
         assert!(result.contains("Warning: Unknown packages in changesets:"));
-        assert!(result.contains("Summary: 1 changeset(s), 0 package(s) affected"));
+        assert!(result.contains("Summary: 1 changeset(s), 0 package(s) to release"));
     }
 
     #[test]
@@ -686,5 +700,71 @@ mod tests {
             !result.contains("... and"),
             "should not show truncation for small lists"
         );
+    }
+
+    #[test]
+    fn format_none_only_packages_section() {
+        let formatter = PlainTextStatusFormatter;
+        let mut status = empty_status();
+        status.changesets = vec![make_changeset(
+            &[("internal-crate", BumpType::None)],
+            ChangeCategory::Changed,
+            "Refactor",
+        )];
+        status.changeset_files = vec![PathBuf::from(".changeset/changesets/refactor.md")];
+        status.bumps_by_package = {
+            let mut map = IndexMap::new();
+            map.insert("internal-crate".to_string(), vec![BumpType::None]);
+            map
+        };
+        status.none_bump_packages = vec!["internal-crate".to_string()];
+
+        let result = formatter.format_status(&status);
+
+        assert!(result.contains("Packages with no version bump:"));
+        assert!(result.contains("internal-crate (none)"));
+        assert!(!result.contains("Projected releases:"));
+    }
+
+    #[test]
+    fn format_mixed_none_and_patch_packages() {
+        let formatter = PlainTextStatusFormatter;
+        let mut status = empty_status();
+        status.changesets = vec![
+            make_changeset(
+                &[("internal-crate", BumpType::None)],
+                ChangeCategory::Changed,
+                "Refactor",
+            ),
+            make_changeset(
+                &[("public-crate", BumpType::Patch)],
+                ChangeCategory::Fixed,
+                "Fix",
+            ),
+        ];
+        status.changeset_files = vec![
+            PathBuf::from(".changeset/changesets/refactor.md"),
+            PathBuf::from(".changeset/changesets/fix.md"),
+        ];
+        status.projected_releases = vec![make_package_version(
+            "public-crate",
+            "1.0.0",
+            "1.0.1",
+            BumpType::Patch,
+        )];
+        status.bumps_by_package = {
+            let mut map = IndexMap::new();
+            map.insert("internal-crate".to_string(), vec![BumpType::None]);
+            map.insert("public-crate".to_string(), vec![BumpType::Patch]);
+            map
+        };
+        status.none_bump_packages = vec!["internal-crate".to_string()];
+
+        let result = formatter.format_status(&status);
+
+        assert!(result.contains("Projected releases:"));
+        assert!(result.contains("public-crate: 1.0.0 -> 1.0.1 (patch)"));
+        assert!(result.contains("Packages with no version bump:"));
+        assert!(result.contains("internal-crate (none)"));
     }
 }

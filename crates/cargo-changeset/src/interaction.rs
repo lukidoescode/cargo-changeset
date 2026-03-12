@@ -60,6 +60,7 @@ impl InteractionProvider for TerminalInteractionProvider {
             "patch - Bug fixes (backwards compatible)",
             "minor - New features (backwards compatible)",
             "major - Breaking changes",
+            "none  - No version bump (internal changes only)",
         ];
 
         let selection = Select::new()
@@ -75,6 +76,7 @@ impl InteractionProvider for TerminalInteractionProvider {
             Some(0) => Ok(BumpSelection::Selected(BumpType::Patch)),
             Some(1) => Ok(BumpSelection::Selected(BumpType::Minor)),
             Some(2) => Ok(BumpSelection::Selected(BumpType::Major)),
+            Some(3) => Ok(BumpSelection::Selected(BumpType::None)),
             _ => Ok(BumpSelection::Cancelled),
         }
     }

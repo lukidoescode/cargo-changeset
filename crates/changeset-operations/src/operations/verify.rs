@@ -331,6 +331,51 @@ mod tests {
     }
 
     #[test]
+    fn returns_success_when_changeset_has_none_bump_type() {
+        let project_provider = MockProjectProvider::single_package("my-crate", "1.0.0");
+
+        let git_provider = MockGitProvider::new().with_changed_files(vec![
+            FileChange {
+                path: PathBuf::from(".changeset/changesets/internal.md"),
+                status: FileStatus::Added,
+                old_path: None,
+            },
+            FileChange {
+                path: PathBuf::from("src/lib.rs"),
+                status: FileStatus::Modified,
+                old_path: None,
+            },
+        ]);
+
+        let changeset =
+            crate::mocks::make_changeset("my-crate", BumpType::None, "Internal refactoring");
+        let changeset_reader = MockChangesetReader::new().with_changeset(
+            PathBuf::from(".changeset/changesets/internal.md"),
+            changeset,
+        );
+
+        let operation = VerifyOperation::new(project_provider, git_provider, changeset_reader);
+
+        let input = VerifyInput {
+            base: "main".to_string(),
+            head: None,
+            allow_deleted_changesets: false,
+        };
+
+        let result = operation
+            .execute(Path::new("/any"), &input)
+            .expect("VerifyOperation failed when changeset has None bump type");
+
+        match result {
+            VerifyOutcome::Success(verification_result) => {
+                assert!(verification_result.uncovered_packages.is_empty());
+                assert!(verification_result.covered_packages.contains("my-crate"));
+            }
+            other => panic!("Expected VerifyOutcome::Success, got {other:?}"),
+        }
+    }
+
+    #[test]
     fn is_markdown_file_recognizes_md_extension() {
         assert!(is_markdown_file(Path::new("test.md")));
         assert!(is_markdown_file(Path::new("path/to/file.md")));

@@ -21,6 +21,7 @@ pub fn bump_version(version: &Version, bump_type: BumpType) -> Version {
     let mut new_version = version.clone();
 
     match bump_type {
+        BumpType::None => return new_version,
         BumpType::Major => {
             new_version.major += 1;
             new_version.minor = 0;
@@ -160,6 +161,7 @@ pub fn calculate_new_version_with_zero_behavior(
 
     let effective_bump = match zero_behavior {
         ZeroVersionBehavior::EffectiveMinor => bump_type.map(|bt| match bt {
+            BumpType::None => BumpType::None,
             BumpType::Major => BumpType::Minor,
             BumpType::Minor | BumpType::Patch => BumpType::Patch,
         }),
@@ -239,6 +241,20 @@ mod tests {
         assert_eq!(bumped, Version::parse("1.2.4").unwrap());
     }
 
+    #[test]
+    fn bump_none_returns_version_unchanged() {
+        let version = Version::parse("1.2.3").unwrap();
+        let bumped = bump_version(&version, BumpType::None);
+        assert_eq!(bumped, Version::parse("1.2.3").unwrap());
+    }
+
+    #[test]
+    fn bump_none_preserves_prerelease() {
+        let version = Version::parse("1.2.3-alpha.1").unwrap();
+        let bumped = bump_version(&version, BumpType::None);
+        assert_eq!(bumped, Version::parse("1.2.3-alpha.1").unwrap());
+    }
+
     mod max_bump_type_tests {
         use super::*;
 
@@ -292,6 +308,27 @@ mod tests {
                 max_bump_type(&[BumpType::Major, BumpType::Patch, BumpType::Minor]),
                 Some(BumpType::Major)
             );
+        }
+
+        #[test]
+        fn none_with_patch_returns_patch() {
+            assert_eq!(
+                max_bump_type(&[BumpType::None, BumpType::Patch]),
+                Some(BumpType::Patch)
+            );
+        }
+
+        #[test]
+        fn all_none_returns_none() {
+            assert_eq!(
+                max_bump_type(&[BumpType::None, BumpType::None]),
+                Some(BumpType::None)
+            );
+        }
+
+        #[test]
+        fn single_none() {
+            assert_eq!(max_bump_type(&[BumpType::None]), Some(BumpType::None));
         }
     }
 
@@ -607,6 +644,20 @@ mod tests {
                 .unwrap();
                 assert_eq!(result, Version::parse("0.1.0").unwrap());
             }
+
+            #[test]
+            fn none_stays_none() {
+                let version = Version::parse("0.1.2").unwrap();
+                let result = calculate_new_version_with_zero_behavior(
+                    &version,
+                    Some(BumpType::None),
+                    None,
+                    ZeroVersionBehavior::EffectiveMinor,
+                    false,
+                )
+                .unwrap();
+                assert_eq!(result, Version::parse("0.1.2").unwrap());
+            }
         }
 
         mod auto_promote_behavior {
@@ -666,6 +717,24 @@ mod tests {
                 )
                 .unwrap();
                 assert_eq!(result, Version::parse("1.0.0-alpha.1").unwrap());
+            }
+        }
+
+        mod none_bump_behavior {
+            use super::*;
+
+            #[test]
+            fn none_leaves_version_unchanged() {
+                let version = Version::parse("0.1.2").unwrap();
+                let result = calculate_new_version_with_zero_behavior(
+                    &version,
+                    Some(BumpType::None),
+                    None,
+                    ZeroVersionBehavior::AutoPromoteOnMajor,
+                    false,
+                )
+                .unwrap();
+                assert_eq!(result, Version::parse("0.1.2").unwrap());
             }
         }
 

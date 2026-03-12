@@ -1,6 +1,7 @@
 use std::path::{Path, PathBuf};
 
 use changeset_core::{BumpType, Changeset, PackageInfo};
+use changeset_version::max_bump_type;
 use indexmap::IndexMap;
 
 use crate::Result;
@@ -17,6 +18,8 @@ pub struct StatusOutput {
     pub projected_releases: Vec<PackageVersion>,
     /// Raw bump types per package (for verbose display).
     pub bumps_by_package: IndexMap<String, Vec<BumpType>>,
+    /// Packages whose max bump type is `None` (tracked but not version-bumped).
+    pub none_bump_packages: Vec<String>,
     /// Packages with no pending changesets.
     pub unchanged_packages: Vec<PackageInfo>,
     /// Packages using inherited versions (informational warning).
@@ -86,11 +89,19 @@ where
             .inherited_checker
             .find_packages_with_inherited_versions(project.packages())?;
 
+        let mut none_bump_packages: Vec<String> = bumps_by_package
+            .iter()
+            .filter(|(_, bumps)| max_bump_type(bumps).is_some_and(|b| b.is_noop()))
+            .map(|(name, _)| name.clone())
+            .collect();
+        none_bump_packages.sort();
+
         Ok(StatusOutput {
             changesets,
             changeset_files,
             projected_releases: plan.releases,
             bumps_by_package,
+            none_bump_packages,
             unchanged_packages,
             packages_with_inherited_versions,
             unknown_packages: plan.unknown_packages,

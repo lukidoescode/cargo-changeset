@@ -46,7 +46,7 @@ fn format_operation_error(out: &mut String, error: &changeset_operations::Operat
                 .expect("string write");
                 writeln!(
                     out,
-                    "  --bump <TYPE>          Bump type: major, minor, or patch"
+                    "  --bump <TYPE>          Bump type: major, minor, patch, or none"
                 )
                 .expect("string write");
                 writeln!(out, "  -m <MESSAGE>           Change description").expect("string write");
