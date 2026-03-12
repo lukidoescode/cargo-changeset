@@ -148,8 +148,8 @@ fn status_shows_single_changeset() {
         .stdout(contains("Pending changesets: 1"))
         .stdout(contains("fix-bug.md"))
         .stdout(contains("Projected releases:"))
-        .stdout(contains("my-crate: 1.0.0 -> 1.0.1 (Patch)"))
-        .stdout(contains("Summary: 1 changeset(s), 1 package(s) affected"));
+        .stdout(contains("my-crate: 1.0.0 -> 1.0.1 (patch)"))
+        .stdout(contains("Summary: 1 changeset(s), 1 package(s) to release"));
 }
 
 #[test]
@@ -164,8 +164,8 @@ fn status_shows_multiple_changesets() {
         .assert()
         .success()
         .stdout(contains("Pending changesets: 2"))
-        .stdout(contains("my-crate: 1.0.0 -> 1.1.0 (Minor)"))
-        .stdout(contains("(from: Patch, Minor)"));
+        .stdout(contains("my-crate: 1.0.0 -> 1.1.0 (minor)"))
+        .stdout(contains("(from: patch, minor)"));
 }
 
 #[test]
@@ -178,7 +178,7 @@ fn status_shows_workspace_packages() {
         .current_dir(workspace.path())
         .assert()
         .success()
-        .stdout(contains("crate-a: 1.0.0 -> 1.0.1 (Patch)"))
+        .stdout(contains("crate-a: 1.0.0 -> 1.0.1 (patch)"))
         .stdout(contains("Packages without changesets:"))
         .stdout(contains("crate-b (2.0.0)"));
 }
@@ -253,8 +253,8 @@ fn status_multiple_packages_multiple_bumps() {
         .success()
         .stdout(contains("Pending changesets: 3"))
         .stdout(contains(
-            "crate-a: 1.0.0 -> 1.1.0 (Minor) (from: Patch, Minor)",
+            "crate-a: 1.0.0 -> 1.1.0 (minor) (from: patch, minor)",
         ))
-        .stdout(contains("crate-b: 2.0.0 -> 3.0.0 (Major)"))
-        .stdout(contains("Summary: 3 changeset(s), 2 package(s) affected"));
+        .stdout(contains("crate-b: 2.0.0 -> 3.0.0 (major)"))
+        .stdout(contains("Summary: 3 changeset(s), 2 package(s) to release"));
 }

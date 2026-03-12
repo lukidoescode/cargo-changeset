@@ -320,6 +320,26 @@ mod tests {
     }
 
     #[test]
+    fn roundtrip_with_none_bump_type() {
+        let original = Changeset {
+            summary: "Internal refactoring".to_string(),
+            releases: vec![PackageRelease {
+                name: "my-crate".to_string(),
+                bump_type: BumpType::None,
+            }],
+            category: ChangeCategory::default(),
+            consumed_for_prerelease: None,
+            graduate: false,
+        };
+
+        let serialized = serialize_changeset(&original).expect("should serialize");
+        let parsed = parse_changeset(&serialized).expect("should parse");
+
+        assert_eq!(parsed.releases[0].bump_type, BumpType::None);
+        assert_eq!(parsed.summary, original.summary);
+    }
+
+    #[test]
     fn roundtrip_with_graduate() {
         let original = Changeset {
             summary: "Graduating to 1.0".to_string(),

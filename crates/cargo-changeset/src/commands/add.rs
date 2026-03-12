@@ -55,7 +55,7 @@ pub(super) fn run(args: AddArgs, start_path: &Path) -> Result<()> {
             println!();
             println!("Releases:");
             for release in &changeset.releases {
-                println!("  - {}: {:?}", release.name, release.bump_type);
+                println!("  - {}: {}", release.name, release.bump_type);
             }
             Ok(())
         }
@@ -110,6 +110,7 @@ fn parse_package_bump(input: &str) -> Result<(String, BumpType)> {
         "major" => BumpType::Major,
         "minor" => BumpType::Minor,
         "patch" => BumpType::Patch,
+        "none" => BumpType::None,
         _ => {
             return Err(CliError::InvalidBumpType {
                 input: bump_str.to_string(),
@@ -155,6 +156,14 @@ mod tests {
 
         assert_eq!(name, "my-package");
         assert_eq!(bump, BumpType::Patch);
+    }
+
+    #[test]
+    fn parse_package_bump_valid_none() {
+        let (name, bump) = parse_package_bump("my-package:none").expect("should parse");
+
+        assert_eq!(name, "my-package");
+        assert_eq!(bump, BumpType::None);
     }
 
     #[test]

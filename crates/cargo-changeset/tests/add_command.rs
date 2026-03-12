@@ -256,7 +256,7 @@ mod non_interactive {
             .success()
             .stdout(contains("Created changeset"))
             .stdout(contains("crate-a"))
-            .stdout(contains("Major"));
+            .stdout(contains("major"));
     }
 
     #[test]
@@ -275,9 +275,9 @@ mod non_interactive {
             .assert()
             .success()
             .stdout(contains("crate-a"))
-            .stdout(contains("Major"))
+            .stdout(contains("major"))
             .stdout(contains("crate-b"))
-            .stdout(contains("Patch"));
+            .stdout(contains("patch"));
     }
 
     #[test]
@@ -298,9 +298,9 @@ mod non_interactive {
             .assert()
             .success()
             .stdout(contains("crate-a"))
-            .stdout(contains("Major"))
+            .stdout(contains("major"))
             .stdout(contains("crate-b"))
-            .stdout(contains("Minor"));
+            .stdout(contains("minor"));
     }
 
     #[test]
@@ -460,6 +460,39 @@ mod non_interactive {
             .collect();
 
         assert_eq!(files.len(), 3, "should have three unique changeset files");
+    }
+
+    #[test]
+    fn add_single_crate_with_bump_none_succeeds() {
+        let workspace = create_single_crate_workspace();
+
+        assert_cmd::cargo::cargo_bin_cmd!("cargo-changeset")
+            .arg("add")
+            .arg("--bump")
+            .arg("none")
+            .arg("-m")
+            .arg("Internal refactoring")
+            .current_dir(workspace.path())
+            .assert()
+            .success()
+            .stdout(contains("Created changeset"))
+            .stdout(contains("Internal refactoring"));
+
+        let changeset_dir = workspace.path().join(".changeset/changesets");
+        let files: Vec<_> = fs::read_dir(&changeset_dir)
+            .expect("read dir")
+            .filter_map(|e| e.ok())
+            .filter(|e| e.path().extension().is_some_and(|ext| ext == "md"))
+            .collect();
+
+        assert_eq!(files.len(), 1, "should have one changeset file");
+
+        let content = fs::read_to_string(files[0].path()).expect("read changeset file");
+        assert!(content.contains("none"), "should contain none bump type");
+        assert!(
+            content.contains("Internal refactoring"),
+            "should contain message"
+        );
     }
 
     #[test]

@@ -533,6 +533,74 @@ Major bump.
     }
 
     #[test]
+    fn parses_none_bump_type_with_body() {
+        let content = r#"---
+"my-crate": none
+---
+Internal refactoring only.
+"#;
+
+        let changeset = parse_changeset(content).expect("should parse");
+        assert_eq!(changeset.releases.len(), 1);
+        assert_eq!(changeset.releases[0].name, "my-crate");
+        assert_eq!(changeset.releases[0].bump_type, BumpType::None);
+        assert_eq!(changeset.summary, "Internal refactoring only.");
+    }
+
+    #[test]
+    fn parses_none_bump_type_with_empty_body() {
+        let content = r#"---
+"my-crate": none
+---
+"#;
+
+        let changeset = parse_changeset(content).expect("should parse");
+        assert_eq!(changeset.releases[0].bump_type, BumpType::None);
+        assert!(changeset.summary.is_empty());
+    }
+
+    #[test]
+    fn parses_mixed_none_and_patch_bump_types() {
+        let content = r#"---
+"crate-a": none
+"crate-b": patch
+---
+Mixed bump types.
+"#;
+
+        let changeset = parse_changeset(content).expect("should parse");
+        assert_eq!(changeset.releases.len(), 2);
+        assert_eq!(changeset.releases[0].bump_type, BumpType::None);
+        assert_eq!(changeset.releases[1].bump_type, BumpType::Patch);
+    }
+
+    #[test]
+    fn yaml_null_does_not_parse_as_bump_type_none() {
+        let content = r#"---
+"my-crate": None
+---
+Summary.
+"#;
+
+        let err = parse_changeset(content)
+            .expect_err("YAML None (null) should not parse as BumpType::None");
+        assert!(err.to_string().contains("YAML"));
+    }
+
+    #[test]
+    fn yaml_uppercase_none_does_not_parse_as_bump_type_none() {
+        let content = r#"---
+"my-crate": NONE
+---
+Summary.
+"#;
+
+        let err =
+            parse_changeset(content).expect_err("YAML NONE should not parse as BumpType::None");
+        assert!(err.to_string().contains("YAML"));
+    }
+
+    #[test]
     fn parses_graduate_with_category() {
         let content = r#"---
 category: added

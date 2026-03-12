@@ -82,21 +82,35 @@ where
             return Ok(AddResult::Cancelled);
         };
 
-        let Some(category) = self.select_category(&input)? else {
-            return Ok(AddResult::Cancelled);
-        };
+        let all_none = releases.iter().all(|r| r.bump_type.is_noop());
 
-        let Some(description) = self.get_description(&input)? else {
-            return Ok(AddResult::Cancelled);
-        };
+        let (category, description) = if all_none {
+            let category = input.category;
+            let description = input
+                .description
+                .clone()
+                .unwrap_or_default()
+                .trim()
+                .to_string();
+            (category, description)
+        } else {
+            let Some(category) = self.select_category(&input)? else {
+                return Ok(AddResult::Cancelled);
+            };
 
-        let description = description.trim();
-        if description.is_empty() {
-            return Err(OperationError::EmptyDescription);
-        }
+            let Some(desc) = self.get_description(&input)? else {
+                return Ok(AddResult::Cancelled);
+            };
+
+            let desc = desc.trim().to_string();
+            if desc.is_empty() {
+                return Err(OperationError::EmptyDescription);
+            }
+            (category, desc)
+        };
 
         let changeset = Changeset {
-            summary: description.to_string(),
+            summary: description,
             releases,
             category,
             consumed_for_prerelease: None,
@@ -562,6 +576,61 @@ mod operation_tests {
         match result {
             AddResult::Created { file_path, .. } => {
                 assert!(file_path.to_string_lossy().contains("my-changeset.md"));
+            }
+            _ => panic!("Expected AddResult::Created"),
+        }
+    }
+
+    #[test]
+    fn all_none_bumps_skip_description_and_category_prompts() {
+        let project_provider = MockProjectProvider::single_package("my-crate", "1.0.0");
+        let writer = MockChangesetWriter::new();
+        let interaction = MockInteractionProvider::all_cancelled();
+
+        let operation = AddOperation::new(project_provider, writer, interaction);
+
+        let input = AddInput {
+            packages: vec!["my-crate".to_string()],
+            bump: Some(BumpType::None),
+            ..Default::default()
+        };
+
+        let result = operation
+            .execute(Path::new("/any"), input)
+            .expect("AddOperation should succeed for all-none bumps without description");
+
+        match result {
+            AddResult::Created { changeset, .. } => {
+                assert!(changeset.summary.is_empty());
+                assert_eq!(changeset.releases[0].bump_type, BumpType::None);
+            }
+            _ => panic!("Expected AddResult::Created"),
+        }
+    }
+
+    #[test]
+    fn all_none_bumps_with_explicit_description() {
+        let project_provider = MockProjectProvider::single_package("my-crate", "1.0.0");
+        let writer = MockChangesetWriter::new();
+        let interaction = MockInteractionProvider::all_cancelled();
+
+        let operation = AddOperation::new(project_provider, writer, interaction);
+
+        let input = AddInput {
+            packages: vec!["my-crate".to_string()],
+            bump: Some(BumpType::None),
+            description: Some("Internal refactoring".to_string()),
+            ..Default::default()
+        };
+
+        let result = operation
+            .execute(Path::new("/any"), input)
+            .expect("AddOperation should succeed for all-none bumps with description");
+
+        match result {
+            AddResult::Created { changeset, .. } => {
+                assert_eq!(changeset.summary, "Internal refactoring");
+                assert_eq!(changeset.releases[0].bump_type, BumpType::None);
             }
             _ => panic!("Expected AddResult::Created"),
         }

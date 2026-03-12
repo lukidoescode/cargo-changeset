@@ -8,9 +8,29 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, ValueEnum)]
 #[serde(rename_all = "lowercase")]
 pub enum BumpType {
+    None,
     Patch,
     Minor,
     Major,
+}
+
+impl BumpType {
+    #[must_use]
+    pub fn is_noop(&self) -> bool {
+        matches!(self, Self::None)
+    }
+}
+
+impl fmt::Display for BumpType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let s = match self {
+            Self::None => "none",
+            Self::Patch => "patch",
+            Self::Minor => "minor",
+            Self::Major => "major",
+        };
+        write!(f, "{s}")
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -26,19 +46,29 @@ mod tests {
     use super::*;
 
     #[test]
-    fn bump_type_ordering_patch_is_smallest() {
+    fn bump_type_ordering_none_is_smallest() {
+        assert!(BumpType::None < BumpType::Patch);
+        assert!(BumpType::None < BumpType::Minor);
+        assert!(BumpType::None < BumpType::Major);
+    }
+
+    #[test]
+    fn bump_type_ordering_patch_is_second() {
+        assert!(BumpType::Patch > BumpType::None);
         assert!(BumpType::Patch < BumpType::Minor);
         assert!(BumpType::Patch < BumpType::Major);
     }
 
     #[test]
     fn bump_type_ordering_minor_is_middle() {
+        assert!(BumpType::Minor > BumpType::None);
         assert!(BumpType::Minor > BumpType::Patch);
         assert!(BumpType::Minor < BumpType::Major);
     }
 
     #[test]
     fn bump_type_ordering_major_is_largest() {
+        assert!(BumpType::Major > BumpType::None);
         assert!(BumpType::Major > BumpType::Patch);
         assert!(BumpType::Major > BumpType::Minor);
     }
@@ -47,6 +77,34 @@ mod tests {
     fn bump_type_max_returns_largest() {
         let bumps = [BumpType::Patch, BumpType::Minor, BumpType::Major];
         assert_eq!(bumps.iter().max(), Some(&BumpType::Major));
+    }
+
+    #[test]
+    fn bump_type_max_none_and_patch_returns_patch() {
+        let bumps = [BumpType::None, BumpType::Patch];
+        assert_eq!(bumps.iter().max(), Some(&BumpType::Patch));
+    }
+
+    #[test]
+    fn bump_type_max_all_none_returns_none() {
+        let bumps = [BumpType::None, BumpType::None];
+        assert_eq!(bumps.iter().max(), Some(&BumpType::None));
+    }
+
+    #[test]
+    fn bump_type_is_noop() {
+        assert!(BumpType::None.is_noop());
+        assert!(!BumpType::Patch.is_noop());
+        assert!(!BumpType::Minor.is_noop());
+        assert!(!BumpType::Major.is_noop());
+    }
+
+    #[test]
+    fn bump_type_display() {
+        assert_eq!(format!("{}", BumpType::None), "none");
+        assert_eq!(format!("{}", BumpType::Patch), "patch");
+        assert_eq!(format!("{}", BumpType::Minor), "minor");
+        assert_eq!(format!("{}", BumpType::Major), "major");
     }
 }
 
