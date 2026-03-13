@@ -1,7 +1,9 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-use changeset_project::{CargoProject, PackageChangesetConfig, RootChangesetConfig};
+use changeset_project::{
+    CargoProject, PackageChangesetConfig, RootChangesetConfig, WorkspaceDependencyGraph,
+};
 
 use crate::Result;
 
@@ -27,4 +29,11 @@ pub trait ProjectProvider: Send + Sync {
         project: &CargoProject,
         config: &RootChangesetConfig,
     ) -> Result<PathBuf>;
+}
+
+pub trait DependencyGraphProvider: Send + Sync {
+    /// # Errors
+    ///
+    /// Returns an error if the dependency graph cannot be built from the project manifests.
+    fn build_dependency_graph(&self, project: &CargoProject) -> Result<WorkspaceDependencyGraph>;
 }

@@ -2,12 +2,12 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use changeset_project::{
-    CargoProject, PackageChangesetConfig, RootChangesetConfig, discover_project,
-    ensure_changeset_dir, load_changeset_configs,
+    CargoProject, PackageChangesetConfig, RootChangesetConfig, WorkspaceDependencyGraph,
+    discover_project, ensure_changeset_dir, load_changeset_configs,
 };
 
 use crate::Result;
-use crate::traits::ProjectProvider;
+use crate::traits::{DependencyGraphProvider, ProjectProvider};
 
 pub struct FileSystemProjectProvider;
 
@@ -42,5 +42,11 @@ impl ProjectProvider for FileSystemProjectProvider {
         config: &RootChangesetConfig,
     ) -> Result<PathBuf> {
         Ok(ensure_changeset_dir(project, config)?)
+    }
+}
+
+impl DependencyGraphProvider for FileSystemProjectProvider {
+    fn build_dependency_graph(&self, project: &CargoProject) -> Result<WorkspaceDependencyGraph> {
+        Ok(WorkspaceDependencyGraph::build(project)?)
     }
 }

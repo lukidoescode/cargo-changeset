@@ -30,7 +30,11 @@ pub trait InteractionProvider: Send + Sync {
     /// # Errors
     ///
     /// Returns an error if the interaction cannot be completed.
-    fn select_packages(&self, available: &[PackageInfo]) -> Result<PackageSelection>;
+    fn select_packages(
+        &self,
+        available: &[PackageInfo],
+        display_labels: Option<&[String]>,
+    ) -> Result<PackageSelection>;
 
     /// # Errors
     ///

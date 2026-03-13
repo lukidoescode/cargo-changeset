@@ -153,7 +153,7 @@ pub(crate) struct AddArgs {
     #[arg(long = "package", short = 'p', value_name = "NAME")]
     pub packages: Vec<String>,
 
-    /// Bump type for all packages (major, minor, patch)
+    /// Bump type for all packages (major, minor, patch, none)
     #[arg(long, short = 'b', value_enum)]
     pub bump: Option<BumpType>,
 
@@ -172,6 +172,10 @@ pub(crate) struct AddArgs {
     /// Open external editor ($EDITOR) for description input
     #[arg(long)]
     pub editor: bool,
+
+    /// Skip dependency tracking (do not compute transitive dependents)
+    #[arg(long)]
+    pub exclude_dependents: bool,
 }
 
 #[derive(Args)]
@@ -191,6 +195,10 @@ pub(crate) struct VerifyArgs {
     /// Allow deleted changeset files (not recommended)
     #[arg(long, short = 'd')]
     pub allow_deleted_changesets: bool,
+
+    /// Skip dependency tracking (do not require coverage for transitive dependents)
+    #[arg(long)]
+    pub exclude_dependents: bool,
 }
 
 #[derive(Args)]

@@ -28,15 +28,26 @@ impl TerminalInteractionProvider {
 }
 
 impl InteractionProvider for TerminalInteractionProvider {
-    fn select_packages(&self, available: &[PackageInfo]) -> Result<PackageSelection> {
+    fn select_packages(
+        &self,
+        available: &[PackageInfo],
+        display_labels: Option<&[String]>,
+    ) -> Result<PackageSelection> {
         if !is_interactive() {
             return Err(cli_to_operation_error(CliError::NotATty));
         }
 
-        let items: Vec<String> = available
-            .iter()
-            .map(|p| format!("{} ({})", p.name, p.version))
-            .collect();
+        let default_labels: Vec<String>;
+        let items: &[String] = match display_labels {
+            Some(labels) => labels,
+            None => {
+                default_labels = available
+                    .iter()
+                    .map(|p| format!("{} ({})", p.name, p.version))
+                    .collect();
+                &default_labels
+            }
+        };
 
         let selection = MultiSelect::new()
             .with_prompt("Select packages to include in changeset")
@@ -60,7 +71,7 @@ impl InteractionProvider for TerminalInteractionProvider {
             "patch - Bug fixes (backwards compatible)",
             "minor - New features (backwards compatible)",
             "major - Breaking changes",
-            "none  - No version bump (internal changes only)",
+            "none - No version bump (internal changes only)",
         ];
 
         let selection = Select::new()
@@ -206,7 +217,11 @@ fn get_description_editor() -> std::result::Result<DescriptionInput, CliError> {
 pub struct NonInteractiveProvider;
 
 impl InteractionProvider for NonInteractiveProvider {
-    fn select_packages(&self, _available: &[PackageInfo]) -> Result<PackageSelection> {
+    fn select_packages(
+        &self,
+        _available: &[PackageInfo],
+        _display_labels: Option<&[String]>,
+    ) -> Result<PackageSelection> {
         Err(changeset_operations::OperationError::InteractionRequired)
     }
 

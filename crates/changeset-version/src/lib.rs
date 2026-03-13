@@ -78,7 +78,9 @@ pub fn calculate_new_version(
             let tag = spec.identifier();
 
             if current.pre.is_empty() {
-                let bump = bump_type.unwrap_or(BumpType::Patch);
+                let bump = bump_type
+                    .filter(|b| !b.is_noop())
+                    .unwrap_or(BumpType::Patch);
                 new_version = bump_version(current, bump);
                 new_version.pre = make_prerelease(tag, 1)?;
             } else if let Some((current_tag, current_num)) = parse_prerelease(&current.pre) {
@@ -479,6 +481,24 @@ mod tests {
             let result =
                 calculate_new_version(&version, None, Some(&PrereleaseSpec::Alpha)).unwrap();
             assert_eq!(result, Version::parse("1.0.1-alpha.1").unwrap());
+        }
+
+        #[test]
+        fn none_bump_with_prerelease_defaults_to_patch() {
+            let version = Version::parse("1.0.0").unwrap();
+            let result =
+                calculate_new_version(&version, Some(BumpType::None), Some(&PrereleaseSpec::Alpha))
+                    .unwrap();
+            assert_eq!(result, Version::parse("1.0.1-alpha.1").unwrap());
+        }
+
+        #[test]
+        fn none_bump_with_prerelease_on_zero_version_defaults_to_patch() {
+            let version = Version::parse("0.5.0").unwrap();
+            let result =
+                calculate_new_version(&version, Some(BumpType::None), Some(&PrereleaseSpec::Beta))
+                    .unwrap();
+            assert_eq!(result, Version::parse("0.5.1-beta.1").unwrap());
         }
     }
 
