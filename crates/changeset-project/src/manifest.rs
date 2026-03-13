@@ -1,8 +1,10 @@
+use std::collections::HashMap;
 use std::path::Path;
 
 use changeset_changelog::{ChangelogLocation, ComparisonLinksSetting};
 use changeset_core::ZeroVersionBehavior;
 use serde::Deserialize;
+use serde::de::IgnoredAny;
 
 use crate::error::ProjectError;
 
@@ -22,6 +24,22 @@ pub(crate) fn read_manifest(path: &Path) -> Result<CargoManifest, ProjectError> 
 pub(crate) struct CargoManifest {
     pub(crate) package: Option<Package>,
     pub(crate) workspace: Option<WorkspaceSection>,
+    #[serde(default)]
+    pub(crate) dependencies: Option<HashMap<String, DependencyEntry>>,
+    #[serde(default, rename = "build-dependencies")]
+    pub(crate) build_dependencies: Option<HashMap<String, DependencyEntry>>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(untagged)]
+pub(crate) enum DependencyEntry {
+    Simple(IgnoredAny),
+    Table(DependencyTable),
+}
+
+#[derive(Debug, Deserialize)]
+pub(crate) struct DependencyTable {
+    pub(crate) package: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]

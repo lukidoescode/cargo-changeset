@@ -114,6 +114,18 @@ impl PlainTextStatusFormatter {
         output.push_str("  Release will require --convert flag\n");
     }
 
+    fn format_uncovered_dependents(output: &mut String, status: &StatusOutput) {
+        if status.uncovered_dependents.is_empty() {
+            return;
+        }
+
+        output.push('\n');
+        output.push_str("Transitive dependents needing changesets:\n");
+        for (name, deps) in &status.uncovered_dependents {
+            output.push_str(&format!("  {name} (depends on: {})\n", deps.join(", ")));
+        }
+    }
+
     fn format_consumed_prerelease_changesets(output: &mut String, status: &StatusOutput) {
         const MAX_DISPLAYED: usize = 10;
 
@@ -161,6 +173,7 @@ impl StatusFormatter for PlainTextStatusFormatter {
             Self::format_consumed_prerelease_changesets(&mut output, status);
             Self::format_projected_releases(&mut output, status);
             Self::format_none_bump_packages(&mut output, status);
+            Self::format_uncovered_dependents(&mut output, status);
             Self::format_unchanged_packages(&mut output, status);
             Self::format_unknown_packages(&mut output, status);
             Self::format_summary(&mut output, status);
@@ -191,6 +204,7 @@ mod tests {
             packages_with_inherited_versions: Vec::new(),
             unknown_packages: Vec::new(),
             consumed_prerelease_changesets: Vec::new(),
+            uncovered_dependents: Vec::new(),
         }
     }
 
@@ -766,5 +780,68 @@ mod tests {
         assert!(result.contains("public-crate: 1.0.0 -> 1.0.1 (patch)"));
         assert!(result.contains("Packages with no version bump:"));
         assert!(result.contains("internal-crate (none)"));
+    }
+
+    #[test]
+    fn format_uncovered_dependents_section() {
+        let formatter = PlainTextStatusFormatter;
+        let mut status = empty_status();
+        status.changesets = vec![make_changeset(
+            &[("core", BumpType::Patch)],
+            ChangeCategory::Fixed,
+            "Fix core",
+        )];
+        status.changeset_files = vec![PathBuf::from(".changeset/changesets/fix.md")];
+        status.projected_releases = vec![make_package_version(
+            "core",
+            "1.0.0",
+            "1.0.1",
+            BumpType::Patch,
+        )];
+        status.bumps_by_package = {
+            let mut map = IndexMap::new();
+            map.insert("core".to_string(), vec![BumpType::Patch]);
+            map
+        };
+        status.uncovered_dependents = vec![
+            ("app".to_string(), vec!["core".to_string()]),
+            (
+                "cli".to_string(),
+                vec!["app".to_string(), "core".to_string()],
+            ),
+        ];
+
+        let result = formatter.format_status(&status);
+
+        assert!(result.contains("Transitive dependents needing changesets:"));
+        assert!(result.contains("app (depends on: core)"));
+        assert!(result.contains("cli (depends on: app, core)"));
+    }
+
+    #[test]
+    fn format_no_uncovered_dependents_when_empty() {
+        let formatter = PlainTextStatusFormatter;
+        let mut status = empty_status();
+        status.changesets = vec![make_changeset(
+            &[("my-crate", BumpType::Patch)],
+            ChangeCategory::Fixed,
+            "Fix",
+        )];
+        status.changeset_files = vec![PathBuf::from(".changeset/changesets/fix.md")];
+        status.projected_releases = vec![make_package_version(
+            "my-crate",
+            "1.0.0",
+            "1.0.1",
+            BumpType::Patch,
+        )];
+        status.bumps_by_package = {
+            let mut map = IndexMap::new();
+            map.insert("my-crate".to_string(), vec![BumpType::Patch]);
+            map
+        };
+
+        let result = formatter.format_status(&status);
+
+        assert!(!result.contains("Transitive dependents needing changesets:"));
     }
 }

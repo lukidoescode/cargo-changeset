@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
 use changeset_core::{BumpType, Changeset, PackageInfo};
@@ -6,7 +7,9 @@ use indexmap::IndexMap;
 
 use crate::Result;
 use crate::planner::VersionPlanner;
-use crate::traits::{ChangesetReader, InheritedVersionChecker, ProjectProvider};
+use crate::traits::{
+    ChangesetReader, DependencyGraphProvider, InheritedVersionChecker, ProjectProvider,
+};
 use crate::types::PackageVersion;
 
 pub struct StatusOutput {
@@ -18,7 +21,7 @@ pub struct StatusOutput {
     pub projected_releases: Vec<PackageVersion>,
     /// Raw bump types per package (for verbose display).
     pub bumps_by_package: IndexMap<String, Vec<BumpType>>,
-    /// Packages whose max bump type is `None` (tracked but not version-bumped).
+    /// Packages with a changeset whose maximum bump type across all changesets is `BumpType::None`.
     pub none_bump_packages: Vec<String>,
     /// Packages with no pending changesets.
     pub unchanged_packages: Vec<PackageInfo>,
@@ -28,6 +31,9 @@ pub struct StatusOutput {
     pub unknown_packages: Vec<String>,
     /// Changesets consumed for pre-release versions (path, version consumed for).
     pub consumed_prerelease_changesets: Vec<(PathBuf, String)>,
+    /// Transitive dependents of packages with pending changesets that have no changeset coverage
+    /// themselves.
+    pub uncovered_dependents: Vec<(String, Vec<String>)>,
 }
 
 pub struct StatusOperation<P, R, I> {
@@ -38,7 +44,7 @@ pub struct StatusOperation<P, R, I> {
 
 impl<P, R, I> StatusOperation<P, R, I>
 where
-    P: ProjectProvider,
+    P: ProjectProvider + DependencyGraphProvider,
     R: ChangesetReader,
     I: InheritedVersionChecker,
 {
@@ -96,6 +102,9 @@ where
             .collect();
         none_bump_packages.sort();
 
+        let uncovered_dependents =
+            self.compute_uncovered_dependents(&project, &plan.releases, &none_bump_packages)?;
+
         Ok(StatusOutput {
             changesets,
             changeset_files,
@@ -106,7 +115,47 @@ where
             packages_with_inherited_versions,
             unknown_packages: plan.unknown_packages,
             consumed_prerelease_changesets,
+            uncovered_dependents,
         })
+    }
+
+    fn compute_uncovered_dependents(
+        &self,
+        project: &changeset_project::CargoProject,
+        releases: &[PackageVersion],
+        none_bump_packages: &[String],
+    ) -> Result<Vec<(String, Vec<String>)>> {
+        let graph = self.project_provider.build_dependency_graph(project)?;
+
+        let covered: Vec<String> = releases
+            .iter()
+            .map(|r| r.name.clone())
+            .chain(none_bump_packages.iter().cloned())
+            .collect();
+
+        let covered_refs: Vec<&str> = covered.iter().map(String::as_str).collect();
+        let uncovered_set = graph.transitive_dependents_of_set(&covered_refs);
+
+        let covered_set: HashSet<&str> = covered_refs.iter().copied().collect();
+
+        let mut result: Vec<(String, Vec<String>)> = uncovered_set
+            .into_iter()
+            .map(|dep_name| {
+                let direct_deps = graph.direct_dependencies(dep_name);
+                let mut relevant: Vec<String> = direct_deps
+                    .into_iter()
+                    .filter(|d| covered_set.contains(d))
+                    .map(str::to_string)
+                    .collect();
+                relevant.sort();
+                (dep_name.to_string(), relevant)
+            })
+            .collect();
+
+        result.retain(|(_, deps)| !deps.is_empty());
+        result.sort_by(|(a, _), (b, _)| a.cmp(b));
+
+        Ok(result)
     }
 
     fn collect_consumed_changesets(
@@ -131,6 +180,7 @@ mod tests {
         FailingInheritedVersionChecker, MockChangesetReader, MockInheritedVersionChecker,
         MockProjectProvider, make_changeset,
     };
+    use crate::traits::DependencyGraphProvider;
     use changeset_core::BumpType;
     use semver::Version;
     use std::path::PathBuf;
@@ -140,7 +190,7 @@ mod tests {
         changeset_reader: R,
     ) -> StatusOperation<P, R, MockInheritedVersionChecker>
     where
-        P: ProjectProvider,
+        P: ProjectProvider + DependencyGraphProvider,
         R: ChangesetReader,
     {
         StatusOperation::new(
@@ -462,5 +512,171 @@ mod tests {
             .collect();
         assert!(versions.contains(&"1.0.1-alpha.1"));
         assert!(versions.contains(&"1.0.1-alpha.2"));
+    }
+
+    #[test]
+    fn uncovered_dependents_appear_for_workspace_with_dependencies() {
+        let project_provider =
+            MockProjectProvider::workspace(vec![("core", "1.0.0"), ("app", "1.0.0")])
+                .with_dependency_edges(vec![("app", "core")]);
+
+        let changeset = make_changeset("core", BumpType::Patch, "Fix core");
+        let changeset_reader = MockChangesetReader::new()
+            .with_changeset(PathBuf::from(".changeset/changesets/fix.md"), changeset);
+
+        let operation = make_operation(project_provider, changeset_reader);
+
+        let result = operation
+            .execute(Path::new("/any"))
+            .expect("StatusOperation failed");
+
+        assert_eq!(result.uncovered_dependents.len(), 1);
+        assert_eq!(result.uncovered_dependents[0].0, "app");
+        assert_eq!(result.uncovered_dependents[0].1, vec!["core".to_string()]);
+    }
+
+    #[test]
+    fn covered_dependents_not_listed_as_uncovered() {
+        let project_provider =
+            MockProjectProvider::workspace(vec![("core", "1.0.0"), ("app", "1.0.0")])
+                .with_dependency_edges(vec![("app", "core")]);
+
+        let changeset1 = make_changeset("core", BumpType::Patch, "Fix core");
+        let changeset2 = make_changeset("app", BumpType::Patch, "Fix app");
+        let changeset_reader = MockChangesetReader::new().with_changesets(vec![
+            (
+                PathBuf::from(".changeset/changesets/fix-core.md"),
+                changeset1,
+            ),
+            (
+                PathBuf::from(".changeset/changesets/fix-app.md"),
+                changeset2,
+            ),
+        ]);
+
+        let operation = make_operation(project_provider, changeset_reader);
+
+        let result = operation
+            .execute(Path::new("/any"))
+            .expect("StatusOperation failed");
+
+        assert!(
+            result.uncovered_dependents.is_empty(),
+            "all dependents are covered, none should appear"
+        );
+    }
+
+    #[test]
+    fn single_package_has_no_uncovered_dependents() {
+        let project_provider = MockProjectProvider::single_package("my-crate", "1.0.0");
+
+        let changeset = make_changeset("my-crate", BumpType::Patch, "Fix");
+        let changeset_reader = MockChangesetReader::new()
+            .with_changeset(PathBuf::from(".changeset/changesets/fix.md"), changeset);
+
+        let operation = make_operation(project_provider, changeset_reader);
+
+        let result = operation
+            .execute(Path::new("/any"))
+            .expect("StatusOperation failed");
+
+        assert!(result.uncovered_dependents.is_empty());
+    }
+
+    #[test]
+    fn no_changesets_means_no_uncovered_dependents() {
+        let project_provider =
+            MockProjectProvider::workspace(vec![("core", "1.0.0"), ("app", "1.0.0")])
+                .with_dependency_edges(vec![("app", "core")]);
+
+        let changeset_reader = MockChangesetReader::new();
+
+        let operation = make_operation(project_provider, changeset_reader);
+
+        let result = operation
+            .execute(Path::new("/any"))
+            .expect("StatusOperation failed");
+
+        assert!(result.uncovered_dependents.is_empty());
+    }
+
+    #[test]
+    fn uncovered_dependents_sorted_alphabetically() {
+        let project_provider = MockProjectProvider::workspace(vec![
+            ("core", "1.0.0"),
+            ("zebra", "1.0.0"),
+            ("alpha", "1.0.0"),
+        ])
+        .with_dependency_edges(vec![("zebra", "core"), ("alpha", "core")]);
+
+        let changeset = make_changeset("core", BumpType::Patch, "Fix core");
+        let changeset_reader = MockChangesetReader::new()
+            .with_changeset(PathBuf::from(".changeset/changesets/fix.md"), changeset);
+
+        let operation = make_operation(project_provider, changeset_reader);
+
+        let result = operation
+            .execute(Path::new("/any"))
+            .expect("StatusOperation failed");
+
+        assert_eq!(result.uncovered_dependents.len(), 2);
+        assert_eq!(result.uncovered_dependents[0].0, "alpha");
+        assert_eq!(result.uncovered_dependents[1].0, "zebra");
+    }
+
+    #[test]
+    fn transitive_chain_excludes_packages_without_direct_covered_dependency() {
+        let project_provider =
+            MockProjectProvider::workspace(vec![("a", "1.0.0"), ("b", "1.0.0"), ("c", "1.0.0")])
+                .with_dependency_edges(vec![("a", "b"), ("b", "c")]);
+
+        let changeset = make_changeset("c", BumpType::Patch, "Fix c");
+        let changeset_reader = MockChangesetReader::new()
+            .with_changeset(PathBuf::from(".changeset/changesets/fix.md"), changeset);
+
+        let operation = make_operation(project_provider, changeset_reader);
+
+        let result = operation
+            .execute(Path::new("/any"))
+            .expect("StatusOperation failed");
+
+        assert_eq!(
+            result.uncovered_dependents.len(),
+            1,
+            "only b should appear; a has no direct link to a covered package"
+        );
+        assert_eq!(result.uncovered_dependents[0].0, "b");
+        assert_eq!(result.uncovered_dependents[0].1, vec!["c".to_string()]);
+    }
+
+    #[test]
+    fn none_bump_dependent_excluded_from_uncovered() {
+        let project_provider =
+            MockProjectProvider::workspace(vec![("core", "1.0.0"), ("app", "1.0.0")])
+                .with_dependency_edges(vec![("app", "core")]);
+
+        let changeset1 = make_changeset("core", BumpType::Patch, "Fix core");
+        let changeset2 = make_changeset("app", BumpType::None, "No version bump for app");
+        let changeset_reader = MockChangesetReader::new().with_changesets(vec![
+            (
+                PathBuf::from(".changeset/changesets/fix-core.md"),
+                changeset1,
+            ),
+            (
+                PathBuf::from(".changeset/changesets/none-app.md"),
+                changeset2,
+            ),
+        ]);
+
+        let operation = make_operation(project_provider, changeset_reader);
+
+        let result = operation
+            .execute(Path::new("/any"))
+            .expect("StatusOperation failed");
+
+        assert!(
+            result.uncovered_dependents.is_empty(),
+            "app is covered by a none-bump changeset and should not appear as uncovered"
+        );
     }
 }

@@ -23,6 +23,7 @@ pub(crate) fn run(args: VerifyArgs, start_path: &Path) -> Result<()> {
         base: args.base,
         head: args.head,
         allow_deleted_changesets: args.allow_deleted_changesets,
+        exclude_dependents: args.exclude_dependents,
     };
 
     let outcome = operation.execute(start_path, &input)?;

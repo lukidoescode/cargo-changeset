@@ -310,6 +310,8 @@ mod tests {
                 package: None,
                 metadata: None,
             }),
+            dependencies: None,
+            build_dependencies: None,
         };
         assert_eq!(
             determine_project_kind(&manifest),
@@ -331,6 +333,8 @@ mod tests {
                 package: None,
                 metadata: None,
             }),
+            dependencies: None,
+            build_dependencies: None,
         };
         assert_eq!(
             determine_project_kind(&manifest),
@@ -347,6 +351,8 @@ mod tests {
                 metadata: None,
             }),
             workspace: None,
+            dependencies: None,
+            build_dependencies: None,
         };
         assert_eq!(
             determine_project_kind(&manifest),

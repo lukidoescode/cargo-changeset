@@ -31,5 +31,5 @@ pub use manifest_writer::{
     FullManifestWriter, ManifestDependencyWriter, ManifestMetadataWriter, ManifestVersionWriter,
     WorkspaceVersionManager,
 };
-pub use project_provider::ProjectProvider;
+pub use project_provider::{DependencyGraphProvider, ProjectProvider};
 pub use release_state_io::ReleaseStateIO;

@@ -60,12 +60,12 @@ impl VersionPlanner {
             }
 
             if let Some(pkg) = package_lookup.get(name) {
-                let new_version = calculate_new_version(&pkg.version, bump_type, prerelease)?;
-                let effective_bump = if should_graduate {
-                    BumpType::Major
-                } else {
-                    bump_type.unwrap_or(BumpType::Patch)
-                };
+                let (new_version, effective_bump) = Self::compute_version_and_bump(
+                    &pkg.version,
+                    bump_type,
+                    prerelease,
+                    should_graduate,
+                )?;
                 releases.push(PackageVersion {
                     name: name.clone(),
                     current_version: pkg.version.clone(),
@@ -136,18 +136,14 @@ impl VersionPlanner {
             }
 
             if let Some(pkg) = package_lookup.get(name) {
-                let effective_bump = if should_graduate {
-                    BumpType::Major
-                } else {
-                    bump_type.unwrap_or(BumpType::Patch)
-                };
-                let new_version = calculate_new_version_with_zero_behavior(
-                    &pkg.version,
-                    bump_type,
-                    prerelease,
-                    zero_behavior,
-                    should_graduate,
-                )?;
+                let (new_version, effective_bump) =
+                    Self::compute_version_and_bump_with_zero_behavior(
+                        &pkg.version,
+                        bump_type,
+                        prerelease,
+                        zero_behavior,
+                        should_graduate,
+                    )?;
                 releases.push(PackageVersion {
                     name: name.clone(),
                     current_version: pkg.version.clone(),
@@ -234,18 +230,14 @@ impl VersionPlanner {
             }
 
             if let Some(pkg) = package_lookup.get(name) {
-                let effective_bump = if should_graduate {
-                    BumpType::Major
-                } else {
-                    bump_type.unwrap_or(BumpType::Patch)
-                };
-                let new_version = calculate_new_version_with_zero_behavior(
-                    &pkg.version,
-                    bump_type,
-                    prerelease,
-                    zero_behavior,
-                    should_graduate,
-                )?;
+                let (new_version, effective_bump) =
+                    Self::compute_version_and_bump_with_zero_behavior(
+                        &pkg.version,
+                        bump_type,
+                        prerelease,
+                        zero_behavior,
+                        should_graduate,
+                    )?;
                 releases.push(PackageVersion {
                     name: name.clone(),
                     current_version: pkg.version.clone(),
@@ -267,18 +259,19 @@ impl VersionPlanner {
             }
 
             if let Some(pkg) = package_lookup.get(name) {
-                let new_version = calculate_new_version_with_zero_behavior(
-                    &pkg.version,
-                    None,
-                    config.prerelease.as_ref(),
-                    zero_behavior,
-                    config.graduate_zero,
-                )?;
+                let (new_version, effective_bump) =
+                    Self::compute_version_and_bump_with_zero_behavior(
+                        &pkg.version,
+                        None,
+                        config.prerelease.as_ref(),
+                        zero_behavior,
+                        config.graduate_zero,
+                    )?;
                 releases.push(PackageVersion {
                     name: name.clone(),
                     current_version: pkg.version.clone(),
                     new_version,
-                    bump_type: BumpType::Major,
+                    bump_type: effective_bump,
                 });
             }
         }
@@ -287,6 +280,57 @@ impl VersionPlanner {
             releases,
             unknown_packages,
         })
+    }
+
+    fn effective_bump_type(aggregated_bump: Option<BumpType>, should_graduate: bool) -> BumpType {
+        if should_graduate {
+            BumpType::Major
+        } else {
+            aggregated_bump.unwrap_or(BumpType::Patch)
+        }
+    }
+
+    fn compute_version_and_bump(
+        current: &semver::Version,
+        bump_type: Option<BumpType>,
+        prerelease: Option<&PrereleaseSpec>,
+        should_graduate: bool,
+    ) -> Result<(semver::Version, BumpType), VersionError> {
+        let new_version = if should_graduate {
+            calculate_new_version_with_zero_behavior(
+                current,
+                bump_type,
+                prerelease,
+                ZeroVersionBehavior::default(),
+                true,
+            )?
+        } else {
+            calculate_new_version(current, bump_type, prerelease)?
+        };
+        Ok((
+            new_version,
+            Self::effective_bump_type(bump_type, should_graduate),
+        ))
+    }
+
+    fn compute_version_and_bump_with_zero_behavior(
+        current: &semver::Version,
+        bump_type: Option<BumpType>,
+        prerelease: Option<&PrereleaseSpec>,
+        zero_behavior: ZeroVersionBehavior,
+        should_graduate: bool,
+    ) -> Result<(semver::Version, BumpType), VersionError> {
+        let new_version = calculate_new_version_with_zero_behavior(
+            current,
+            bump_type,
+            prerelease,
+            zero_behavior,
+            should_graduate,
+        )?;
+        Ok((
+            new_version,
+            Self::effective_bump_type(bump_type, should_graduate),
+        ))
     }
 
     fn should_skip_package(
@@ -977,6 +1021,41 @@ mod tests {
             assert_eq!(plan.releases.len(), 1);
             let release = &plan.releases[0];
             assert_eq!(release.new_version, Version::new(1, 0, 0));
+        }
+
+        #[test]
+        fn prerelease_plan_graduate_with_none_bump_still_graduates() {
+            let packages = vec![make_package("my-crate", "0.5.3")];
+            let changesets = vec![make_graduating_changeset("my-crate", BumpType::None)];
+
+            let plan = VersionPlanner::plan_releases_with_prerelease(&changesets, &packages, None)
+                .expect("plan_releases_with_prerelease");
+
+            assert_eq!(plan.releases.len(), 1);
+            let release = &plan.releases[0];
+            assert_eq!(release.new_version, Version::new(1, 0, 0));
+            assert_eq!(release.bump_type, BumpType::Major);
+        }
+
+        #[test]
+        fn prerelease_plan_graduate_with_none_bump_and_prerelease_spec() {
+            let packages = vec![make_package("my-crate", "0.5.3")];
+            let changesets = vec![make_graduating_changeset("my-crate", BumpType::None)];
+
+            let plan = VersionPlanner::plan_releases_with_prerelease(
+                &changesets,
+                &packages,
+                Some(&PrereleaseSpec::Alpha),
+            )
+            .expect("plan_releases_with_prerelease");
+
+            assert_eq!(plan.releases.len(), 1);
+            let release = &plan.releases[0];
+            assert_eq!(
+                release.new_version,
+                "1.0.0-alpha.1".parse::<Version>().expect("valid")
+            );
+            assert_eq!(release.bump_type, BumpType::Major);
         }
     }
 

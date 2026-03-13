@@ -46,6 +46,7 @@ pub(super) fn run(args: AddArgs, start_path: &Path) -> Result<()> {
         AddResult::Created {
             changeset,
             file_path,
+            uncovered_dependents,
         } => {
             println!();
             println!("Created changeset: {}", file_path.display());
@@ -56,6 +57,14 @@ pub(super) fn run(args: AddArgs, start_path: &Path) -> Result<()> {
             println!("Releases:");
             for release in &changeset.releases {
                 println!("  - {}: {}", release.name, release.bump_type);
+            }
+            if !uncovered_dependents.is_empty() {
+                println!();
+                println!(
+                    "Info: The following transitive dependents are not covered by this changeset:"
+                );
+                println!("  {}", uncovered_dependents.join(", "));
+                println!("Consider creating separate changesets for these packages.");
             }
             Ok(())
         }
@@ -78,6 +87,7 @@ fn build_input(args: &AddArgs) -> Result<AddInput> {
         package_bumps,
         category: args.category,
         description,
+        exclude_dependents: args.exclude_dependents,
     })
 }
 

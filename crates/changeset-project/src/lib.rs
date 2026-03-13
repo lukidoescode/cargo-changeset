@@ -1,4 +1,5 @@
 mod config;
+mod dependency_graph;
 mod error;
 mod manifest;
 mod mapping;
@@ -15,6 +16,7 @@ pub use config::{
     GitConfig, PackageChangesetConfig, RootChangesetConfig, TagFormat, load_changeset_configs,
     parse_package_config, parse_root_config,
 };
+pub use dependency_graph::WorkspaceDependencyGraph;
 pub use error::ProjectError;
 pub use mapping::{FileMapping, PackageFiles, map_files_to_packages};
 pub use project::{CargoProject, ProjectKind, discover_project, ensure_changeset_dir};

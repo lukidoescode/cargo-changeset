@@ -1,10 +1,11 @@
 use std::path::{Path, PathBuf};
 
+use changeset_core::PackageInfo;
 use changeset_git::{FileChange, FileStatus};
 use changeset_project::map_files_to_packages;
 
 use crate::Result;
-use crate::traits::{ChangesetReader, GitDiffProvider, ProjectProvider};
+use crate::traits::{ChangesetReader, DependencyGraphProvider, GitDiffProvider, ProjectProvider};
 use crate::verification::rules::{CoverageRule, DeletedChangesetsRule};
 use crate::verification::{VerificationContext, VerificationEngine, VerificationResult};
 
@@ -12,6 +13,7 @@ pub struct VerifyInput {
     pub base: String,
     pub head: Option<String>,
     pub allow_deleted_changesets: bool,
+    pub exclude_dependents: bool,
 }
 
 #[derive(Debug)]
@@ -33,7 +35,7 @@ pub struct VerifyOperation<P, G, R> {
 
 impl<P, G, R> VerifyOperation<P, G, R>
 where
-    P: ProjectProvider,
+    P: ProjectProvider + DependencyGraphProvider,
     G: GitDiffProvider,
     R: ChangesetReader,
 {
@@ -87,10 +89,27 @@ where
             None
         };
 
-        let affected_packages = mapping.as_ref().map_or(
-            Vec::new(),
-            changeset_project::FileMapping::affected_packages,
-        );
+        let mut affected_packages: Vec<PackageInfo> = mapping.as_ref().map_or(Vec::new(), |m| {
+            m.affected_packages().into_iter().cloned().collect()
+        });
+
+        if !input.exclude_dependents
+            && project.packages().len() > 1
+            && !affected_packages.is_empty()
+        {
+            let graph = self.project_provider.build_dependency_graph(&project)?;
+            let affected_names: Vec<&str> =
+                affected_packages.iter().map(|p| p.name.as_str()).collect();
+            let dependents = graph.transitive_dependents_of_set(&affected_names);
+
+            for pkg in project.packages() {
+                if dependents.contains(pkg.name.as_str())
+                    && !affected_packages.iter().any(|p| p.name == pkg.name)
+                {
+                    affected_packages.push(pkg.clone());
+                }
+            }
+        }
 
         if affected_packages.is_empty() && !has_deleted_changesets {
             let (project_file_count, ignored_file_count) = mapping
@@ -102,7 +121,12 @@ where
             });
         }
 
-        let context = build_context(mapping.as_ref(), changeset_files, deleted_changesets);
+        let context = build_context(
+            mapping.as_ref(),
+            affected_packages,
+            changeset_files,
+            deleted_changesets,
+        );
 
         let deleted_rule = DeletedChangesetsRule::new(input.allow_deleted_changesets);
         let coverage_rule = CoverageRule::new(&self.changeset_reader);
@@ -159,19 +183,20 @@ fn extract_active_changesets(changes: &[FileChange]) -> Vec<PathBuf> {
 
 fn build_context(
     mapping: Option<&changeset_project::FileMapping>,
+    affected_packages: Vec<PackageInfo>,
     changeset_files: Vec<PathBuf>,
     deleted_changesets: Vec<PathBuf>,
 ) -> VerificationContext {
     match mapping {
         Some(m) => VerificationContext {
-            affected_packages: m.affected_packages().into_iter().cloned().collect(),
+            affected_packages,
             changeset_files,
             deleted_changesets,
             project_files: m.project_files.clone(),
             ignored_files: m.ignored_files.clone(),
         },
         None => VerificationContext {
-            affected_packages: Vec::new(),
+            affected_packages,
             changeset_files,
             deleted_changesets,
             project_files: Vec::new(),
@@ -199,6 +224,7 @@ mod tests {
             base: "main".to_string(),
             head: None,
             allow_deleted_changesets: false,
+            exclude_dependents: false,
         };
 
         let result = operation
@@ -235,6 +261,7 @@ mod tests {
             base: "main".to_string(),
             head: None,
             allow_deleted_changesets: false,
+            exclude_dependents: false,
         };
 
         let result = operation
@@ -268,6 +295,7 @@ mod tests {
             base: "main".to_string(),
             head: None,
             allow_deleted_changesets: false,
+            exclude_dependents: false,
         };
 
         let result = operation
@@ -360,6 +388,7 @@ mod tests {
             base: "main".to_string(),
             head: None,
             allow_deleted_changesets: false,
+            exclude_dependents: false,
         };
 
         let result = operation
@@ -381,5 +410,204 @@ mod tests {
         assert!(is_markdown_file(Path::new("path/to/file.md")));
         assert!(!is_markdown_file(Path::new("test.rs")));
         assert!(!is_markdown_file(Path::new("test")));
+    }
+
+    #[test]
+    fn fails_when_transitive_dependent_not_covered() {
+        let project_provider =
+            MockProjectProvider::workspace(vec![("core", "1.0.0"), ("app", "1.0.0")])
+                .with_dependency_edges(vec![("app", "core")]);
+
+        let git_provider = MockGitProvider::new().with_changed_files(vec![
+            FileChange {
+                path: PathBuf::from(".changeset/changesets/fix.md"),
+                status: FileStatus::Added,
+                old_path: None,
+            },
+            FileChange {
+                path: PathBuf::from("crates/core/src/lib.rs"),
+                status: FileStatus::Modified,
+                old_path: None,
+            },
+        ]);
+
+        let changeset = crate::mocks::make_changeset("core", BumpType::Patch, "Fix core bug");
+        let changeset_reader = MockChangesetReader::new()
+            .with_changeset(PathBuf::from(".changeset/changesets/fix.md"), changeset);
+
+        let operation = VerifyOperation::new(project_provider, git_provider, changeset_reader);
+
+        let input = VerifyInput {
+            base: "main".to_string(),
+            head: None,
+            allow_deleted_changesets: false,
+            exclude_dependents: false,
+        };
+
+        let result = operation
+            .execute(Path::new("/any"), &input)
+            .expect("operation should not error");
+
+        match result {
+            VerifyOutcome::Failed(verification_result) => {
+                assert!(
+                    verification_result
+                        .uncovered_packages
+                        .iter()
+                        .any(|p| p.name == "app"),
+                    "app should be uncovered as a transitive dependent of core"
+                );
+            }
+            other => panic!("Expected VerifyOutcome::Failed, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn succeeds_when_transitive_dependent_is_covered() {
+        let project_provider =
+            MockProjectProvider::workspace(vec![("core", "1.0.0"), ("app", "1.0.0")])
+                .with_dependency_edges(vec![("app", "core")]);
+
+        let git_provider = MockGitProvider::new().with_changed_files(vec![
+            FileChange {
+                path: PathBuf::from(".changeset/changesets/fix.md"),
+                status: FileStatus::Added,
+                old_path: None,
+            },
+            FileChange {
+                path: PathBuf::from("crates/core/src/lib.rs"),
+                status: FileStatus::Modified,
+                old_path: None,
+            },
+        ]);
+
+        let changeset = changeset_core::Changeset {
+            summary: "Fix core bug".to_string(),
+            releases: vec![
+                changeset_core::PackageRelease {
+                    name: "core".to_string(),
+                    bump_type: BumpType::Patch,
+                },
+                changeset_core::PackageRelease {
+                    name: "app".to_string(),
+                    bump_type: BumpType::Patch,
+                },
+            ],
+            category: changeset_core::ChangeCategory::Changed,
+            consumed_for_prerelease: None,
+            graduate: false,
+        };
+        let changeset_reader = MockChangesetReader::new()
+            .with_changeset(PathBuf::from(".changeset/changesets/fix.md"), changeset);
+
+        let operation = VerifyOperation::new(project_provider, git_provider, changeset_reader);
+
+        let input = VerifyInput {
+            base: "main".to_string(),
+            head: None,
+            allow_deleted_changesets: false,
+            exclude_dependents: false,
+        };
+
+        let result = operation
+            .execute(Path::new("/any"), &input)
+            .expect("operation should not error");
+
+        match result {
+            VerifyOutcome::Success(verification_result) => {
+                assert!(verification_result.covered_packages.contains("core"));
+                assert!(verification_result.covered_packages.contains("app"));
+                assert!(verification_result.uncovered_packages.is_empty());
+            }
+            other => panic!("Expected VerifyOutcome::Success, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn exclude_dependents_skips_transitive_expansion() {
+        let project_provider =
+            MockProjectProvider::workspace(vec![("core", "1.0.0"), ("app", "1.0.0")])
+                .with_dependency_edges(vec![("app", "core")]);
+
+        let git_provider = MockGitProvider::new().with_changed_files(vec![
+            FileChange {
+                path: PathBuf::from(".changeset/changesets/fix.md"),
+                status: FileStatus::Added,
+                old_path: None,
+            },
+            FileChange {
+                path: PathBuf::from("crates/core/src/lib.rs"),
+                status: FileStatus::Modified,
+                old_path: None,
+            },
+        ]);
+
+        let changeset = crate::mocks::make_changeset("core", BumpType::Patch, "Fix core bug");
+        let changeset_reader = MockChangesetReader::new()
+            .with_changeset(PathBuf::from(".changeset/changesets/fix.md"), changeset);
+
+        let operation = VerifyOperation::new(project_provider, git_provider, changeset_reader);
+
+        let input = VerifyInput {
+            base: "main".to_string(),
+            head: None,
+            allow_deleted_changesets: false,
+            exclude_dependents: true,
+        };
+
+        let result = operation
+            .execute(Path::new("/any"), &input)
+            .expect("operation should not error");
+
+        match result {
+            VerifyOutcome::Success(verification_result) => {
+                assert!(verification_result.covered_packages.contains("core"));
+                assert!(verification_result.uncovered_packages.is_empty());
+            }
+            other => panic!("Expected VerifyOutcome::Success, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn single_package_skips_dependency_computation() {
+        let project_provider = MockProjectProvider::single_package("solo", "1.0.0");
+
+        let git_provider = MockGitProvider::new().with_changed_files(vec![
+            FileChange {
+                path: PathBuf::from(".changeset/changesets/fix.md"),
+                status: FileStatus::Added,
+                old_path: None,
+            },
+            FileChange {
+                path: PathBuf::from("src/lib.rs"),
+                status: FileStatus::Modified,
+                old_path: None,
+            },
+        ]);
+
+        let changeset = crate::mocks::make_changeset("solo", BumpType::Patch, "Fix bug");
+        let changeset_reader = MockChangesetReader::new()
+            .with_changeset(PathBuf::from(".changeset/changesets/fix.md"), changeset);
+
+        let operation = VerifyOperation::new(project_provider, git_provider, changeset_reader);
+
+        let input = VerifyInput {
+            base: "main".to_string(),
+            head: None,
+            allow_deleted_changesets: false,
+            exclude_dependents: false,
+        };
+
+        let result = operation
+            .execute(Path::new("/any"), &input)
+            .expect("operation should not error");
+
+        match result {
+            VerifyOutcome::Success(verification_result) => {
+                assert!(verification_result.covered_packages.contains("solo"));
+                assert!(verification_result.uncovered_packages.is_empty());
+            }
+            other => panic!("Expected VerifyOutcome::Success, got {other:?}"),
+        }
     }
 }

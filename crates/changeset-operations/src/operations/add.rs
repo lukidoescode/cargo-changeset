@@ -7,8 +7,8 @@ use indexmap::IndexSet;
 use crate::Result;
 use crate::error::OperationError;
 use crate::traits::{
-    BumpSelection, CategorySelection, ChangesetWriter, DescriptionInput, InteractionProvider,
-    PackageSelection, ProjectProvider,
+    BumpSelection, CategorySelection, ChangesetWriter, DependencyGraphProvider, DescriptionInput,
+    InteractionProvider, PackageSelection, ProjectProvider,
 };
 
 pub struct AddInput {
@@ -17,6 +17,7 @@ pub struct AddInput {
     pub package_bumps: HashMap<String, BumpType>,
     pub category: ChangeCategory,
     pub description: Option<String>,
+    pub exclude_dependents: bool,
 }
 
 impl Default for AddInput {
@@ -27,6 +28,7 @@ impl Default for AddInput {
             package_bumps: HashMap::new(),
             category: ChangeCategory::Changed,
             description: None,
+            exclude_dependents: false,
         }
     }
 }
@@ -36,6 +38,7 @@ pub enum AddResult {
     Created {
         changeset: Changeset,
         file_path: PathBuf,
+        uncovered_dependents: Vec<String>,
     },
     Cancelled,
     NoPackages,
@@ -49,7 +52,7 @@ pub struct AddOperation<P, W, I> {
 
 impl<P, W, I> AddOperation<P, W, I>
 where
-    P: ProjectProvider,
+    P: ProjectProvider + DependencyGraphProvider,
     W: ChangesetWriter,
     I: InteractionProvider,
 {
@@ -72,42 +75,67 @@ where
             return Err(OperationError::EmptyProject(project.root().to_path_buf()));
         }
 
-        let packages = match self.select_packages(project.packages(), &input)? {
-            Some(packages) if packages.is_empty() => return Ok(AddResult::NoPackages),
-            Some(packages) => packages,
-            None => return Ok(AddResult::Cancelled),
+        let graph = if !input.exclude_dependents && project.packages().len() > 1 {
+            Some(self.project_provider.build_dependency_graph(&project)?)
+        } else {
+            None
+        };
+
+        let display_labels: Option<Vec<String>> = graph.as_ref().map(|g| {
+            project
+                .packages()
+                .iter()
+                .map(|pkg| {
+                    let dependents = g.transitive_dependents(&pkg.name);
+                    if dependents.is_empty() {
+                        format!("{} ({})", pkg.name, pkg.version)
+                    } else {
+                        let mut dep_list: Vec<&str> = dependents.into_iter().collect();
+                        dep_list.sort_unstable();
+                        format!(
+                            "{} ({}) [depended on by: {}]",
+                            pkg.name,
+                            pkg.version,
+                            dep_list.join(", ")
+                        )
+                    }
+                })
+                .collect()
+        });
+
+        let packages =
+            match self.select_packages(project.packages(), &input, display_labels.as_deref())? {
+                Some(packages) if packages.is_empty() => return Ok(AddResult::NoPackages),
+                Some(packages) => packages,
+                None => return Ok(AddResult::Cancelled),
+            };
+
+        let uncovered_dependents = if let Some(ref g) = graph {
+            let selected_names: Vec<&str> = packages.iter().map(|p| p.name.as_str()).collect();
+            let dependents = g.transitive_dependents_of_set(&selected_names);
+            let mut result: Vec<String> = dependents.into_iter().map(String::from).collect();
+            result.sort();
+            result
+        } else {
+            Vec::new()
         };
 
         let Some(releases) = self.collect_releases(&packages, &input)? else {
             return Ok(AddResult::Cancelled);
         };
 
-        let all_none = releases.iter().all(|r| r.bump_type.is_noop());
-
-        let (category, description) = if all_none {
-            let category = input.category;
-            let description = input
-                .description
-                .clone()
-                .unwrap_or_default()
-                .trim()
-                .to_string();
-            (category, description)
-        } else {
-            let Some(category) = self.select_category(&input)? else {
-                return Ok(AddResult::Cancelled);
-            };
-
-            let Some(desc) = self.get_description(&input)? else {
-                return Ok(AddResult::Cancelled);
-            };
-
-            let desc = desc.trim().to_string();
-            if desc.is_empty() {
-                return Err(OperationError::EmptyDescription);
-            }
-            (category, desc)
+        let Some(category) = self.select_category(&input)? else {
+            return Ok(AddResult::Cancelled);
         };
+
+        let Some(desc) = self.get_description(&input)? else {
+            return Ok(AddResult::Cancelled);
+        };
+
+        let description = desc.trim().to_string();
+        if description.is_empty() {
+            return Err(OperationError::EmptyDescription);
+        }
 
         let changeset = Changeset {
             summary: description,
@@ -130,6 +158,7 @@ where
         Ok(AddResult::Created {
             changeset,
             file_path,
+            uncovered_dependents,
         })
     }
 
@@ -137,6 +166,7 @@ where
         &self,
         available: &[PackageInfo],
         input: &AddInput,
+        display_labels: Option<&[String]>,
     ) -> Result<Option<Vec<PackageInfo>>> {
         let explicit_packages = collect_explicit_packages(input);
 
@@ -149,7 +179,10 @@ where
             return Ok(Some(vec![available[0].clone()]));
         }
 
-        match self.interaction_provider.select_packages(available)? {
+        match self
+            .interaction_provider
+            .select_packages(available, display_labels)?
+        {
             PackageSelection::Selected(packages) => Ok(Some(packages)),
             PackageSelection::Cancelled => Ok(None),
         }
@@ -185,6 +218,7 @@ where
 
     fn select_category(&self, input: &AddInput) -> Result<Option<ChangeCategory>> {
         let has_explicit_input = input.description.is_some()
+            || input.bump.is_some()
             || !input.packages.is_empty()
             || !input.package_bumps.is_empty();
 
@@ -341,6 +375,7 @@ mod operation_tests {
             AddResult::Created {
                 changeset,
                 file_path,
+                ..
             } => {
                 assert_eq!(changeset.summary, "Fix a bug");
                 assert_eq!(changeset.releases.len(), 1);
@@ -582,7 +617,7 @@ mod operation_tests {
     }
 
     #[test]
-    fn all_none_bumps_skip_description_and_category_prompts() {
+    fn none_bump_without_description_returns_empty_description_error() {
         let project_provider = MockProjectProvider::single_package("my-crate", "1.0.0");
         let writer = MockChangesetWriter::new();
         let interaction = MockInteractionProvider::all_cancelled();
@@ -592,24 +627,19 @@ mod operation_tests {
         let input = AddInput {
             packages: vec!["my-crate".to_string()],
             bump: Some(BumpType::None),
+            description: Some("   ".to_string()),
             ..Default::default()
         };
 
-        let result = operation
-            .execute(Path::new("/any"), input)
-            .expect("AddOperation should succeed for all-none bumps without description");
+        let result = operation.execute(Path::new("/any"), input);
 
-        match result {
-            AddResult::Created { changeset, .. } => {
-                assert!(changeset.summary.is_empty());
-                assert_eq!(changeset.releases[0].bump_type, BumpType::None);
-            }
-            _ => panic!("Expected AddResult::Created"),
-        }
+        assert!(result.is_err());
+        let err = result.expect_err("AddOperation should fail for none bump without description");
+        assert!(matches!(err, crate::OperationError::EmptyDescription));
     }
 
     #[test]
-    fn all_none_bumps_with_explicit_description() {
+    fn none_bump_with_explicit_description_creates_changeset() {
         let project_provider = MockProjectProvider::single_package("my-crate", "1.0.0");
         let writer = MockChangesetWriter::new();
         let interaction = MockInteractionProvider::all_cancelled();
@@ -625,12 +655,193 @@ mod operation_tests {
 
         let result = operation
             .execute(Path::new("/any"), input)
-            .expect("AddOperation should succeed for all-none bumps with description");
+            .expect("AddOperation should succeed for none bump with description");
 
         match result {
             AddResult::Created { changeset, .. } => {
                 assert_eq!(changeset.summary, "Internal refactoring");
                 assert_eq!(changeset.releases[0].bump_type, BumpType::None);
+            }
+            _ => panic!("Expected AddResult::Created"),
+        }
+    }
+
+    #[test]
+    fn none_bump_interactive_description_creates_changeset() {
+        let project_provider = MockProjectProvider::single_package("my-crate", "1.0.0");
+        let writer = MockChangesetWriter::new();
+        let interaction = MockInteractionProvider {
+            package_selection: crate::traits::PackageSelection::Cancelled,
+            bump_selections: std::sync::Mutex::new(vec![]),
+            category_selection: crate::traits::CategorySelection::Selected(ChangeCategory::Changed),
+            description: crate::traits::DescriptionInput::Provided(
+                "Interactive reason".to_string(),
+            ),
+        };
+
+        let operation = AddOperation::new(project_provider, writer, interaction);
+
+        let input = AddInput {
+            bump: Some(BumpType::None),
+            ..Default::default()
+        };
+
+        let result = operation
+            .execute(Path::new("/any"), input)
+            .expect("AddOperation should succeed with interactive description for none bump");
+
+        match result {
+            AddResult::Created { changeset, .. } => {
+                assert_eq!(changeset.summary, "Interactive reason");
+                assert_eq!(changeset.releases[0].bump_type, BumpType::None);
+                assert_eq!(changeset.category, ChangeCategory::Changed);
+            }
+            _ => panic!("Expected AddResult::Created"),
+        }
+    }
+
+    #[test]
+    fn mixed_none_and_patch_bumps_creates_changeset() {
+        let project_provider =
+            MockProjectProvider::workspace(vec![("crate-a", "1.0.0"), ("crate-b", "2.0.0")]);
+        let writer = MockChangesetWriter::new();
+        let interaction = MockInteractionProvider::all_cancelled();
+
+        let operation = AddOperation::new(project_provider, writer, interaction);
+
+        let mut package_bumps = HashMap::new();
+        package_bumps.insert("crate-a".to_string(), BumpType::None);
+        package_bumps.insert("crate-b".to_string(), BumpType::Patch);
+
+        let input = AddInput {
+            package_bumps,
+            description: Some("Update crate-b with internal crate-a changes".to_string()),
+            ..Default::default()
+        };
+
+        let result = operation
+            .execute(Path::new("/any"), input)
+            .expect("AddOperation should succeed for mixed none/patch bumps with description");
+
+        match result {
+            AddResult::Created { changeset, .. } => {
+                assert_eq!(
+                    changeset.summary,
+                    "Update crate-b with internal crate-a changes"
+                );
+                assert_eq!(changeset.releases.len(), 2);
+                let none_release = changeset
+                    .releases
+                    .iter()
+                    .find(|r| r.name == "crate-a")
+                    .expect("crate-a should be in releases");
+                assert_eq!(none_release.bump_type, BumpType::None);
+                let patch_release = changeset
+                    .releases
+                    .iter()
+                    .find(|r| r.name == "crate-b")
+                    .expect("crate-b should be in releases");
+                assert_eq!(patch_release.bump_type, BumpType::Patch);
+            }
+            _ => panic!("Expected AddResult::Created"),
+        }
+    }
+
+    #[test]
+    fn exclude_dependents_skips_dependency_computation() {
+        let project_provider =
+            MockProjectProvider::workspace(vec![("core", "1.0.0"), ("app", "1.0.0")])
+                .with_dependency_edges(vec![("app", "core")]);
+        let writer = MockChangesetWriter::new();
+        let interaction = MockInteractionProvider::all_cancelled();
+
+        let operation = AddOperation::new(project_provider, writer, interaction);
+
+        let input = AddInput {
+            packages: vec!["core".to_string()],
+            bump: Some(BumpType::Patch),
+            description: Some("Fix in core".to_string()),
+            exclude_dependents: true,
+            ..Default::default()
+        };
+
+        let result = operation
+            .execute(Path::new("/any"), input)
+            .expect("AddOperation should succeed with exclude_dependents");
+
+        match result {
+            AddResult::Created {
+                uncovered_dependents,
+                ..
+            } => {
+                assert!(uncovered_dependents.is_empty());
+            }
+            _ => panic!("Expected AddResult::Created"),
+        }
+    }
+
+    #[test]
+    fn non_interactive_with_dependents_returns_uncovered() {
+        let project_provider = MockProjectProvider::workspace(vec![
+            ("core", "1.0.0"),
+            ("lib", "1.0.0"),
+            ("app", "1.0.0"),
+        ])
+        .with_dependency_edges(vec![("lib", "core"), ("app", "lib")]);
+        let writer = MockChangesetWriter::new();
+        let interaction = MockInteractionProvider::all_cancelled();
+
+        let operation = AddOperation::new(project_provider, writer, interaction);
+
+        let input = AddInput {
+            packages: vec!["core".to_string()],
+            bump: Some(BumpType::Patch),
+            description: Some("Fix in core".to_string()),
+            ..Default::default()
+        };
+
+        let result = operation
+            .execute(Path::new("/any"), input)
+            .expect("AddOperation should succeed and report uncovered dependents");
+
+        match result {
+            AddResult::Created {
+                uncovered_dependents,
+                ..
+            } => {
+                assert!(uncovered_dependents.contains(&"lib".to_string()));
+                assert!(uncovered_dependents.contains(&"app".to_string()));
+                assert_eq!(uncovered_dependents.len(), 2);
+            }
+            _ => panic!("Expected AddResult::Created"),
+        }
+    }
+
+    #[test]
+    fn single_package_workspace_skips_dependency_computation() {
+        let project_provider = MockProjectProvider::single_package("solo", "1.0.0");
+        let writer = MockChangesetWriter::new();
+        let interaction = MockInteractionProvider::all_cancelled();
+
+        let operation = AddOperation::new(project_provider, writer, interaction);
+
+        let input = AddInput {
+            packages: vec!["solo".to_string()],
+            bump: Some(BumpType::Minor),
+            description: Some("New feature".to_string()),
+            ..Default::default()
+        };
+
+        let result = operation
+            .execute(Path::new("/any"), input)
+            .expect("AddOperation should succeed for single-package project");
+
+        match result {
+            AddResult::Created {
+                uncovered_dependents,
+                ..
+            } => {
+                assert!(uncovered_dependents.is_empty());
             }
             _ => panic!("Expected AddResult::Created"),
         }

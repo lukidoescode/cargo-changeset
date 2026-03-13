@@ -8,16 +8,16 @@ use changeset_git::{CommitInfo, FileChange, TagInfo};
 use changeset_manifest::{InitConfig, MetadataSection};
 use changeset_project::{
     CargoProject, GraduationState, PackageChangesetConfig, PrereleaseState, ProjectKind,
-    RootChangesetConfig,
+    RootChangesetConfig, WorkspaceDependencyGraph,
 };
 use semver::Version;
 
 use crate::Result;
 use crate::traits::{
     BumpSelection, CategorySelection, ChangelogSettingsInput, ChangelogWriteResult,
-    ChangelogWriter, ChangesetReader, ChangesetWriter, DescriptionInput, GitCommitProvider,
-    GitDiffProvider, GitSettingsInput, GitStagingProvider, GitStatusProvider, GitTagProvider,
-    GraduationAction, GraduationInteractionProvider, InheritedVersionChecker,
+    ChangelogWriter, ChangesetReader, ChangesetWriter, DependencyGraphProvider, DescriptionInput,
+    GitCommitProvider, GitDiffProvider, GitSettingsInput, GitStagingProvider, GitStatusProvider,
+    GitTagProvider, GraduationAction, GraduationInteractionProvider, InheritedVersionChecker,
     InitInteractionProvider, InteractionProvider, ManifestDependencyWriter, ManifestMetadataWriter,
     ManifestVersionWriter, MenuSelection, PackageSelection, PrereleaseAction,
     PrereleaseInteractionProvider, ProjectContext, ProjectProvider, ReleaseStateIO,
@@ -46,6 +46,7 @@ pub struct MockProjectProvider {
     project: CargoProject,
     changeset_dir: PathBuf,
     root_config: RootChangesetConfig,
+    dependency_edges: Vec<(String, String)>,
 }
 
 impl MockProjectProvider {
@@ -56,6 +57,7 @@ impl MockProjectProvider {
             project,
             changeset_dir,
             root_config: RootChangesetConfig::default(),
+            dependency_edges: Vec::new(),
         }
     }
 
@@ -85,6 +87,15 @@ impl MockProjectProvider {
     #[must_use]
     pub fn with_root_config(mut self, config: RootChangesetConfig) -> Self {
         self.root_config = config;
+        self
+    }
+
+    #[must_use]
+    pub fn with_dependency_edges(mut self, edges: Vec<(&str, &str)>) -> Self {
+        self.dependency_edges = edges
+            .into_iter()
+            .map(|(a, b)| (a.to_string(), b.to_string()))
+            .collect();
         self
     }
 
@@ -144,6 +155,21 @@ impl ProjectProvider for MockProjectProvider {
         _config: &RootChangesetConfig,
     ) -> Result<PathBuf> {
         Ok(self.changeset_dir.clone())
+    }
+}
+
+impl DependencyGraphProvider for MockProjectProvider {
+    fn build_dependency_graph(&self, _project: &CargoProject) -> Result<WorkspaceDependencyGraph> {
+        let member_names: HashSet<String> = self
+            .project
+            .packages()
+            .iter()
+            .map(|p| p.name.clone())
+            .collect();
+        Ok(WorkspaceDependencyGraph::from_edges(
+            member_names,
+            &self.dependency_edges,
+        ))
     }
 }
 
@@ -761,7 +787,11 @@ impl MockInteractionProvider {
 }
 
 impl InteractionProvider for MockInteractionProvider {
-    fn select_packages(&self, _available: &[PackageInfo]) -> Result<PackageSelection> {
+    fn select_packages(
+        &self,
+        _available: &[PackageInfo],
+        _display_labels: Option<&[String]>,
+    ) -> Result<PackageSelection> {
         Ok(self.package_selection.clone())
     }
 
