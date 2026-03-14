@@ -6,6 +6,7 @@ use changeset_core::PackageInfo;
 #[derive(Debug)]
 pub struct VerificationResult {
     pub affected_packages: Vec<PackageInfo>,
+    pub transitive_dependents: HashSet<String>,
     pub covered_packages: HashSet<String>,
     pub uncovered_packages: Vec<PackageInfo>,
     pub deleted_changesets: Vec<PathBuf>,

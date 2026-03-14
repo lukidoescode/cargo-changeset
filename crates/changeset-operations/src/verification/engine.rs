@@ -24,6 +24,7 @@ impl<'a> VerificationEngine<'a> {
     pub fn verify(&self, context: &VerificationContext) -> Result<VerificationResult> {
         let mut result = VerificationResult {
             affected_packages: context.affected_packages.clone(),
+            transitive_dependents: context.transitive_dependents.clone(),
             covered_packages: HashSet::new(),
             uncovered_packages: Vec::new(),
             deleted_changesets: Vec::new(),

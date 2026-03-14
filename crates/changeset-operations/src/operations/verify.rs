@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
 use changeset_core::PackageInfo;
@@ -117,6 +118,8 @@ where
             m.affected_packages().into_iter().cloned().collect()
         });
 
+        let mut transitive_dependents = HashSet::new();
+
         if !input.exclude_dependents
             && project.packages().len() > 1
             && !affected_packages.is_empty()
@@ -130,6 +133,7 @@ where
                 if dependents.contains(pkg.name.as_str())
                     && !affected_packages.iter().any(|p| p.name == pkg.name)
                 {
+                    transitive_dependents.insert(pkg.name.clone());
                     affected_packages.push(pkg.clone());
                 }
             }
@@ -151,6 +155,7 @@ where
         let context = build_context(
             mapping.as_ref(),
             affected_packages,
+            transitive_dependents,
             changeset_files,
             deleted_changesets,
         );
@@ -213,12 +218,14 @@ fn extract_active_changesets(changes: &[FileChange]) -> Vec<PathBuf> {
 fn build_context(
     mapping: Option<&changeset_project::FileMapping>,
     affected_packages: Vec<PackageInfo>,
+    transitive_dependents: HashSet<String>,
     changeset_files: Vec<PathBuf>,
     deleted_changesets: Vec<PathBuf>,
 ) -> VerificationContext {
     match mapping {
         Some(m) => VerificationContext {
             affected_packages,
+            transitive_dependents,
             changeset_files,
             deleted_changesets,
             project_files: m.project_files.clone(),
@@ -226,6 +233,7 @@ fn build_context(
         },
         None => VerificationContext {
             affected_packages,
+            transitive_dependents,
             changeset_files,
             deleted_changesets,
             project_files: Vec::new(),
