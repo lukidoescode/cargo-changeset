@@ -13,7 +13,7 @@ pub use changelog_writer::{ChangelogWriteResult, ChangelogWriter};
 pub use changeset_io::{ChangesetReader, ChangesetWriter};
 pub use git_provider::{
     FullGitProvider, GitCommitProvider, GitDiffProvider, GitStagingProvider, GitStatusProvider,
-    GitTagProvider,
+    GitTagProvider, GitWorkdirDiffProvider,
 };
 pub use inherited_version_checker::InheritedVersionChecker;
 pub use init_interaction::{

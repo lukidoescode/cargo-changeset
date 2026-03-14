@@ -199,6 +199,10 @@ pub(crate) struct VerifyArgs {
     /// Skip dependency tracking (do not require coverage for transitive dependents)
     #[arg(long)]
     pub exclude_dependents: bool,
+
+    /// Skip dirty working directory detection; always compare against base branch
+    #[arg(long)]
+    pub ignore_dirty: bool,
 }
 
 #[derive(Args)]
