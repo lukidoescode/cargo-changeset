@@ -5,6 +5,7 @@ use changeset_git::{CommitInfo, FileChange, Repository, TagInfo};
 
 use crate::traits::{
     GitCommitProvider, GitDiffProvider, GitStagingProvider, GitStatusProvider, GitTagProvider,
+    GitWorkdirDiffProvider,
 };
 
 pub struct Git2Provider {
@@ -68,6 +69,12 @@ impl GitDiffProvider for Git2Provider {
         head: &str,
     ) -> crate::Result<Vec<FileChange>> {
         self.with_repo(project_root, |repo| repo.changed_files(Some(base), head))
+    }
+}
+
+impl GitWorkdirDiffProvider for Git2Provider {
+    fn uncommitted_changes(&self, project_root: &Path) -> crate::Result<Vec<FileChange>> {
+        self.with_repo(project_root, Repository::uncommitted_changes)
     }
 }
 

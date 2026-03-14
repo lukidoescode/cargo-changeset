@@ -5,11 +5,21 @@ use changeset_git::{CommitInfo, FileChange, TagInfo};
 use crate::Result;
 
 pub trait FullGitProvider:
-    GitDiffProvider + GitStatusProvider + GitStagingProvider + GitCommitProvider + GitTagProvider
+    GitDiffProvider
+    + GitWorkdirDiffProvider
+    + GitStatusProvider
+    + GitStagingProvider
+    + GitCommitProvider
+    + GitTagProvider
 {
 }
 impl<
-    T: GitDiffProvider + GitStatusProvider + GitStagingProvider + GitCommitProvider + GitTagProvider,
+    T: GitDiffProvider
+        + GitWorkdirDiffProvider
+        + GitStatusProvider
+        + GitStagingProvider
+        + GitCommitProvider
+        + GitTagProvider,
 > FullGitProvider for T
 {
 }
@@ -20,6 +30,13 @@ pub trait GitDiffProvider: Send + Sync {
     /// Propagates repository errors.
     fn changed_files(&self, project_root: &Path, base: &str, head: &str)
     -> Result<Vec<FileChange>>;
+}
+
+pub trait GitWorkdirDiffProvider: Send + Sync {
+    /// # Errors
+    ///
+    /// Propagates repository errors.
+    fn uncommitted_changes(&self, project_root: &Path) -> Result<Vec<FileChange>>;
 }
 
 pub trait GitStatusProvider: Send + Sync {

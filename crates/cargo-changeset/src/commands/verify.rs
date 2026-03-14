@@ -24,13 +24,18 @@ pub(crate) fn run(args: VerifyArgs, start_path: &Path) -> Result<()> {
         head: args.head,
         allow_deleted_changesets: args.allow_deleted_changesets,
         exclude_dependents: args.exclude_dependents,
+        ignore_dirty: args.ignore_dirty,
     };
 
-    let outcome = operation.execute(start_path, &input)?;
+    let result = operation.execute(start_path, &input)?;
+
+    if result.is_dirty && !args.quiet {
+        eprintln!("Dirty working directory detected, verifying uncommitted changes against HEAD");
+    }
 
     let formatter = PlainTextFormatter;
 
-    match outcome {
+    match result.outcome {
         VerifyOutcome::NoChanges => {
             if !args.quiet {
                 println!("No files changed");
@@ -52,23 +57,23 @@ pub(crate) fn run(args: VerifyArgs, start_path: &Path) -> Result<()> {
             }
             Ok(())
         }
-        VerifyOutcome::Success(result) => {
+        VerifyOutcome::Success(verification) => {
             if !args.quiet {
-                print!("{}", formatter.format_success(&result));
+                print!("{}", formatter.format_success(&verification));
             }
             Ok(())
         }
-        VerifyOutcome::Failed(result) => {
+        VerifyOutcome::Failed(verification) => {
             if !args.quiet {
-                eprint!("{}", formatter.format_failure(&result));
+                eprint!("{}", formatter.format_failure(&verification));
             }
-            if !result.deleted_changesets.is_empty() {
+            if !verification.deleted_changesets.is_empty() {
                 Err(CliError::ChangesetDeleted {
-                    paths: result.deleted_changesets,
+                    paths: verification.deleted_changesets,
                 })
             } else {
                 Err(CliError::VerificationFailed {
-                    uncovered_count: result.uncovered_packages.len(),
+                    uncovered_count: verification.uncovered_packages.len(),
                 })
             }
         }

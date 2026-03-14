@@ -8,14 +8,36 @@ pub(crate) struct PlainTextFormatter;
 
 impl PlainTextFormatter {
     fn format_affected_packages(output: &mut String, result: &VerificationResult) {
-        output.push_str("Changed packages:\n");
-        for pkg in &result.affected_packages {
-            let status = if result.covered_packages.contains(&pkg.name) {
-                "✓"
-            } else {
-                "✗"
-            };
-            output.push_str(&format!("  {status} {}\n", pkg.name));
+        let (direct, transitive): (Vec<_>, Vec<_>) = result
+            .affected_packages
+            .iter()
+            .partition(|pkg| !result.transitive_dependents.contains(&pkg.name));
+
+        if !direct.is_empty() {
+            output.push_str("Changed packages:\n");
+            for pkg in &direct {
+                let status = if result.covered_packages.contains(&pkg.name) {
+                    "✓"
+                } else {
+                    "✗"
+                };
+                output.push_str(&format!("  {status} {}\n", pkg.name));
+            }
+        }
+
+        if !transitive.is_empty() {
+            if !direct.is_empty() {
+                output.push('\n');
+            }
+            output.push_str("Transitive dependents:\n");
+            for pkg in &transitive {
+                let status = if result.covered_packages.contains(&pkg.name) {
+                    "✓"
+                } else {
+                    "✗"
+                };
+                output.push_str(&format!("  {status} {}\n", pkg.name));
+            }
         }
     }
 

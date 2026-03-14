@@ -17,11 +17,11 @@ use crate::traits::{
     BumpSelection, CategorySelection, ChangelogSettingsInput, ChangelogWriteResult,
     ChangelogWriter, ChangesetReader, ChangesetWriter, DependencyGraphProvider, DescriptionInput,
     GitCommitProvider, GitDiffProvider, GitSettingsInput, GitStagingProvider, GitStatusProvider,
-    GitTagProvider, GraduationAction, GraduationInteractionProvider, InheritedVersionChecker,
-    InitInteractionProvider, InteractionProvider, ManifestDependencyWriter, ManifestMetadataWriter,
-    ManifestVersionWriter, MenuSelection, PackageSelection, PrereleaseAction,
-    PrereleaseInteractionProvider, ProjectContext, ProjectProvider, ReleaseStateIO,
-    VersionSettingsInput, WorkspaceVersionManager,
+    GitTagProvider, GitWorkdirDiffProvider, GraduationAction, GraduationInteractionProvider,
+    InheritedVersionChecker, InitInteractionProvider, InteractionProvider,
+    ManifestDependencyWriter, ManifestMetadataWriter, ManifestVersionWriter, MenuSelection,
+    PackageSelection, PrereleaseAction, PrereleaseInteractionProvider, ProjectContext,
+    ProjectProvider, ReleaseStateIO, VersionSettingsInput, WorkspaceVersionManager,
 };
 
 macro_rules! impl_arc_delegation {
@@ -437,10 +437,12 @@ struct MockGitState {
     fail_on_create_tag: bool,
     fail_on_create_tag_nth: Option<usize>,
     fail_on_stage_files: bool,
+    fail_on_is_clean: bool,
 }
 
 pub struct MockGitProvider {
     changed_files: Vec<FileChange>,
+    uncommitted_changes: Vec<FileChange>,
     clean: bool,
     branch: String,
     remote_url: Option<String>,
@@ -452,6 +454,7 @@ impl MockGitProvider {
     pub fn new() -> Self {
         Self {
             changed_files: Vec::new(),
+            uncommitted_changes: Vec::new(),
             clean: true,
             branch: "main".to_string(),
             remote_url: None,
@@ -466,6 +469,7 @@ impl MockGitProvider {
                 fail_on_create_tag: false,
                 fail_on_create_tag_nth: None,
                 fail_on_stage_files: false,
+                fail_on_is_clean: false,
             }),
         }
     }
@@ -473,6 +477,12 @@ impl MockGitProvider {
     #[must_use]
     pub fn with_changed_files(mut self, files: Vec<FileChange>) -> Self {
         self.changed_files = files;
+        self
+    }
+
+    #[must_use]
+    pub fn with_uncommitted_changes(mut self, files: Vec<FileChange>) -> Self {
+        self.uncommitted_changes = files;
         self
     }
 
@@ -591,6 +601,13 @@ impl MockGitProvider {
             .expect("lock poisoned")
             .fail_on_stage_files = fail;
     }
+
+    /// # Panics
+    ///
+    /// Panics if the internal mutex is poisoned.
+    pub fn set_fail_on_is_clean(&self, fail: bool) {
+        self.state.lock().expect("lock poisoned").fail_on_is_clean = fail;
+    }
 }
 
 impl Default for MockGitProvider {
@@ -610,8 +627,19 @@ impl GitDiffProvider for MockGitProvider {
     }
 }
 
+impl GitWorkdirDiffProvider for MockGitProvider {
+    fn uncommitted_changes(&self, _project_root: &Path) -> Result<Vec<FileChange>> {
+        Ok(self.uncommitted_changes.clone())
+    }
+}
+
 impl GitStatusProvider for MockGitProvider {
     fn is_working_tree_clean(&self, _project_root: &Path) -> Result<bool> {
+        if self.state.lock().expect("lock poisoned").fail_on_is_clean {
+            return Err(crate::OperationError::Io(std::io::Error::other(
+                "mock is_working_tree_clean failure",
+            )));
+        }
         Ok(self.clean)
     }
 
@@ -709,6 +737,12 @@ impl GitTagProvider for MockGitProvider {
 impl_arc_delegation! {
     impl GitDiffProvider for Arc<MockGitProvider> {
         fn changed_files(&self, project_root: &Path, base: &str, head: &str) -> Result<Vec<FileChange>>;
+    }
+}
+
+impl_arc_delegation! {
+    impl GitWorkdirDiffProvider for Arc<MockGitProvider> {
+        fn uncommitted_changes(&self, project_root: &Path) -> Result<Vec<FileChange>>;
     }
 }
 

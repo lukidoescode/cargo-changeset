@@ -22,4 +22,4 @@ pub use release::{
     ValidationError, ValidationErrors,
 };
 pub use status::{StatusOperation, StatusOutput};
-pub use verify::{VerifyInput, VerifyOperation, VerifyOutcome};
+pub use verify::{VerifyInput, VerifyOperation, VerifyOutcome, VerifyResult};
