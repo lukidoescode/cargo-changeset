@@ -29,8 +29,9 @@ jobs:
   release:
     name: Release
     runs-on: ubuntu-latest
+    environment: release
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 0
 
@@ -41,7 +42,7 @@ jobs:
 
       - name: Cache cargo-changeset binary
         id: cache
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: ~/.cargo/bin/cargo-changeset
           key: cargo-changeset-${{ runner.os }}-0.1.0
@@ -75,5 +76,7 @@ jobs:
       - name: Push release commit and tags
         if: ${{ inputs.dry_run == false }}
         run: |-
-          git remote set-url origin "https://x-access-token:${{ secrets.GH_RELEASE_PAT }}@github.com/${{ github.repository }}.git"
+          eval "$(ssh-agent -s)"
+          echo "${{ secrets.GH_DEPLOY_KEY }}" | ssh-add -
+          git remote set-url origin "git@github.com:${{ github.repository }}.git"
           git push --follow-tags
