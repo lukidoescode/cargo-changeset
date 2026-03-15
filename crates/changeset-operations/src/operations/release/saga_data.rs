@@ -46,6 +46,9 @@ pub struct ReleaseSagaData {
     pub workspace_version_removed: bool,
     pub original_workspace_version: Option<Version>,
 
+    pub lockfile_backup: Option<Vec<u8>>,
+    pub lockfile_path: Option<PathBuf>,
+
     pub staged_files: Vec<PathBuf>,
     pub files_were_staged: bool,
 

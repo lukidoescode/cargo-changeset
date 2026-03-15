@@ -13,7 +13,8 @@ use super::saga_data::{ReleaseSagaData, SagaReleaseOptions};
 use super::saga_steps::{
     ClearChangesetsConsumedStep, CreateCommitStep, CreateTagsStep, DeleteChangesetFilesStep,
     MarkChangesetsConsumedStep, RemoveWorkspaceVersionStep, RestoreChangelogsStep, StageFilesStep,
-    UpdateDependencyVersionsStep, UpdateReleaseStateStep, WriteManifestVersionsStep,
+    UpdateDependencyVersionsStep, UpdateLockfileStep, UpdateReleaseStateStep,
+    WriteManifestVersionsStep,
 };
 use super::types::{
     ChangelogUpdate, GitOptions, PrepareResult, ReleaseClassification, ReleaseContext,
@@ -367,6 +368,7 @@ where
         type WriteManifests<G, M, RW, S, CW> = WriteManifestVersionsStep<G, M, RW, S, CW>;
         type UpdateDeps<G, M, RW, S, CW> = UpdateDependencyVersionsStep<G, M, RW, S, CW>;
         type RemoveWorkspace<G, M, RW, S, CW> = RemoveWorkspaceVersionStep<G, M, RW, S, CW>;
+        type UpdateLockfile<G, M, RW, S, CW> = UpdateLockfileStep<G, M, RW, S, CW>;
         type MarkConsumed<G, M, RW, S, CW> = MarkChangesetsConsumedStep<G, M, RW, S, CW>;
         type ClearConsumed<G, M, RW, S, CW> = ClearChangesetsConsumedStep<G, M, RW, S, CW>;
         type DeleteChangesets<G, M, RW, S, CW> = DeleteChangesetFilesStep<G, M, RW, S, CW>;
@@ -386,6 +388,7 @@ where
             .then(WriteManifests::<G, M, RW, S, C>::new())
             .then(UpdateDeps::<G, M, RW, S, C>::new())
             .then(RemoveWorkspace::<G, M, RW, S, C>::new())
+            .then(UpdateLockfile::<G, M, RW, S, C>::new())
             .then(MarkConsumed::<G, M, RW, S, C>::new())
             .then(ClearConsumed::<G, M, RW, S, C>::new())
             .then(DeleteChangesets::<G, M, RW, S, C>::new())

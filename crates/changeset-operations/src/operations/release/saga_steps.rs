@@ -35,8 +35,8 @@ use super::{CommitResult, TagResult};
 use crate::OperationError;
 use crate::traits::{
     ChangelogWriter, ChangesetReader, ChangesetWriter, GitCommitProvider, GitStagingProvider,
-    GitTagProvider, ManifestDependencyWriter, ManifestVersionWriter, ReleaseStateIO,
-    WorkspaceVersionManager,
+    GitTagProvider, LockfileUpdater, ManifestDependencyWriter, ManifestVersionWriter,
+    ReleaseStateIO, WorkspaceVersionManager,
 };
 
 saga_step_struct!(WriteManifestVersionsStep);
@@ -257,6 +257,57 @@ where
 
     fn compensation_description(&self) -> String {
         "restore workspace package version".to_string()
+    }
+}
+
+saga_step_struct!(UpdateLockfileStep);
+
+impl<G, M, RW, S, C> SagaStep for UpdateLockfileStep<G, M, RW, S, C>
+where
+    G: Send + Sync,
+    M: LockfileUpdater,
+    RW: Send + Sync,
+    S: Send + Sync,
+    C: Send + Sync,
+{
+    type Input = ReleaseSagaData;
+    type Output = ReleaseSagaData;
+    type Context = ReleaseSagaContext<G, M, RW, S, C>;
+    type Error = OperationError;
+
+    fn name(&self) -> &'static str {
+        "update_lockfile"
+    }
+
+    fn execute(
+        &self,
+        ctx: &Self::Context,
+        mut input: Self::Input,
+    ) -> Result<Self::Output, Self::Error> {
+        if !input.should_commit {
+            return Ok(input);
+        }
+
+        input.lockfile_backup = ctx.manifest_writer().read_lockfile(ctx.project_root())?;
+        ctx.manifest_writer()
+            .generate_lockfile(ctx.project_root())?;
+        input.lockfile_path = Some(ctx.project_root().join("Cargo.lock"));
+
+        Ok(input)
+    }
+
+    fn compensate(&self, ctx: &Self::Context, input: Self::Input) -> Result<(), Self::Error> {
+        if let Some(backup) = &input.lockfile_backup {
+            ctx.manifest_writer()
+                .restore_lockfile(ctx.project_root(), backup)?;
+        } else if input.lockfile_path.is_some() {
+            ctx.manifest_writer().remove_lockfile(ctx.project_root())?;
+        }
+        Ok(())
+    }
+
+    fn compensation_description(&self) -> String {
+        "restore original Cargo.lock".to_string()
     }
 }
 
@@ -515,6 +566,10 @@ where
 
         if !input.changesets_deleted.is_empty() {
             files.extend(input.changesets_deleted.iter().cloned());
+        }
+
+        if let Some(lockfile_path) = &input.lockfile_path {
+            files.push(lockfile_path.clone());
         }
 
         files.sort();
@@ -1175,6 +1230,182 @@ mod tests {
         assert!(result.files_were_staged);
         assert!(!result.staged_files.is_empty());
         assert!(!git_provider.staged_files().is_empty());
+
+        Ok(())
+    }
+
+    #[test]
+    fn update_lockfile_generates_lockfile_when_committing() -> anyhow::Result<()> {
+        let ctx = make_test_context(
+            Arc::new(MockGitProvider::new()),
+            Arc::new(MockManifestWriter::new()),
+            Arc::new(MockChangesetReader::new()),
+            Arc::new(MockReleaseStateIO::new()),
+        );
+
+        let step: UpdateLockfileStep<
+            MockGitProvider,
+            MockManifestWriter,
+            MockChangesetReader,
+            MockReleaseStateIO,
+            MockChangelogWriter,
+        > = UpdateLockfileStep::new();
+        let input = make_test_data();
+
+        let result = SagaStep::execute(&step, &ctx, input)?;
+
+        assert_eq!(
+            result.lockfile_path,
+            Some(PathBuf::from("/mock/project/Cargo.lock"))
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn update_lockfile_skips_when_no_commit() -> anyhow::Result<()> {
+        let ctx = make_test_context(
+            Arc::new(MockGitProvider::new()),
+            Arc::new(MockManifestWriter::new()),
+            Arc::new(MockChangesetReader::new()),
+            Arc::new(MockReleaseStateIO::new()),
+        );
+
+        let step: UpdateLockfileStep<
+            MockGitProvider,
+            MockManifestWriter,
+            MockChangesetReader,
+            MockReleaseStateIO,
+            MockChangelogWriter,
+        > = UpdateLockfileStep::new();
+        let mut input = make_test_data();
+        input.should_commit = false;
+
+        let result = SagaStep::execute(&step, &ctx, input)?;
+
+        assert!(result.lockfile_path.is_none());
+        assert!(result.lockfile_backup.is_none());
+
+        Ok(())
+    }
+
+    #[test]
+    fn update_lockfile_compensate_restores_from_backup() -> anyhow::Result<()> {
+        let manifest_writer = Arc::new(
+            MockManifestWriter::new().with_lockfile_content(b"original-lockfile".to_vec()),
+        );
+        let ctx = make_test_context(
+            Arc::new(MockGitProvider::new()),
+            Arc::clone(&manifest_writer),
+            Arc::new(MockChangesetReader::new()),
+            Arc::new(MockReleaseStateIO::new()),
+        );
+
+        let step: UpdateLockfileStep<
+            MockGitProvider,
+            MockManifestWriter,
+            MockChangesetReader,
+            MockReleaseStateIO,
+            MockChangelogWriter,
+        > = UpdateLockfileStep::new();
+        let mut input = make_test_data();
+        input.lockfile_backup = Some(b"original-lockfile".to_vec());
+
+        SagaStep::compensate(&step, &ctx, input)?;
+
+        assert_eq!(
+            manifest_writer.lockfile_restored(),
+            Some(b"original-lockfile".to_vec()),
+        );
+        assert!(!manifest_writer.lockfile_removed());
+
+        Ok(())
+    }
+
+    #[test]
+    fn update_lockfile_compensate_removes_when_no_backup() -> anyhow::Result<()> {
+        let manifest_writer = Arc::new(MockManifestWriter::new());
+        let ctx = make_test_context(
+            Arc::new(MockGitProvider::new()),
+            Arc::clone(&manifest_writer),
+            Arc::new(MockChangesetReader::new()),
+            Arc::new(MockReleaseStateIO::new()),
+        );
+
+        let step: UpdateLockfileStep<
+            MockGitProvider,
+            MockManifestWriter,
+            MockChangesetReader,
+            MockReleaseStateIO,
+            MockChangelogWriter,
+        > = UpdateLockfileStep::new();
+        let mut input = make_test_data();
+        input.lockfile_path = Some(PathBuf::from("/mock/project/Cargo.lock"));
+
+        SagaStep::compensate(&step, &ctx, input)?;
+
+        assert!(manifest_writer.lockfile_removed());
+        assert!(manifest_writer.lockfile_restored().is_none());
+
+        Ok(())
+    }
+
+    #[test]
+    fn update_lockfile_compensate_noop_when_nothing_to_restore() -> anyhow::Result<()> {
+        let manifest_writer = Arc::new(MockManifestWriter::new());
+        let ctx = make_test_context(
+            Arc::new(MockGitProvider::new()),
+            Arc::clone(&manifest_writer),
+            Arc::new(MockChangesetReader::new()),
+            Arc::new(MockReleaseStateIO::new()),
+        );
+
+        let step: UpdateLockfileStep<
+            MockGitProvider,
+            MockManifestWriter,
+            MockChangesetReader,
+            MockReleaseStateIO,
+            MockChangelogWriter,
+        > = UpdateLockfileStep::new();
+        let input = make_test_data();
+
+        SagaStep::compensate(&step, &ctx, input)?;
+
+        assert!(!manifest_writer.lockfile_removed());
+        assert!(manifest_writer.lockfile_restored().is_none());
+
+        Ok(())
+    }
+
+    #[test]
+    fn stage_files_includes_lockfile_when_present() -> anyhow::Result<()> {
+        let git_provider = Arc::new(MockGitProvider::new());
+        let ctx = make_test_context(
+            Arc::clone(&git_provider),
+            Arc::new(MockManifestWriter::new()),
+            Arc::new(MockChangesetReader::new()),
+            Arc::new(MockReleaseStateIO::new()),
+        );
+
+        let step: StageFilesStep<
+            MockGitProvider,
+            MockManifestWriter,
+            MockChangesetReader,
+            MockReleaseStateIO,
+            MockChangelogWriter,
+        > = StageFilesStep::new();
+        let mut input = make_test_data();
+        input.lockfile_path = Some(PathBuf::from("/mock/project/Cargo.lock"));
+
+        let result = SagaStep::execute(&step, &ctx, input)?;
+
+        assert!(result.files_were_staged);
+        assert!(
+            result
+                .staged_files
+                .contains(&PathBuf::from("/mock/project/Cargo.lock")),
+            "lockfile should be staged"
+        );
 
         Ok(())
     }

@@ -193,6 +193,30 @@ pub enum OperationError {
         source: changeset_core::PrereleaseSpecParseError,
     },
 
+    #[error("failed to read lockfile '{}'", path.display())]
+    LockfileRead {
+        path: PathBuf,
+        #[source]
+        source: std::io::Error,
+    },
+
+    #[error("failed to write lockfile '{}'", path.display())]
+    LockfileWrite {
+        path: PathBuf,
+        #[source]
+        source: std::io::Error,
+    },
+
+    #[error("lockfile generation failed in '{}'", path.display())]
+    LockfileGeneration {
+        path: PathBuf,
+        #[source]
+        source: std::io::Error,
+    },
+
+    #[error("cargo generate-lockfile failed: {stderr}")]
+    LockfileCommandFailed { stderr: String },
+
     #[error("release saga failed at step '{step}'")]
     SagaFailed {
         step: String,

@@ -1,11 +1,13 @@
 use std::path::Path;
+use std::process::Command;
 
 use changeset_manifest::{InitConfig, MetadataSection};
 use semver::Version;
 
 use crate::Result;
+use crate::error::OperationError;
 use crate::traits::{
-    InheritedVersionChecker, ManifestDependencyWriter, ManifestMetadataWriter,
+    InheritedVersionChecker, LockfileUpdater, ManifestDependencyWriter, ManifestMetadataWriter,
     ManifestVersionWriter, WorkspaceVersionManager,
 };
 
@@ -76,6 +78,65 @@ impl WorkspaceVersionManager for FileSystemManifestWriter {
             manifest_path,
             version,
         )?)
+    }
+}
+
+impl LockfileUpdater for FileSystemManifestWriter {
+    fn generate_lockfile(&self, project_root: &Path) -> Result<()> {
+        let output = Command::new("cargo")
+            .arg("generate-lockfile")
+            .current_dir(project_root)
+            .output()
+            .map_err(|source| OperationError::LockfileGeneration {
+                path: project_root.to_path_buf(),
+                source,
+            })?;
+
+        if !output.status.success() {
+            return Err(OperationError::LockfileCommandFailed {
+                stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
+            });
+        }
+
+        Ok(())
+    }
+
+    fn read_lockfile(&self, project_root: &Path) -> Result<Option<Vec<u8>>> {
+        let lockfile_path = project_root.join("Cargo.lock");
+        if lockfile_path.exists() {
+            let content =
+                std::fs::read(&lockfile_path).map_err(|source| OperationError::LockfileRead {
+                    path: lockfile_path,
+                    source,
+                })?;
+            Ok(Some(content))
+        } else {
+            Ok(None)
+        }
+    }
+
+    fn restore_lockfile(&self, project_root: &Path, content: &[u8]) -> Result<()> {
+        let lockfile_path = project_root.join("Cargo.lock");
+        std::fs::write(&lockfile_path, content).map_err(|source| {
+            OperationError::LockfileWrite {
+                path: lockfile_path,
+                source,
+            }
+        })?;
+        Ok(())
+    }
+
+    fn remove_lockfile(&self, project_root: &Path) -> Result<()> {
+        let lockfile_path = project_root.join("Cargo.lock");
+        if lockfile_path.exists() {
+            std::fs::remove_file(&lockfile_path).map_err(|source| {
+                OperationError::LockfileWrite {
+                    path: lockfile_path,
+                    source,
+                }
+            })?;
+        }
+        Ok(())
     }
 }
 

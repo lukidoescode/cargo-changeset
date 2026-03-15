@@ -7,14 +7,19 @@ use crate::Result;
 use crate::traits::InheritedVersionChecker;
 
 pub trait FullManifestWriter:
-    ManifestVersionWriter + ManifestDependencyWriter + WorkspaceVersionManager + InheritedVersionChecker
+    ManifestVersionWriter
+    + ManifestDependencyWriter
+    + WorkspaceVersionManager
+    + InheritedVersionChecker
+    + LockfileUpdater
 {
 }
 impl<
     T: ManifestVersionWriter
         + ManifestDependencyWriter
         + WorkspaceVersionManager
-        + InheritedVersionChecker,
+        + InheritedVersionChecker
+        + LockfileUpdater,
 > FullManifestWriter for T
 {
 }
@@ -60,6 +65,28 @@ pub trait WorkspaceVersionManager: Send + Sync {
     ///
     /// Propagates manifest write errors.
     fn write_workspace_version(&self, manifest_path: &Path, version: &Version) -> Result<()>;
+}
+
+pub trait LockfileUpdater: Send + Sync {
+    /// # Errors
+    ///
+    /// Returns an error if the `cargo generate-lockfile` command fails.
+    fn generate_lockfile(&self, project_root: &Path) -> Result<()>;
+
+    /// # Errors
+    ///
+    /// Returns an error if the lockfile exists but cannot be read.
+    fn read_lockfile(&self, project_root: &Path) -> Result<Option<Vec<u8>>>;
+
+    /// # Errors
+    ///
+    /// Returns an error if the lockfile cannot be written.
+    fn restore_lockfile(&self, project_root: &Path, content: &[u8]) -> Result<()>;
+
+    /// # Errors
+    ///
+    /// Returns an error if the lockfile exists but cannot be removed.
+    fn remove_lockfile(&self, project_root: &Path) -> Result<()>;
 }
 
 pub trait ManifestMetadataWriter: Send + Sync {

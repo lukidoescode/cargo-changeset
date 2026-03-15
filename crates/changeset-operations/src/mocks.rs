@@ -18,7 +18,7 @@ use crate::traits::{
     ChangelogWriter, ChangesetReader, ChangesetWriter, DependencyGraphProvider, DescriptionInput,
     GitCommitProvider, GitDiffProvider, GitSettingsInput, GitStagingProvider, GitStatusProvider,
     GitTagProvider, GitWorkdirDiffProvider, GraduationAction, GraduationInteractionProvider,
-    InheritedVersionChecker, InitInteractionProvider, InteractionProvider,
+    InheritedVersionChecker, InitInteractionProvider, InteractionProvider, LockfileUpdater,
     ManifestDependencyWriter, ManifestMetadataWriter, ManifestVersionWriter, MenuSelection,
     PackageSelection, PrereleaseAction, PrereleaseInteractionProvider, ProjectContext,
     ProjectProvider, ReleaseStateIO, VersionSettingsInput, WorkspaceVersionManager,
@@ -880,6 +880,9 @@ struct MockManifestState {
     removed_workspace_version: bool,
     workspace_version: Option<Version>,
     written_metadata: Vec<(PathBuf, MetadataSection, InitConfig)>,
+    lockfile_content: Option<Vec<u8>>,
+    lockfile_restored: Option<Vec<u8>>,
+    lockfile_removed: bool,
 }
 
 pub struct MockManifestWriter {
@@ -898,6 +901,9 @@ impl MockManifestWriter {
                 removed_workspace_version: false,
                 workspace_version: None,
                 written_metadata: Vec::new(),
+                lockfile_content: None,
+                lockfile_restored: None,
+                lockfile_removed: false,
             }),
             inherited_paths: HashSet::new(),
         }
@@ -988,6 +994,35 @@ impl MockManifestWriter {
             .written_metadata
             .clone()
     }
+
+    /// # Panics
+    ///
+    /// Panics if the internal mutex is poisoned.
+    #[must_use]
+    pub fn with_lockfile_content(self, content: Vec<u8>) -> Self {
+        self.state.lock().expect("lock poisoned").lockfile_content = Some(content);
+        self
+    }
+
+    /// # Panics
+    ///
+    /// Panics if the internal mutex is poisoned.
+    #[must_use]
+    pub fn lockfile_restored(&self) -> Option<Vec<u8>> {
+        self.state
+            .lock()
+            .expect("lock poisoned")
+            .lockfile_restored
+            .clone()
+    }
+
+    /// # Panics
+    ///
+    /// Panics if the internal mutex is poisoned.
+    #[must_use]
+    pub fn lockfile_removed(&self) -> bool {
+        self.state.lock().expect("lock poisoned").lockfile_removed
+    }
 }
 
 impl Default for MockManifestWriter {
@@ -1062,6 +1097,31 @@ impl WorkspaceVersionManager for MockManifestWriter {
     }
 }
 
+impl LockfileUpdater for MockManifestWriter {
+    fn generate_lockfile(&self, _project_root: &Path) -> Result<()> {
+        Ok(())
+    }
+
+    fn read_lockfile(&self, _project_root: &Path) -> Result<Option<Vec<u8>>> {
+        Ok(self
+            .state
+            .lock()
+            .expect("lock poisoned")
+            .lockfile_content
+            .clone())
+    }
+
+    fn restore_lockfile(&self, _project_root: &Path, content: &[u8]) -> Result<()> {
+        self.state.lock().expect("lock poisoned").lockfile_restored = Some(content.to_vec());
+        Ok(())
+    }
+
+    fn remove_lockfile(&self, _project_root: &Path) -> Result<()> {
+        self.state.lock().expect("lock poisoned").lockfile_removed = true;
+        Ok(())
+    }
+}
+
 impl ManifestMetadataWriter for MockManifestWriter {
     fn write_metadata(
         &self,
@@ -1102,6 +1162,15 @@ impl_arc_delegation! {
         fn read_workspace_version(&self, manifest_path: &Path) -> Result<Option<Version>>;
         fn remove_workspace_version(&self, manifest_path: &Path) -> Result<()>;
         fn write_workspace_version(&self, manifest_path: &Path, version: &Version) -> Result<()>;
+    }
+}
+
+impl_arc_delegation! {
+    impl LockfileUpdater for Arc<MockManifestWriter> {
+        fn generate_lockfile(&self, project_root: &Path) -> Result<()>;
+        fn read_lockfile(&self, project_root: &Path) -> Result<Option<Vec<u8>>>;
+        fn restore_lockfile(&self, project_root: &Path, content: &[u8]) -> Result<()>;
+        fn remove_lockfile(&self, project_root: &Path) -> Result<()>;
     }
 }
 
