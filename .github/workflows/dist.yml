@@ -4,6 +4,7 @@ name: Distribute Binaries
 on:
   push:
     tags: [cargo-changeset@v*]
+  workflow_dispatch:
 
 permissions:
   contents: write
