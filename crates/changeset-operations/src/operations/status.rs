@@ -2,6 +2,7 @@ use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
 use changeset_core::{BumpType, Changeset, PackageInfo};
+use changeset_project::WorkspaceDependencyGraph;
 use changeset_version::max_bump_type;
 use indexmap::IndexMap;
 
@@ -88,15 +89,15 @@ where
             root_config.zero_version_behavior(),
         )?;
 
-        let projected_releases = {
-            let graph = self.project_provider.build_dependency_graph(&project)?;
+        let graph = self.project_provider.build_dependency_graph(&project)?;
+
+        let projected_releases =
             super::release::dependency_expansion::expand_with_reverse_dependencies(
                 plan.releases,
                 &graph,
                 project.packages(),
                 root_config.zero_version_behavior(),
-            )?
-        };
+            )?;
 
         let (_, unchanged_packages) =
             VersionPlanner::partition_packages(&changesets, project.packages());
@@ -113,7 +114,7 @@ where
         none_bump_packages.sort();
 
         let uncovered_dependents =
-            self.compute_uncovered_dependents(&project, &projected_releases, &none_bump_packages)?;
+            Self::compute_uncovered_dependents(&graph, &projected_releases, &none_bump_packages);
 
         Ok(StatusOutput {
             changesets,
@@ -130,13 +131,10 @@ where
     }
 
     fn compute_uncovered_dependents(
-        &self,
-        project: &changeset_project::CargoProject,
+        graph: &WorkspaceDependencyGraph,
         releases: &[PackageVersion],
         none_bump_packages: &[String],
-    ) -> Result<Vec<(String, Vec<String>)>> {
-        let graph = self.project_provider.build_dependency_graph(project)?;
-
+    ) -> Vec<(String, Vec<String>)> {
         let covered: Vec<String> = releases
             .iter()
             .map(|r| r.name.clone())
@@ -165,7 +163,7 @@ where
         result.retain(|(_, deps)| !deps.is_empty());
         result.sort_by(|(a, _), (b, _)| a.cmp(b));
 
-        Ok(result)
+        result
     }
 
     fn collect_consumed_changesets(
