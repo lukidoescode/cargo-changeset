@@ -5,6 +5,35 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.1] - 2026-03-15
+### Added
+
+- **changeset-parse**: Support parsing and serializing 'none' as a bump type in changeset files
+- **cargo-changeset**: Warn about transitive workspace dependents not covered by a changeset when running "add"
+- **cargo-changeset**: "verify" now detects uncommitted changes and verifies them against HEAD automatically
+- **cargo-changeset**: Add 'none' bump type option for tracking changes without version increments
+- **cargo-changeset**: Add "none" bump type for changesets that document changes without incrementing the version
+- **cargo-changeset**: Add --exclude-dependents flag and show transitive dependent coverage in add, verify, and status commands
+- **changeset-project**: Add WorkspaceDependencyGraph for resolving transitive workspace member dependencies
+- **changeset-operations**: Add DependencyGraphProvider trait and dependency-aware logic to add, verify, and status operations
+- **changeset-operations**: Warn about transitive workspace dependents not covered by a changeset when running "add"
+- **changeset-operations**: "verify" now detects uncommitted changes and verifies them against HEAD automatically
+- **changeset-operations**: Add "none" bump type for changesets that document changes without incrementing the version
+- **changeset-operations**: Support non-bump changesets in add, status, verify, and release planning operations
+- **changeset-version**: Support BumpType::None to preserve version unchanged during bump calculations
+- **changeset-git**: "verify" now detects uncommitted changes and verifies them against HEAD automatically
+- **changeset-core**: Add BumpType::None variant for tracking changes without version increments
+
+### Changed
+
+- **cargo-changeset**: "verify" output now distinguishes directly changed packages from transitive dependents
+- **changeset-version**: Refactor version planner to track effective bump type separately from computed version
+
+### Fixed
+
+- **cargo-changeset**: Release now regenerates Cargo.lock automatically.
+- **changeset-operations**: Cargo.lock is now automatically regenerated during release. If the release fails, the original lockfile is restored.
+
 ## [0.1.0] - 2026-03-08
 ### Added
 
@@ -47,3 +76,5 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **cargo-changeset**: Tags created with the crate-prefixed format now use @ as the separator (e.g., my-crate@v1.2.3) instead of - (e.g., my-crate-v1.2.3).
 - **cargo-changeset**: Fix cargo subcommand dispatch by supporting both 'cargo changeset <cmd>' and direct 'cargo-changeset <cmd>' invocation modes
+
+[0.1.1]: https://github.com/lukidoescode/cargo-changeset/compare/v0.1.0...v0.1.1
