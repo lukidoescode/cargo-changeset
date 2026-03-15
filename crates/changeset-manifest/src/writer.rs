@@ -216,6 +216,13 @@ pub fn write_metadata_section(
         );
     }
 
+    if let Some(ref dependency_update_summary) = config.dependency_update_summary {
+        changeset_table.insert(
+            "dependency-update-summary",
+            value(dependency_update_summary.as_str()),
+        );
+    }
+
     std::fs::write(path, doc.to_string()).map_err(|source| ManifestError::Write {
         path: path.to_path_buf(),
         source,
@@ -600,6 +607,7 @@ members = ["crates/*"]
             changelog: Some(ChangelogLocation::PerPackage),
             comparison_links: Some(ComparisonLinks::Enabled),
             zero_version_behavior: Some(ZeroVersionBehavior::AutoPromoteOnMajor),
+            dependency_update_summary: None,
         };
 
         write_metadata_section(&path, MetadataSection::Workspace, &config).expect("write metadata");
@@ -632,6 +640,7 @@ members = ["crates/*"]
             changelog: None,
             comparison_links: None,
             zero_version_behavior: None,
+            dependency_update_summary: None,
         };
 
         write_metadata_section(&path, MetadataSection::Workspace, &config).expect("write metadata");
@@ -887,6 +896,32 @@ my-crate = "1.0.0"
 
         let content = std::fs::read_to_string(&path).expect("read file");
         assert!(content.contains(r#"my-crate = "1.0.0""#));
+    }
+
+    #[test]
+    fn write_metadata_serializes_dependency_update_summary() {
+        let toml = r#"
+[workspace]
+members = ["crates/*"]
+"#;
+        let dir = tempfile::tempdir().expect("create temp dir");
+        let path = dir.path().join("Cargo.toml");
+        std::fs::write(&path, toml).expect("write test file");
+
+        let config = InitConfig {
+            dependency_update_summary: Some(
+                "Updated dependency `{dependency}` to v{version}".to_string(),
+            ),
+            ..Default::default()
+        };
+
+        write_metadata_section(&path, MetadataSection::Workspace, &config).expect("write metadata");
+
+        let content = std::fs::read_to_string(&path).expect("read file");
+        assert!(content.contains("[workspace.metadata.changeset]"));
+        assert!(content.contains(
+            r#"dependency-update-summary = "Updated dependency `{dependency}` to v{version}""#
+        ));
     }
 
     #[test]
