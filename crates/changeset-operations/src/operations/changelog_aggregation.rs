@@ -292,6 +292,22 @@ mod tests {
     }
 
     #[test]
+    fn empty_dependency_updates_adds_no_entries() {
+        let mut aggregator = ChangesetAggregator::new();
+        let deps: Vec<(String, Version)> = vec![];
+
+        aggregator.add_dependency_update_entries("my-crate", &deps, "{dependency} {version}");
+
+        let release =
+            aggregator.build_package_release("my-crate", &Version::new(1, 0, 1), test_date());
+
+        assert!(
+            release.is_none(),
+            "no release should be produced when no dependency updates are added"
+        );
+    }
+
+    #[test]
     fn dependency_update_entries_use_changed_category() {
         let mut aggregator = ChangesetAggregator::new();
         let deps = vec![("dep-a".to_string(), Version::new(1, 0, 0))];

@@ -834,6 +834,28 @@ dependency-update-summary = "Upgraded `{dependency}` to {version}"
     }
 
     #[test]
+    fn parse_dependency_update_summary_from_package_metadata() -> anyhow::Result<()> {
+        let toml = r#"
+[package]
+name = "my-crate"
+version = "0.1.0"
+
+[package.metadata.changeset]
+dependency-update-summary = "Bumped `{dependency}` to {version}"
+"#;
+        let dir = setup_with_config(toml)?;
+
+        let config = parse_package_root_config(dir.path())?;
+
+        assert_eq!(
+            config.dependency_update_summary(),
+            "Bumped `{dependency}` to {version}"
+        );
+
+        Ok(())
+    }
+
+    #[test]
     fn dependency_update_summary_defaults_when_not_specified() -> anyhow::Result<()> {
         let toml = r#"
 [workspace]

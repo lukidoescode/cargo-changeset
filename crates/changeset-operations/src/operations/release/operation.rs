@@ -2,7 +2,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use changeset_core::PackageInfo;
-use changeset_project::{ProjectKind, TagFormat};
+use changeset_project::{ProjectKind, TagFormat, WorkspaceDependencyGraph};
 use changeset_saga::SagaBuilder;
 use chrono::Local;
 use indexmap::IndexMap;
@@ -158,7 +158,7 @@ where
     /// planning, changelog generation, and git operations.
     pub fn execute(&self, start_path: &Path, input: &ReleaseInput) -> Result<ReleaseOutcome> {
         let context = match self.prepare_release_context(start_path, input)? {
-            PrepareResult::Ready(ctx) => ctx,
+            PrepareResult::Ready(ctx) => *ctx,
             PrepareResult::EarlyReturn(outcome) => return Ok(outcome),
         };
 
@@ -234,7 +234,7 @@ where
         let inherited_packages =
             self.check_inherited_versions(project.packages(), input.convert_inherited())?;
 
-        Ok(PrepareResult::Ready(ReleaseContext {
+        Ok(PrepareResult::Ready(Box::new(ReleaseContext {
             project,
             root_config,
             changeset_dir,
@@ -249,7 +249,7 @@ where
             },
             git_options,
             inherited_packages,
-        }))
+        })))
     }
 
     fn plan_release(&self, context: &ReleaseContext, dry_run: bool) -> Result<ReleasePlan> {
@@ -262,44 +262,30 @@ where
         let planned_releases = if context.classification.is_prerelease_graduation {
             VersionPlanner::plan_graduation(context.project.packages())?.releases
         } else {
-            VersionPlanner::plan_releases_per_package(
+            let base_releases = VersionPlanner::plan_releases_per_package(
                 &changesets,
                 context.project.packages(),
                 &context.per_package_config,
                 context.root_config.zero_version_behavior(),
             )?
-            .releases
-        };
+            .releases;
 
-        let planned_releases = if context.classification.is_prerelease_graduation {
-            planned_releases
-        } else {
             let graph = self
                 .project_provider
                 .build_dependency_graph(&context.project)?;
             let expanded = super::dependency_expansion::expand_with_reverse_dependencies(
-                planned_releases,
+                base_releases,
                 &graph,
                 context.project.packages(),
                 context.root_config.zero_version_behavior(),
             )?;
 
-            let template = context.root_config.dependency_update_summary();
-            for release in expanded.iter().filter(|r| r.auto_bumped) {
-                let direct_deps = graph.direct_dependencies(&release.name);
-                let upgraded_deps: Vec<(String, semver::Version)> = expanded
-                    .iter()
-                    .filter(|r| direct_deps.contains(r.name.as_str()))
-                    .map(|r| (r.name.clone(), r.new_version.clone()))
-                    .collect();
-                if !upgraded_deps.is_empty() {
-                    aggregator.add_dependency_update_entries(
-                        &release.name,
-                        &upgraded_deps,
-                        template,
-                    );
-                }
-            }
+            populate_dependency_update_entries(
+                &expanded,
+                &graph,
+                context.root_config.dependency_update_summary(),
+                &mut aggregator,
+            );
 
             expanded
         };
@@ -450,6 +436,25 @@ where
             Arc::clone(&self.release_state_io),
             Arc::clone(&self.changelog_writer),
         )
+    }
+}
+
+fn populate_dependency_update_entries(
+    releases: &[PackageVersion],
+    graph: &WorkspaceDependencyGraph,
+    template: &str,
+    aggregator: &mut ChangesetAggregator,
+) {
+    for release in releases.iter().filter(|r| r.auto_bumped) {
+        let direct_deps = graph.direct_dependencies(&release.name);
+        let upgraded_deps: Vec<(String, semver::Version)> = releases
+            .iter()
+            .filter(|r| direct_deps.contains(r.name.as_str()))
+            .map(|r| (r.name.clone(), r.new_version.clone()))
+            .collect();
+        if !upgraded_deps.is_empty() {
+            aggregator.add_dependency_update_entries(&release.name, &upgraded_deps, template);
+        }
     }
 }
 

@@ -1064,6 +1064,9 @@ fn create_workspace_with_dependency_chain() -> TempDir {
         r#"[workspace]
 members = ["crates/*"]
 resolver = "2"
+
+[workspace.metadata.changeset]
+changelog = "per-package"
 "#,
     )
     .expect("write workspace Cargo.toml");
@@ -1159,11 +1162,21 @@ fn system_test_release_auto_bumps_dependents() {
     );
 
     let lib_changelog_path = dir.path().join("crates/lib/CHANGELOG.md");
-    if lib_changelog_path.exists() {
-        let lib_changelog = fs::read_to_string(&lib_changelog_path).expect("read lib changelog");
-        assert!(
-            lib_changelog.contains("1.0.1"),
-            "lib changelog should contain version 1.0.1"
-        );
-    }
+    assert!(
+        lib_changelog_path.exists(),
+        "lib changelog should be created for auto-bumped dependent"
+    );
+    let lib_changelog = fs::read_to_string(&lib_changelog_path).expect("read lib changelog");
+    assert!(
+        lib_changelog.contains("1.0.1"),
+        "lib changelog should contain version 1.0.1"
+    );
+    assert!(
+        lib_changelog.contains("Updated dependency"),
+        "lib changelog should contain dependency update text"
+    );
+    assert!(
+        lib_changelog.contains("core"),
+        "lib changelog should reference the updated dependency name"
+    );
 }

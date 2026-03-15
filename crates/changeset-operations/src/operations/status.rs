@@ -91,13 +91,12 @@ where
 
         let graph = self.project_provider.build_dependency_graph(&project)?;
 
-        let projected_releases =
-            super::release::dependency_expansion::expand_with_reverse_dependencies(
-                plan.releases,
-                &graph,
-                project.packages(),
-                root_config.zero_version_behavior(),
-            )?;
+        let projected_releases = super::release::expand_with_reverse_dependencies(
+            plan.releases,
+            &graph,
+            project.packages(),
+            root_config.zero_version_behavior(),
+        )?;
 
         let (_, unchanged_packages) =
             VersionPlanner::partition_packages(&changesets, project.packages());
