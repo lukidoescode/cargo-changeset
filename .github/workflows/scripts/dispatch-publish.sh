@@ -14,22 +14,25 @@ fi
 
 # Emit "<depth> <crate_name>" lines sorted by depth, derived from the workspace
 # dependency graph. Depth 0 = no internal deps; higher = depends on lower tiers.
-depth_order=$(cargo metadata --no-deps --format-version 1 | jq -r '
-  .packages as $pkgs |
-  ($pkgs | map({
-    key: .name,
-    value: [.dependencies[] | select(.path != null) | .name]
-  }) | from_entries) as $deps |
-  ($pkgs | map(.name)) as $names |
-  reduce range($names | length) as $_ (
-    ($names | map({key: ., value: 0}) | from_entries);
-    reduce $names[] as $n (
-      .;
-      reduce $deps[$n][] as $d (.; .[$n] = ([.[$n], (.[$d] + 1)] | max))
-    )
-  ) as $depths |
-  $names[] | "\($depths[.]) \(.)"
-' | sort -n)
+depth_order=$(cargo metadata --no-deps --format-version 1 | python3 -c "
+import json, sys
+
+data = json.load(sys.stdin)
+pkgs = data['packages']
+
+deps = {p['name']: [d['name'] for d in p['dependencies'] if d.get('path')] for p in pkgs}
+names = [p['name'] for p in pkgs]
+
+depths = {n: 0 for n in names}
+for _ in range(len(names)):
+    for n in names:
+        for d in deps[n]:
+            if depths[n] <= depths[d]:
+                depths[n] = depths[d] + 1
+
+for name in sorted(names, key=lambda n: depths[n]):
+    print(depths[name], name)
+")
 
 current_depth=-1
 
