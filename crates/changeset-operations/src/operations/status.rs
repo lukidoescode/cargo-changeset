@@ -683,6 +683,42 @@ mod tests {
     }
 
     #[test]
+    fn auto_bumped_dependents_appear_in_projected_releases() {
+        let project_provider =
+            MockProjectProvider::workspace(vec![("core", "1.0.0"), ("app", "1.0.0")])
+                .with_dependency_edges(vec![("app", "core")]);
+
+        let changeset = make_changeset("core", BumpType::Minor, "Add feature to core");
+        let changeset_reader = MockChangesetReader::new()
+            .with_changeset(PathBuf::from(".changeset/changesets/feature.md"), changeset);
+
+        let operation = make_operation(project_provider, changeset_reader);
+
+        let result = operation
+            .execute(Path::new("/any"))
+            .expect("StatusOperation failed");
+
+        assert_eq!(result.projected_releases.len(), 2);
+
+        let core_release = result
+            .projected_releases
+            .iter()
+            .find(|r| r.name == "core")
+            .expect("core should be in projected releases");
+        assert_eq!(core_release.new_version, Version::new(1, 1, 0));
+        assert!(!core_release.auto_bumped);
+
+        let app_release = result
+            .projected_releases
+            .iter()
+            .find(|r| r.name == "app")
+            .expect("app should be auto-bumped into projected releases");
+        assert_eq!(app_release.new_version, Version::new(1, 0, 1));
+        assert_eq!(app_release.bump_type, BumpType::Patch);
+        assert!(app_release.auto_bumped);
+    }
+
+    #[test]
     fn none_bump_dependent_excluded_from_uncovered() {
         let project_provider =
             MockProjectProvider::workspace(vec![("core", "1.0.0"), ("app", "1.0.0")])

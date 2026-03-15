@@ -2012,4 +2012,157 @@ mod tests {
             "manifest version should be restored to original"
         );
     }
+
+    #[test]
+    fn auto_bumps_transitive_dependents() {
+        let project_provider = MockProjectProvider::workspace(vec![
+            ("core", "1.0.0"),
+            ("lib", "1.0.0"),
+            ("app", "1.0.0"),
+        ])
+        .with_dependency_edges(vec![("lib", "core"), ("app", "lib")]);
+
+        let changeset = make_changeset("core", BumpType::Minor, "Add feature to core");
+        let changeset_reader = MockChangesetReader::new()
+            .with_changeset(PathBuf::from(".changeset/changesets/feature.md"), changeset);
+        let manifest_writer = MockManifestWriter::new();
+
+        let operation = make_operation(project_provider, changeset_reader, manifest_writer);
+
+        let result = operation
+            .execute(Path::new("/any"), &default_input())
+            .expect("execute failed");
+
+        let ReleaseOutcome::DryRun(output) = result else {
+            panic!("expected DryRun outcome");
+        };
+
+        assert_eq!(output.planned_releases.len(), 3);
+
+        let core_release = output
+            .planned_releases
+            .iter()
+            .find(|r| r.name == "core")
+            .expect("core should be in releases");
+        assert_eq!(core_release.bump_type, BumpType::Minor);
+        assert!(!core_release.auto_bumped);
+
+        let lib_release = output
+            .planned_releases
+            .iter()
+            .find(|r| r.name == "lib")
+            .expect("lib should be auto-bumped");
+        assert_eq!(lib_release.bump_type, BumpType::Patch);
+        assert!(lib_release.auto_bumped);
+
+        let app_release = output
+            .planned_releases
+            .iter()
+            .find(|r| r.name == "app")
+            .expect("app should be auto-bumped");
+        assert_eq!(app_release.bump_type, BumpType::Patch);
+        assert!(app_release.auto_bumped);
+    }
+
+    #[test]
+    fn explicit_changeset_takes_precedence_over_auto_bump() {
+        let project_provider =
+            MockProjectProvider::workspace(vec![("core", "1.0.0"), ("lib", "1.0.0")])
+                .with_dependency_edges(vec![("lib", "core")]);
+
+        let changeset1 = make_changeset("core", BumpType::Minor, "Add feature to core");
+        let changeset2 = make_changeset("lib", BumpType::Patch, "Fix lib");
+        let changeset_reader = MockChangesetReader::new().with_changesets(vec![
+            (
+                PathBuf::from(".changeset/changesets/feature.md"),
+                changeset1,
+            ),
+            (PathBuf::from(".changeset/changesets/fix.md"), changeset2),
+        ]);
+        let manifest_writer = MockManifestWriter::new();
+
+        let operation = make_operation(project_provider, changeset_reader, manifest_writer);
+
+        let result = operation
+            .execute(Path::new("/any"), &default_input())
+            .expect("execute failed");
+
+        let ReleaseOutcome::DryRun(output) = result else {
+            panic!("expected DryRun outcome");
+        };
+
+        assert_eq!(output.planned_releases.len(), 2);
+
+        let lib_release = output
+            .planned_releases
+            .iter()
+            .find(|r| r.name == "lib")
+            .expect("lib should be in releases");
+        assert_eq!(lib_release.bump_type, BumpType::Patch);
+        assert!(
+            !lib_release.auto_bumped,
+            "explicit changeset should take precedence over auto-bump"
+        );
+
+        let lib_count = output
+            .planned_releases
+            .iter()
+            .filter(|r| r.name == "lib")
+            .count();
+        assert_eq!(lib_count, 1, "lib should appear exactly once");
+    }
+
+    #[test]
+    fn no_auto_bump_for_single_package_projects() {
+        let project_provider = MockProjectProvider::single_package("my-crate", "1.0.0");
+
+        let changeset = make_changeset("my-crate", BumpType::Minor, "Add feature");
+        let changeset_reader = MockChangesetReader::new()
+            .with_changeset(PathBuf::from(".changeset/changesets/feature.md"), changeset);
+        let manifest_writer = MockManifestWriter::new();
+
+        let operation = make_operation(project_provider, changeset_reader, manifest_writer);
+
+        let result = operation
+            .execute(Path::new("/any"), &default_input())
+            .expect("execute failed");
+
+        let ReleaseOutcome::DryRun(output) = result else {
+            panic!("expected DryRun outcome");
+        };
+
+        assert_eq!(output.planned_releases.len(), 1);
+        assert!(!output.planned_releases[0].auto_bumped);
+    }
+
+    #[test]
+    fn no_auto_bump_when_no_dependency_edges() {
+        let project_provider = MockProjectProvider::workspace(vec![
+            ("crate-a", "1.0.0"),
+            ("crate-b", "2.0.0"),
+            ("crate-c", "3.0.0"),
+        ]);
+
+        let changeset = make_changeset("crate-a", BumpType::Patch, "Fix crate-a");
+        let changeset_reader = MockChangesetReader::new()
+            .with_changeset(PathBuf::from(".changeset/changesets/fix.md"), changeset);
+        let manifest_writer = MockManifestWriter::new();
+
+        let operation = make_operation(project_provider, changeset_reader, manifest_writer);
+
+        let result = operation
+            .execute(Path::new("/any"), &default_input())
+            .expect("execute failed");
+
+        let ReleaseOutcome::DryRun(output) = result else {
+            panic!("expected DryRun outcome");
+        };
+
+        assert_eq!(
+            output.planned_releases.len(),
+            1,
+            "only the explicitly changed crate should be released"
+        );
+        assert_eq!(output.planned_releases[0].name, "crate-a");
+    }
 }
