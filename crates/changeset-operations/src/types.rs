@@ -8,6 +8,7 @@ pub struct PackageVersion {
     pub current_version: Version,
     pub new_version: Version,
     pub bump_type: BumpType,
+    pub auto_bumped: bool,
 }
 
 /// Per-package release configuration from merged CLI + TOML sources.

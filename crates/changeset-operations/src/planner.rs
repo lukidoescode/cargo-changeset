@@ -71,6 +71,7 @@ impl VersionPlanner {
                     current_version: pkg.version.clone(),
                     new_version,
                     bump_type: effective_bump,
+                    auto_bumped: false,
                 });
             } else {
                 unknown_packages.push(name.clone());
@@ -99,6 +100,7 @@ impl VersionPlanner {
                     current_version: pkg.version.clone(),
                     new_version,
                     bump_type: BumpType::Patch,
+                    auto_bumped: false,
                 });
             }
         }
@@ -149,6 +151,7 @@ impl VersionPlanner {
                     current_version: pkg.version.clone(),
                     new_version,
                     bump_type: effective_bump,
+                    auto_bumped: false,
                 });
             } else {
                 unknown_packages.push(name.clone());
@@ -186,6 +189,7 @@ impl VersionPlanner {
                     current_version: pkg.version.clone(),
                     new_version,
                     bump_type: BumpType::Major,
+                    auto_bumped: false,
                 });
             }
         }
@@ -243,6 +247,7 @@ impl VersionPlanner {
                     current_version: pkg.version.clone(),
                     new_version,
                     bump_type: effective_bump,
+                    auto_bumped: false,
                 });
             } else {
                 unknown_packages.push(name.clone());
@@ -272,6 +277,7 @@ impl VersionPlanner {
                     current_version: pkg.version.clone(),
                     new_version,
                     bump_type: effective_bump,
+                    auto_bumped: false,
                 });
             }
         }

@@ -302,6 +302,7 @@ mod tests {
                 current_version: "1.0.0".parse().expect("valid"),
                 new_version: "1.0.1".parse().expect("valid"),
                 bump_type: BumpType::Patch,
+                auto_bumped: false,
             }];
 
             let unchanged = collect_unchanged_packages(&packages, &releases);
@@ -317,6 +318,7 @@ mod tests {
                 current_version: "1.0.0".parse().expect("valid"),
                 new_version: "1.0.1".parse().expect("valid"),
                 bump_type: BumpType::Patch,
+                auto_bumped: false,
             }];
 
             let unchanged = collect_unchanged_packages(&packages, &releases);

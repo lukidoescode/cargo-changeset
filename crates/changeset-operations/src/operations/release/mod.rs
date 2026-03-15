@@ -2,6 +2,7 @@ mod changelog_strategy;
 mod classifiers;
 mod config_builder;
 mod context;
+pub(crate) mod dependency_expansion;
 mod loading;
 mod operation;
 mod saga_data;
