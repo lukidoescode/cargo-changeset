@@ -822,7 +822,7 @@ zero-version-behavior = "auto-promote-on-major"
 members = ["crates/*"]
 
 [workspace.metadata.changeset]
-dependency_bump_changelog_template = "Upgraded `{dependency}` to {version}"
+dependency-bump-changelog-template = "Upgraded `{dependency}` to {version}"
 "#;
         let dir = setup_with_config(toml)?;
 
@@ -844,7 +844,7 @@ name = "my-crate"
 version = "0.1.0"
 
 [package.metadata.changeset]
-dependency_bump_changelog_template = "Bumped `{dependency}` to {version}"
+dependency-bump-changelog-template = "Bumped `{dependency}` to {version}"
 "#;
         let dir = setup_with_config(toml)?;
 
