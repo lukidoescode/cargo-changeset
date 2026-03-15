@@ -29,14 +29,20 @@ impl PlainTextStatusFormatter {
 
         for release in &status.projected_releases {
             let bump_detail = Self::format_bump_detail(status, &release.name);
+            let auto_label = if release.auto_bumped {
+                " (dependency update)"
+            } else {
+                ""
+            };
 
             output.push_str(&format!(
-                "  {}: {} -> {} ({}){}\n",
+                "  {}: {} -> {} ({}){}{}\n",
                 release.name,
                 release.current_version,
                 release.new_version,
                 release.bump_type,
-                bump_detail
+                bump_detail,
+                auto_label,
             ));
         }
     }

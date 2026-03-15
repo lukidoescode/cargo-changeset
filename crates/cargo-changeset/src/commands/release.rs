@@ -178,9 +178,14 @@ fn print_release_output(output: &ReleaseOutput) {
 
     println!("Releases:");
     for release in &output.planned_releases {
+        let auto_label = if release.auto_bumped {
+            " (dependency update)"
+        } else {
+            ""
+        };
         println!(
-            "  - {} {} -> {}",
-            release.name, release.current_version, release.new_version
+            "  - {} {} -> {}{}",
+            release.name, release.current_version, release.new_version, auto_label
         );
     }
 

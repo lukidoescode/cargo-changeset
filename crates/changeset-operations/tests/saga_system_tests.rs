@@ -635,8 +635,22 @@ fn system_test_release_updates_workspace_dependency_versions() {
         panic!("expected Executed outcome");
     };
 
-    assert_eq!(output.planned_releases.len(), 1);
-    assert_eq!(output.planned_releases[0].new_version.to_string(), "1.1.0");
+    assert_eq!(output.planned_releases.len(), 2);
+
+    let release_a = output
+        .planned_releases
+        .iter()
+        .find(|r| r.name == "crate-a")
+        .expect("crate-a should be in releases");
+    assert_eq!(release_a.new_version.to_string(), "1.1.0");
+    assert!(!release_a.auto_bumped);
+
+    let release_b = output
+        .planned_releases
+        .iter()
+        .find(|r| r.name == "crate-b")
+        .expect("crate-b should be auto-bumped as dependent");
+    assert!(release_b.auto_bumped);
 
     let crate_b_dep_version = read_dep_version(
         &dir.path().join("crates/crate-b/Cargo.toml"),
