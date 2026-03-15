@@ -216,10 +216,11 @@ pub fn write_metadata_section(
         );
     }
 
-    if let Some(ref dependency_update_summary) = config.dependency_update_summary {
+    if let Some(ref dependency_bump_changelog_template) = config.dependency_bump_changelog_template
+    {
         changeset_table.insert(
-            "dependency-update-summary",
-            value(dependency_update_summary.as_str()),
+            "dependency_bump_changelog_template",
+            value(dependency_bump_changelog_template.as_str()),
         );
     }
 
@@ -607,7 +608,7 @@ members = ["crates/*"]
             changelog: Some(ChangelogLocation::PerPackage),
             comparison_links: Some(ComparisonLinks::Enabled),
             zero_version_behavior: Some(ZeroVersionBehavior::AutoPromoteOnMajor),
-            dependency_update_summary: None,
+            dependency_bump_changelog_template: None,
         };
 
         write_metadata_section(&path, MetadataSection::Workspace, &config).expect("write metadata");
@@ -640,7 +641,7 @@ members = ["crates/*"]
             changelog: None,
             comparison_links: None,
             zero_version_behavior: None,
-            dependency_update_summary: None,
+            dependency_bump_changelog_template: None,
         };
 
         write_metadata_section(&path, MetadataSection::Workspace, &config).expect("write metadata");
@@ -899,7 +900,7 @@ my-crate = "1.0.0"
     }
 
     #[test]
-    fn write_metadata_serializes_dependency_update_summary() {
+    fn write_metadata_serializes_dependency_bump_changelog_template() {
         let toml = r#"
 [workspace]
 members = ["crates/*"]
@@ -909,7 +910,7 @@ members = ["crates/*"]
         std::fs::write(&path, toml).expect("write test file");
 
         let config = InitConfig {
-            dependency_update_summary: Some(
+            dependency_bump_changelog_template: Some(
                 "Updated dependency `{dependency}` to v{version}".to_string(),
             ),
             ..Default::default()
@@ -920,7 +921,7 @@ members = ["crates/*"]
         let content = std::fs::read_to_string(&path).expect("read file");
         assert!(content.contains("[workspace.metadata.changeset]"));
         assert!(content.contains(
-            r#"dependency-update-summary = "Updated dependency `{dependency}` to v{version}""#
+            r#"dependency_bump_changelog_template = "Updated dependency `{dependency}` to v{version}""#
         ));
     }
 

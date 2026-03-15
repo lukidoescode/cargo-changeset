@@ -283,7 +283,7 @@ where
             populate_dependency_update_entries(
                 &expanded,
                 &graph,
-                context.root_config.dependency_update_summary(),
+                context.root_config.dependency_bump_changelog_template(),
                 &mut aggregator,
             );
 

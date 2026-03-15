@@ -237,7 +237,7 @@ pub(crate) fn build_default_config(context: ProjectContext) -> InitConfig {
         changelog: Some(changeset_manifest::ChangelogLocation::default()),
         comparison_links: Some(changeset_manifest::ComparisonLinks::default()),
         zero_version_behavior: Some(changeset_manifest::ZeroVersionBehavior::default()),
-        dependency_update_summary: Some(String::from(
+        dependency_bump_changelog_template: Some(String::from(
             "Updated dependency `{dependency}` to v{version}",
         )),
     }
@@ -714,13 +714,13 @@ mod tests {
     }
 
     #[test]
-    fn default_config_includes_dependency_update_summary() {
+    fn default_config_includes_dependency_bump_changelog_template() {
         let context = ProjectContext {
             is_single_package: true,
         };
         let config = build_default_config(context);
         assert_eq!(
-            config.dependency_update_summary,
+            config.dependency_bump_changelog_template,
             Some("Updated dependency `{dependency}` to v{version}".to_string())
         );
     }

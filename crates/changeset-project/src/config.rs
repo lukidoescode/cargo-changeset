@@ -9,7 +9,8 @@ use crate::error::ProjectError;
 use crate::manifest::{ChangesetMetadata, TagFormatValue, read_manifest};
 use crate::project::{CargoProject, ProjectKind};
 
-const DEFAULT_DEPENDENCY_UPDATE_SUMMARY: &str = "Updated dependency `{dependency}` to v{version}";
+const DEFAULT_DEPENDENCY_BUMP_CHANGELOG_TEMPLATE: &str =
+    "Updated dependency `{dependency}` to v{version}";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum TagFormat {
@@ -88,7 +89,7 @@ pub struct RootChangesetConfig {
     changelog_config: ChangelogConfig,
     git_config: GitConfig,
     zero_version_behavior: ZeroVersionBehavior,
-    dependency_update_summary: String,
+    dependency_bump_changelog_template: String,
 }
 
 impl Default for RootChangesetConfig {
@@ -99,7 +100,9 @@ impl Default for RootChangesetConfig {
             changelog_config: ChangelogConfig::default(),
             git_config: GitConfig::default(),
             zero_version_behavior: ZeroVersionBehavior::default(),
-            dependency_update_summary: String::from(DEFAULT_DEPENDENCY_UPDATE_SUMMARY),
+            dependency_bump_changelog_template: String::from(
+                DEFAULT_DEPENDENCY_BUMP_CHANGELOG_TEMPLATE,
+            ),
         }
     }
 }
@@ -136,8 +139,8 @@ impl RootChangesetConfig {
     }
 
     #[must_use]
-    pub fn dependency_update_summary(&self) -> &str {
-        &self.dependency_update_summary
+    pub fn dependency_bump_changelog_template(&self) -> &str {
+        &self.dependency_bump_changelog_template
     }
 
     #[cfg(any(test, feature = "testing"))]
@@ -256,10 +259,10 @@ fn parse_workspace_root_config(project_root: &Path) -> Result<RootChangesetConfi
         .and_then(|cs| cs.zero_version_behavior)
         .unwrap_or_default();
 
-    let dependency_update_summary = changeset_metadata
+    let dependency_bump_changelog_template = changeset_metadata
         .as_ref()
-        .and_then(|cs| cs.dependency_update_summary.clone())
-        .unwrap_or_else(|| String::from(DEFAULT_DEPENDENCY_UPDATE_SUMMARY));
+        .and_then(|cs| cs.dependency_bump_changelog_template.clone())
+        .unwrap_or_else(|| String::from(DEFAULT_DEPENDENCY_BUMP_CHANGELOG_TEMPLATE));
 
     Ok(RootChangesetConfig {
         ignored_files,
@@ -267,7 +270,7 @@ fn parse_workspace_root_config(project_root: &Path) -> Result<RootChangesetConfi
         changelog_config,
         git_config,
         zero_version_behavior,
-        dependency_update_summary,
+        dependency_bump_changelog_template,
     })
 }
 
@@ -314,10 +317,10 @@ fn parse_package_root_config(project_root: &Path) -> Result<RootChangesetConfig,
         .and_then(|cs| cs.zero_version_behavior)
         .unwrap_or_default();
 
-    let dependency_update_summary = changeset_metadata
+    let dependency_bump_changelog_template = changeset_metadata
         .as_ref()
-        .and_then(|cs| cs.dependency_update_summary.clone())
-        .unwrap_or_else(|| String::from(DEFAULT_DEPENDENCY_UPDATE_SUMMARY));
+        .and_then(|cs| cs.dependency_bump_changelog_template.clone())
+        .unwrap_or_else(|| String::from(DEFAULT_DEPENDENCY_BUMP_CHANGELOG_TEMPLATE));
 
     Ok(RootChangesetConfig {
         ignored_files,
@@ -325,7 +328,7 @@ fn parse_package_root_config(project_root: &Path) -> Result<RootChangesetConfig,
         changelog_config,
         git_config,
         zero_version_behavior,
-        dependency_update_summary,
+        dependency_bump_changelog_template,
     })
 }
 
@@ -813,20 +816,20 @@ zero-version-behavior = "auto-promote-on-major"
     }
 
     #[test]
-    fn parse_dependency_update_summary_from_workspace_metadata() -> anyhow::Result<()> {
+    fn parse_dependency_bump_changelog_template_from_workspace_metadata() -> anyhow::Result<()> {
         let toml = r#"
 [workspace]
 members = ["crates/*"]
 
 [workspace.metadata.changeset]
-dependency-update-summary = "Upgraded `{dependency}` to {version}"
+dependency_bump_changelog_template = "Upgraded `{dependency}` to {version}"
 "#;
         let dir = setup_with_config(toml)?;
 
         let config = parse_workspace_root_config(dir.path())?;
 
         assert_eq!(
-            config.dependency_update_summary(),
+            config.dependency_bump_changelog_template(),
             "Upgraded `{dependency}` to {version}"
         );
 
@@ -834,21 +837,21 @@ dependency-update-summary = "Upgraded `{dependency}` to {version}"
     }
 
     #[test]
-    fn parse_dependency_update_summary_from_package_metadata() -> anyhow::Result<()> {
+    fn parse_dependency_bump_changelog_template_from_package_metadata() -> anyhow::Result<()> {
         let toml = r#"
 [package]
 name = "my-crate"
 version = "0.1.0"
 
 [package.metadata.changeset]
-dependency-update-summary = "Bumped `{dependency}` to {version}"
+dependency_bump_changelog_template = "Bumped `{dependency}` to {version}"
 "#;
         let dir = setup_with_config(toml)?;
 
         let config = parse_package_root_config(dir.path())?;
 
         assert_eq!(
-            config.dependency_update_summary(),
+            config.dependency_bump_changelog_template(),
             "Bumped `{dependency}` to {version}"
         );
 
@@ -856,7 +859,7 @@ dependency-update-summary = "Bumped `{dependency}` to {version}"
     }
 
     #[test]
-    fn dependency_update_summary_defaults_when_not_specified() -> anyhow::Result<()> {
+    fn dependency_bump_changelog_template_defaults_when_not_specified() -> anyhow::Result<()> {
         let toml = r#"
 [workspace]
 members = ["crates/*"]
@@ -866,7 +869,7 @@ members = ["crates/*"]
         let config = parse_workspace_root_config(dir.path())?;
 
         assert_eq!(
-            config.dependency_update_summary(),
+            config.dependency_bump_changelog_template(),
             "Updated dependency `{dependency}` to v{version}"
         );
 

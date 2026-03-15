@@ -111,8 +111,8 @@ pub(crate) struct ChangesetMetadata {
     pub(crate) changes_in_body: Option<bool>,
     #[serde(default)]
     pub(crate) zero_version_behavior: Option<ZeroVersionBehavior>,
-    #[serde(default)]
-    pub(crate) dependency_update_summary: Option<String>,
+    #[serde(default, rename = "dependency_bump_changelog_template")]
+    pub(crate) dependency_bump_changelog_template: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Clone, Copy)]

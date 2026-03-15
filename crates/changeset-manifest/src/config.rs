@@ -120,7 +120,7 @@ pub struct InitConfig {
     pub changelog: Option<ChangelogLocation>,
     pub comparison_links: Option<ComparisonLinks>,
     pub zero_version_behavior: Option<ZeroVersionBehavior>,
-    pub dependency_update_summary: Option<String>,
+    pub dependency_bump_changelog_template: Option<String>,
 }
 
 impl InitConfig {
@@ -133,7 +133,7 @@ impl InitConfig {
             && self.changelog.is_none()
             && self.comparison_links.is_none()
             && self.zero_version_behavior.is_none()
-            && self.dependency_update_summary.is_none()
+            && self.dependency_bump_changelog_template.is_none()
     }
 }
 
@@ -142,9 +142,9 @@ mod tests {
     use super::*;
 
     #[test]
-    fn is_empty_returns_false_when_only_dependency_update_summary_set() {
+    fn is_empty_returns_false_when_only_dependency_bump_changelog_template_set() {
         let config = InitConfig {
-            dependency_update_summary: Some(
+            dependency_bump_changelog_template: Some(
                 "Updated dependency `{dependency}` to v{version}".to_string(),
             ),
             ..Default::default()
