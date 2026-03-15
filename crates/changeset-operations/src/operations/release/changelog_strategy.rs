@@ -208,6 +208,7 @@ mod tests {
             current_version: from.parse().expect("valid"),
             new_version: to.parse().expect("valid"),
             bump_type: BumpType::Patch,
+            auto_bumped: false,
         }
     }
 

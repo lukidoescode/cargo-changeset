@@ -2,6 +2,9 @@ mod changelog_strategy;
 mod classifiers;
 mod config_builder;
 mod context;
+mod dependency_expansion;
+
+pub(crate) use dependency_expansion::expand_with_reverse_dependencies;
 mod loading;
 mod operation;
 mod saga_data;

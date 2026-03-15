@@ -29,14 +29,20 @@ impl PlainTextStatusFormatter {
 
         for release in &status.projected_releases {
             let bump_detail = Self::format_bump_detail(status, &release.name);
+            let auto_label = if release.auto_bumped {
+                " (dependency update)"
+            } else {
+                ""
+            };
 
             output.push_str(&format!(
-                "  {}: {} -> {} ({}){}\n",
+                "  {}: {} -> {} ({}){}{}\n",
                 release.name,
                 release.current_version,
                 release.new_version,
                 release.bump_type,
-                bump_detail
+                bump_detail,
+                auto_label,
             ));
         }
     }
@@ -219,6 +225,7 @@ mod tests {
             current_version: current.parse().expect("valid version"),
             new_version: new.parse().expect("valid version"),
             bump_type: bump,
+            auto_bumped: false,
         }
     }
 
@@ -816,6 +823,44 @@ mod tests {
         assert!(result.contains("Transitive dependents needing changesets:"));
         assert!(result.contains("app (depends on: core)"));
         assert!(result.contains("cli (depends on: app, core)"));
+    }
+
+    #[test]
+    fn format_auto_bumped_shows_dependency_update_label() {
+        let formatter = PlainTextStatusFormatter;
+        let mut status = empty_status();
+        status.changesets = vec![make_changeset(
+            &[("core-crate", BumpType::Patch)],
+            ChangeCategory::Fixed,
+            "Fix core",
+        )];
+        status.changeset_files = vec![PathBuf::from(".changeset/changesets/fix-core.md")];
+        status.projected_releases = vec![
+            make_package_version("core-crate", "1.0.0", "1.0.1", BumpType::Patch),
+            PackageVersion {
+                name: "dependent-crate".to_string(),
+                current_version: "2.0.0".parse().expect("valid version"),
+                new_version: "2.0.1".parse().expect("valid version"),
+                bump_type: BumpType::Patch,
+                auto_bumped: true,
+            },
+        ];
+        status.bumps_by_package = {
+            let mut map = IndexMap::new();
+            map.insert("core-crate".to_string(), vec![BumpType::Patch]);
+            map
+        };
+
+        let result = formatter.format_status(&status);
+
+        assert!(
+            result.contains("dependent-crate: 2.0.0 -> 2.0.1 (patch) (dependency update)"),
+            "auto-bumped package should show dependency update label, got: {result}"
+        );
+        assert!(
+            !result.contains("core-crate: 1.0.0 -> 1.0.1 (patch) (dependency update)"),
+            "manually bumped package should not show dependency update label"
+        );
     }
 
     #[test]

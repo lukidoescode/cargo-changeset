@@ -194,11 +194,11 @@ pub fn write_metadata_section(
     }
 
     if let Some(keep_changesets) = config.keep_changesets {
-        changeset_table.insert("keep_changesets", value(keep_changesets));
+        changeset_table.insert("keep-changesets", value(keep_changesets));
     }
 
     if let Some(tag_format) = config.tag_format {
-        changeset_table.insert("tag_format", value(tag_format.as_str()));
+        changeset_table.insert("tag-format", value(tag_format.as_str()));
     }
 
     if let Some(changelog) = config.changelog {
@@ -206,13 +206,21 @@ pub fn write_metadata_section(
     }
 
     if let Some(comparison_links) = config.comparison_links {
-        changeset_table.insert("comparison_links", value(comparison_links.as_str()));
+        changeset_table.insert("comparison-links", value(comparison_links.as_str()));
     }
 
     if let Some(zero_version_behavior) = config.zero_version_behavior {
         changeset_table.insert(
-            "zero_version_behavior",
+            "zero-version-behavior",
             value(zero_version_behavior.as_str()),
+        );
+    }
+
+    if let Some(ref dependency_bump_changelog_template) = config.dependency_bump_changelog_template
+    {
+        changeset_table.insert(
+            "dependency-bump-changelog-template",
+            value(dependency_bump_changelog_template.as_str()),
         );
     }
 
@@ -600,6 +608,7 @@ members = ["crates/*"]
             changelog: Some(ChangelogLocation::PerPackage),
             comparison_links: Some(ComparisonLinks::Enabled),
             zero_version_behavior: Some(ZeroVersionBehavior::AutoPromoteOnMajor),
+            dependency_bump_changelog_template: None,
         };
 
         write_metadata_section(&path, MetadataSection::Workspace, &config).expect("write metadata");
@@ -607,11 +616,11 @@ members = ["crates/*"]
         let content = std::fs::read_to_string(&path).expect("read file");
         assert!(content.contains("commit = true"));
         assert!(content.contains("tags = true"));
-        assert!(content.contains("keep_changesets = false"));
-        assert!(content.contains(r#"tag_format = "crate-prefixed""#));
+        assert!(content.contains("keep-changesets = false"));
+        assert!(content.contains(r#"tag-format = "crate-prefixed""#));
         assert!(content.contains(r#"changelog = "per-package""#));
-        assert!(content.contains(r#"comparison_links = "enabled""#));
-        assert!(content.contains(r#"zero_version_behavior = "auto-promote-on-major""#));
+        assert!(content.contains(r#"comparison-links = "enabled""#));
+        assert!(content.contains(r#"zero-version-behavior = "auto-promote-on-major""#));
     }
 
     #[test]
@@ -632,6 +641,7 @@ members = ["crates/*"]
             changelog: None,
             comparison_links: None,
             zero_version_behavior: None,
+            dependency_bump_changelog_template: None,
         };
 
         write_metadata_section(&path, MetadataSection::Workspace, &config).expect("write metadata");
@@ -639,11 +649,11 @@ members = ["crates/*"]
         let content = std::fs::read_to_string(&path).expect("read file");
         assert!(content.contains("commit = true"));
         assert!(!content.contains("tags"));
-        assert!(!content.contains("keep_changesets"));
-        assert!(!content.contains("tag_format"));
+        assert!(!content.contains("keep-changesets"));
+        assert!(!content.contains("tag-format"));
         assert!(!content.contains("changelog"));
-        assert!(!content.contains("comparison_links"));
-        assert!(!content.contains("zero_version_behavior"));
+        assert!(!content.contains("comparison-links"));
+        assert!(!content.contains("zero-version-behavior"));
     }
 
     #[test]
@@ -669,10 +679,10 @@ members = ["crates/*"]
         write_metadata_section(&path, MetadataSection::Workspace, &config).expect("write metadata");
 
         let content = std::fs::read_to_string(&path).expect("read file");
-        assert!(content.contains(r#"tag_format = "version-only""#));
+        assert!(content.contains(r#"tag-format = "version-only""#));
         assert!(content.contains(r#"changelog = "root""#));
-        assert!(content.contains(r#"comparison_links = "auto""#));
-        assert!(content.contains(r#"zero_version_behavior = "effective-minor""#));
+        assert!(content.contains(r#"comparison-links = "auto""#));
+        assert!(content.contains(r#"zero-version-behavior = "effective-minor""#));
     }
 
     #[test]
@@ -887,6 +897,32 @@ my-crate = "1.0.0"
 
         let content = std::fs::read_to_string(&path).expect("read file");
         assert!(content.contains(r#"my-crate = "1.0.0""#));
+    }
+
+    #[test]
+    fn write_metadata_serializes_dependency_bump_changelog_template() {
+        let toml = r#"
+[workspace]
+members = ["crates/*"]
+"#;
+        let dir = tempfile::tempdir().expect("create temp dir");
+        let path = dir.path().join("Cargo.toml");
+        std::fs::write(&path, toml).expect("write test file");
+
+        let config = InitConfig {
+            dependency_bump_changelog_template: Some(
+                "Updated dependency `{dependency}` to v{version}".to_string(),
+            ),
+            ..Default::default()
+        };
+
+        write_metadata_section(&path, MetadataSection::Workspace, &config).expect("write metadata");
+
+        let content = std::fs::read_to_string(&path).expect("read file");
+        assert!(content.contains("[workspace.metadata.changeset]"));
+        assert!(content.contains(
+            r#"dependency-bump-changelog-template = "Updated dependency `{dependency}` to v{version}""#
+        ));
     }
 
     #[test]

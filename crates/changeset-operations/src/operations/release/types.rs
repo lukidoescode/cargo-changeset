@@ -211,7 +211,7 @@ pub(super) struct GitOptions {
 }
 
 pub(super) enum PrepareResult {
-    Ready(ReleaseContext),
+    Ready(Box<ReleaseContext>),
     EarlyReturn(ReleaseOutcome),
 }
 

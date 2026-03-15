@@ -2,6 +2,7 @@ use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
 use changeset_core::{BumpType, Changeset, PackageInfo};
+use changeset_project::WorkspaceDependencyGraph;
 use changeset_version::max_bump_type;
 use indexmap::IndexMap;
 
@@ -88,6 +89,15 @@ where
             root_config.zero_version_behavior(),
         )?;
 
+        let graph = self.project_provider.build_dependency_graph(&project)?;
+
+        let projected_releases = super::release::expand_with_reverse_dependencies(
+            plan.releases,
+            &graph,
+            project.packages(),
+            root_config.zero_version_behavior(),
+        )?;
+
         let (_, unchanged_packages) =
             VersionPlanner::partition_packages(&changesets, project.packages());
 
@@ -103,12 +113,12 @@ where
         none_bump_packages.sort();
 
         let uncovered_dependents =
-            self.compute_uncovered_dependents(&project, &plan.releases, &none_bump_packages)?;
+            Self::compute_uncovered_dependents(&graph, &projected_releases, &none_bump_packages);
 
         Ok(StatusOutput {
             changesets,
             changeset_files,
-            projected_releases: plan.releases,
+            projected_releases,
             bumps_by_package,
             none_bump_packages,
             unchanged_packages,
@@ -120,13 +130,10 @@ where
     }
 
     fn compute_uncovered_dependents(
-        &self,
-        project: &changeset_project::CargoProject,
+        graph: &WorkspaceDependencyGraph,
         releases: &[PackageVersion],
         none_bump_packages: &[String],
-    ) -> Result<Vec<(String, Vec<String>)>> {
-        let graph = self.project_provider.build_dependency_graph(project)?;
-
+    ) -> Vec<(String, Vec<String>)> {
         let covered: Vec<String> = releases
             .iter()
             .map(|r| r.name.clone())
@@ -155,7 +162,7 @@ where
         result.retain(|(_, deps)| !deps.is_empty());
         result.sort_by(|(a, _), (b, _)| a.cmp(b));
 
-        Ok(result)
+        result
     }
 
     fn collect_consumed_changesets(
@@ -515,7 +522,7 @@ mod tests {
     }
 
     #[test]
-    fn uncovered_dependents_appear_for_workspace_with_dependencies() {
+    fn dependents_auto_bumped_for_workspace_with_dependencies() {
         let project_provider =
             MockProjectProvider::workspace(vec![("core", "1.0.0"), ("app", "1.0.0")])
                 .with_dependency_edges(vec![("app", "core")]);
@@ -530,9 +537,18 @@ mod tests {
             .execute(Path::new("/any"))
             .expect("StatusOperation failed");
 
-        assert_eq!(result.uncovered_dependents.len(), 1);
-        assert_eq!(result.uncovered_dependents[0].0, "app");
-        assert_eq!(result.uncovered_dependents[0].1, vec!["core".to_string()]);
+        assert!(
+            result.uncovered_dependents.is_empty(),
+            "dependents are auto-bumped, none should be uncovered"
+        );
+
+        let app_release = result
+            .projected_releases
+            .iter()
+            .find(|r| r.name == "app")
+            .expect("app should be auto-bumped into projected releases");
+        assert!(app_release.auto_bumped);
+        assert_eq!(app_release.bump_type, BumpType::Patch);
     }
 
     #[test]
@@ -601,7 +617,7 @@ mod tests {
     }
 
     #[test]
-    fn uncovered_dependents_sorted_alphabetically() {
+    fn multiple_dependents_auto_bumped() {
         let project_provider = MockProjectProvider::workspace(vec![
             ("core", "1.0.0"),
             ("zebra", "1.0.0"),
@@ -619,13 +635,23 @@ mod tests {
             .execute(Path::new("/any"))
             .expect("StatusOperation failed");
 
-        assert_eq!(result.uncovered_dependents.len(), 2);
-        assert_eq!(result.uncovered_dependents[0].0, "alpha");
-        assert_eq!(result.uncovered_dependents[1].0, "zebra");
+        assert!(
+            result.uncovered_dependents.is_empty(),
+            "all dependents are auto-bumped"
+        );
+
+        let auto_bumped: Vec<&str> = result
+            .projected_releases
+            .iter()
+            .filter(|r| r.auto_bumped)
+            .map(|r| r.name.as_str())
+            .collect();
+        assert!(auto_bumped.contains(&"alpha"));
+        assert!(auto_bumped.contains(&"zebra"));
     }
 
     #[test]
-    fn transitive_chain_excludes_packages_without_direct_covered_dependency() {
+    fn transitive_chain_auto_bumps_all_dependents() {
         let project_provider =
             MockProjectProvider::workspace(vec![("a", "1.0.0"), ("b", "1.0.0"), ("c", "1.0.0")])
                 .with_dependency_edges(vec![("a", "b"), ("b", "c")]);
@@ -640,13 +666,55 @@ mod tests {
             .execute(Path::new("/any"))
             .expect("StatusOperation failed");
 
-        assert_eq!(
-            result.uncovered_dependents.len(),
-            1,
-            "only b should appear; a has no direct link to a covered package"
+        assert!(
+            result.uncovered_dependents.is_empty(),
+            "all transitive dependents are auto-bumped"
         );
-        assert_eq!(result.uncovered_dependents[0].0, "b");
-        assert_eq!(result.uncovered_dependents[0].1, vec!["c".to_string()]);
+
+        let auto_bumped: Vec<&str> = result
+            .projected_releases
+            .iter()
+            .filter(|r| r.auto_bumped)
+            .map(|r| r.name.as_str())
+            .collect();
+        assert!(auto_bumped.contains(&"a"));
+        assert!(auto_bumped.contains(&"b"));
+    }
+
+    #[test]
+    fn auto_bumped_dependents_appear_in_projected_releases() {
+        let project_provider =
+            MockProjectProvider::workspace(vec![("core", "1.0.0"), ("app", "1.0.0")])
+                .with_dependency_edges(vec![("app", "core")]);
+
+        let changeset = make_changeset("core", BumpType::Minor, "Add feature to core");
+        let changeset_reader = MockChangesetReader::new()
+            .with_changeset(PathBuf::from(".changeset/changesets/feature.md"), changeset);
+
+        let operation = make_operation(project_provider, changeset_reader);
+
+        let result = operation
+            .execute(Path::new("/any"))
+            .expect("StatusOperation failed");
+
+        assert_eq!(result.projected_releases.len(), 2);
+
+        let core_release = result
+            .projected_releases
+            .iter()
+            .find(|r| r.name == "core")
+            .expect("core should be in projected releases");
+        assert_eq!(core_release.new_version, Version::new(1, 1, 0));
+        assert!(!core_release.auto_bumped);
+
+        let app_release = result
+            .projected_releases
+            .iter()
+            .find(|r| r.name == "app")
+            .expect("app should be auto-bumped into projected releases");
+        assert_eq!(app_release.new_version, Version::new(1, 0, 1));
+        assert_eq!(app_release.bump_type, BumpType::Patch);
+        assert!(app_release.auto_bumped);
     }
 
     #[test]
