@@ -134,7 +134,7 @@ checksum = "5dd9dc738b7a8311c7ade152424974d8115f2cdad61e8dab8dac9f2362298510"
 
 [[package]]
 name = "cargo-changeset"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "assert_cmd",
  "changeset-core",
@@ -188,7 +188,7 @@ dependencies = [
 
 [[package]]
 name = "changeset-core"
-version = "0.0.1"
+version = "0.0.2"
 dependencies = [
  "clap",
  "semver",
@@ -198,7 +198,7 @@ dependencies = [
 
 [[package]]
 name = "changeset-git"
-version = "0.0.2"
+version = "0.0.3"
 dependencies = [
  "anyhow",
  "dunce",
@@ -219,7 +219,7 @@ dependencies = [
 
 [[package]]
 name = "changeset-operations"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "changeset-changelog",
@@ -245,7 +245,7 @@ dependencies = [
 
 [[package]]
 name = "changeset-parse"
-version = "0.0.1"
+version = "0.0.2"
 dependencies = [
  "changeset-core",
  "indexmap 2.13.0",
@@ -257,7 +257,7 @@ dependencies = [
 
 [[package]]
 name = "changeset-project"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "changeset-changelog",
@@ -280,7 +280,7 @@ dependencies = [
 
 [[package]]
 name = "changeset-version"
-version = "0.0.1"
+version = "0.0.2"
 dependencies = [
  "changeset-core",
  "semver",
