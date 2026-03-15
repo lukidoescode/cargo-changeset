@@ -4,8 +4,14 @@ name: Lint Workflows and Actions
 on:
   push:
     branches: [main]
+    paths:
+      - '.github/**'
+      - 'zizmor.yml'
   pull_request:
     branches: [main]
+    paths:
+      - '.github/**'
+      - 'zizmor.yml'
 
 jobs:
   actionlint:
