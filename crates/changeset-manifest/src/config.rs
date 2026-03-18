@@ -121,6 +121,7 @@ pub struct InitConfig {
     pub comparison_links: Option<ComparisonLinks>,
     pub zero_version_behavior: Option<ZeroVersionBehavior>,
     pub dependency_bump_changelog_template: Option<String>,
+    pub base_branch: Option<String>,
 }
 
 impl InitConfig {
@@ -134,6 +135,7 @@ impl InitConfig {
             && self.comparison_links.is_none()
             && self.zero_version_behavior.is_none()
             && self.dependency_bump_changelog_template.is_none()
+            && self.base_branch.is_none()
     }
 }
 
@@ -147,6 +149,15 @@ mod tests {
             dependency_bump_changelog_template: Some(
                 "Updated dependency `{dependency}` to v{version}".to_string(),
             ),
+            ..Default::default()
+        };
+        assert!(!config.is_empty());
+    }
+
+    #[test]
+    fn is_empty_returns_false_when_only_base_branch_set() {
+        let config = InitConfig {
+            base_branch: Some("develop".to_string()),
             ..Default::default()
         };
         assert!(!config.is_empty());

@@ -1,3 +1,4 @@
+use changeset_git::DEFAULT_BASE_BRANCH;
 use changeset_manifest::{ChangelogLocation, ComparisonLinks, TagFormat, ZeroVersionBehavior};
 
 use crate::Result;
@@ -13,6 +14,7 @@ pub struct GitSettingsInput {
     pub tags: bool,
     pub keep_changesets: bool,
     pub tag_format: TagFormat,
+    pub base_branch: String,
 }
 
 impl Default for GitSettingsInput {
@@ -22,6 +24,7 @@ impl Default for GitSettingsInput {
             tags: true,
             keep_changesets: false,
             tag_format: TagFormat::default(),
+            base_branch: String::from(DEFAULT_BASE_BRANCH),
         }
     }
 }

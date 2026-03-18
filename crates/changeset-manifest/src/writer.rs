@@ -224,6 +224,10 @@ pub fn write_metadata_section(
         );
     }
 
+    if let Some(ref base_branch) = config.base_branch {
+        changeset_table.insert("base-branch", value(base_branch.as_str()));
+    }
+
     std::fs::write(path, doc.to_string()).map_err(|source| ManifestError::Write {
         path: path.to_path_buf(),
         source,
@@ -609,6 +613,7 @@ members = ["crates/*"]
             comparison_links: Some(ComparisonLinks::Enabled),
             zero_version_behavior: Some(ZeroVersionBehavior::AutoPromoteOnMajor),
             dependency_bump_changelog_template: None,
+            base_branch: None,
         };
 
         write_metadata_section(&path, MetadataSection::Workspace, &config).expect("write metadata");
@@ -642,6 +647,7 @@ members = ["crates/*"]
             comparison_links: None,
             zero_version_behavior: None,
             dependency_bump_changelog_template: None,
+            base_branch: None,
         };
 
         write_metadata_section(&path, MetadataSection::Workspace, &config).expect("write metadata");
@@ -968,5 +974,27 @@ my-crate = { path = "crates/my-crate", version = "1.0.0" }
         let not_changed = update_dependency_version(&path, "nonexistent", &Version::new(2, 0, 0))
             .expect("update");
         assert!(!not_changed);
+    }
+
+    #[test]
+    fn write_metadata_serializes_base_branch() {
+        let toml = r#"
+[workspace]
+members = ["crates/*"]
+"#;
+        let dir = tempfile::tempdir().expect("create temp dir");
+        let path = dir.path().join("Cargo.toml");
+        std::fs::write(&path, toml).expect("write test file");
+
+        let config = InitConfig {
+            base_branch: Some("develop".to_string()),
+            ..Default::default()
+        };
+
+        write_metadata_section(&path, MetadataSection::Workspace, &config).expect("write metadata");
+
+        let content = std::fs::read_to_string(&path).expect("read file");
+        assert!(content.contains("[workspace.metadata.changeset]"));
+        assert!(content.contains(r#"base-branch = "develop""#));
     }
 }

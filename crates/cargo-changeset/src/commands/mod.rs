@@ -83,6 +83,10 @@ pub(crate) struct InitArgs {
     /// Zero version behavior: "effective-minor" or "auto-promote-on-major" (default: effective-minor)
     #[arg(long, value_name = "BEHAVIOR")]
     pub zero_version_behavior: Option<ZeroVersionBehaviorArg>,
+
+    /// Default base branch for git comparisons (default: main)
+    #[arg(long, value_name = "BRANCH")]
+    pub base_branch: Option<String>,
 }
 
 #[derive(Clone, Copy, ValueEnum)]
@@ -180,9 +184,9 @@ pub(crate) struct AddArgs {
 
 #[derive(Args)]
 pub(crate) struct VerifyArgs {
-    /// Base branch to compare against
-    #[arg(long, default_value = "main")]
-    pub base: String,
+    /// Base branch to compare against (overrides config value)
+    #[arg(long)]
+    pub base: Option<String>,
 
     /// Head ref to compare (defaults to HEAD)
     #[arg(long)]

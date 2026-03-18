@@ -5,6 +5,7 @@ use std::process::Command;
 use crate::environment::is_interactive;
 
 use changeset_core::{BumpType, ChangeCategory, PackageInfo};
+use changeset_git::DEFAULT_BASE_BRANCH;
 use changeset_manifest::{ChangelogLocation, ComparisonLinks, TagFormat, ZeroVersionBehavior};
 use changeset_operations::Result;
 use changeset_operations::traits::{
@@ -12,7 +13,7 @@ use changeset_operations::traits::{
     InitInteractionProvider, InteractionProvider, PackageSelection, ProjectContext,
     VersionSettingsInput,
 };
-use dialoguer::{Confirm, MultiSelect, Select};
+use dialoguer::{Confirm, Input, MultiSelect, Select};
 
 use crate::error::CliError;
 
@@ -271,12 +272,14 @@ impl InitInteractionProvider for TerminalInitInteractionProvider {
         let tags = select_bool("Create git tags on release?", true)?;
         let keep_changesets = select_bool("Keep changeset files after release?", false)?;
         let tag_format = select_tag_format(context.is_single_package)?;
+        let base_branch = prompt_base_branch()?;
 
         Ok(Some(GitSettingsInput {
             commit,
             tags,
             keep_changesets,
             tag_format,
+            base_branch,
         }))
     }
 
@@ -336,6 +339,16 @@ impl InitInteractionProvider for TerminalInitInteractionProvider {
             zero_version_behavior,
         }))
     }
+}
+
+fn prompt_base_branch() -> Result<String> {
+    Input::new()
+        .with_prompt("Default base branch for git comparisons")
+        .default(DEFAULT_BASE_BRANCH.to_string())
+        .interact_text()
+        .map_err(|e| match e {
+            dialoguer::Error::IO(io) => cli_to_operation_error(CliError::Io(io)),
+        })
 }
 
 fn select_bool(prompt: &str, default: bool) -> Result<bool> {

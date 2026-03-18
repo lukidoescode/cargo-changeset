@@ -262,6 +262,7 @@ dependencies = [
  "anyhow",
  "changeset-changelog",
  "changeset-core",
+ "changeset-git",
  "globset",
  "semver",
  "serde",
