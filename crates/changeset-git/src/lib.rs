@@ -10,6 +10,8 @@ use std::path::Path;
 
 pub type Result<T> = std::result::Result<T, GitError>;
 
+pub const DEFAULT_BASE_BRANCH: &str = "main";
+
 /// # Errors
 ///
 /// Returns an error if the path is not a git repository or if the status check fails.

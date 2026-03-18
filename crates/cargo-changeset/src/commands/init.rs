@@ -1,5 +1,6 @@
 use std::path::Path;
 
+use changeset_git::DEFAULT_BASE_BRANCH;
 use changeset_manifest::InitConfig;
 use changeset_operations::operations::{
     InitInput, InitOperation, InitPlan, build_config_from_input,
@@ -105,6 +106,7 @@ fn has_any_git_args(args: &InitArgs) -> bool {
         || args.tags.is_some()
         || args.keep_changesets.is_some()
         || args.tag_format.is_some()
+        || args.base_branch.is_some()
 }
 
 fn has_any_changelog_args(args: &InitArgs) -> bool {
@@ -134,6 +136,10 @@ fn build_init_input_interactive(
                     changeset_manifest::TagFormat::CratePrefixed
                 }
             }),
+            base_branch: args
+                .base_branch
+                .clone()
+                .unwrap_or_else(|| String::from(DEFAULT_BASE_BRANCH)),
         })
     } else {
         provider.configure_git_settings(context)?
@@ -225,6 +231,9 @@ fn print_config_summary(config: &InitConfig) {
             zero_version_behavior.as_str()
         );
     }
+    if let Some(ref base_branch) = config.base_branch {
+        println!("  base_branch = \"{base_branch}\"");
+    }
 }
 
 fn build_init_input(args: &InitArgs, context: ProjectContext) -> InitInput {
@@ -240,6 +249,10 @@ fn build_init_input(args: &InitArgs, context: ProjectContext) -> InitInput {
                     changeset_manifest::TagFormat::CratePrefixed
                 }
             }),
+            base_branch: args
+                .base_branch
+                .clone()
+                .unwrap_or_else(|| String::from(DEFAULT_BASE_BRANCH)),
         })
     } else {
         None

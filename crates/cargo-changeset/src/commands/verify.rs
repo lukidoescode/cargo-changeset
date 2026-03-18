@@ -13,14 +13,19 @@ use crate::output::{OutputFormatter, PlainTextFormatter};
 pub(crate) fn run(args: VerifyArgs, start_path: &Path) -> Result<()> {
     let project_provider = FileSystemProjectProvider::new();
     let project = project_provider.discover_project(start_path)?;
+    let (root_config, _) = project_provider.load_configs(&project)?;
 
     let git_provider = Git2Provider::new(project.root())?;
     let changeset_reader = FileSystemChangesetIO::new(project.root());
 
     let operation = VerifyOperation::new(project_provider, git_provider, changeset_reader);
 
+    let base = args
+        .base
+        .unwrap_or_else(|| root_config.base_branch().to_string());
+
     let input = VerifyInput {
-        base: args.base,
+        base,
         head: args.head,
         allow_deleted_changesets: args.allow_deleted_changesets,
         exclude_dependents: args.exclude_dependents,

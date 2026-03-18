@@ -1,6 +1,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use changeset_git::DEFAULT_BASE_BRANCH;
 use changeset_manifest::{InitConfig, MetadataSection};
 use changeset_project::{CargoProject, ProjectKind, RootChangesetConfig};
 
@@ -173,6 +174,7 @@ where
                     config.tags = Some(git.tags);
                     config.keep_changesets = Some(git.keep_changesets);
                     config.tag_format = Some(git.tag_format);
+                    config.base_branch = Some(git.base_branch.clone());
                 }
 
                 if let Some(changelog) = provider.configure_changelog_settings(context)? {
@@ -240,6 +242,7 @@ pub(crate) fn build_default_config(context: ProjectContext) -> InitConfig {
         dependency_bump_changelog_template: Some(String::from(
             "Updated dependency `{dependency}` to v{version}",
         )),
+        base_branch: Some(String::from(DEFAULT_BASE_BRANCH)),
     }
 }
 
@@ -256,6 +259,7 @@ pub fn build_config_from_input(input: &InitInput, context: ProjectContext) -> In
         config.tags = Some(git.tags);
         config.keep_changesets = Some(git.keep_changesets);
         config.tag_format = Some(git.tag_format);
+        config.base_branch = Some(git.base_branch.clone());
     }
 
     if let Some(ref changelog) = input.changelog_config {
@@ -477,6 +481,7 @@ mod tests {
                 tags: true,
                 keep_changesets: true,
                 tag_format: TagFormat::CratePrefixed,
+                base_branch: String::from("main"),
             }),
             changelog_config: Some(ChangelogSettingsInput {
                 changelog: ChangelogLocation::PerPackage,
@@ -530,6 +535,7 @@ mod tests {
                 tags: false,
                 keep_changesets: false,
                 tag_format: TagFormat::VersionOnly,
+                base_branch: String::from("main"),
             }),
             changelog_config: None,
             version_config: None,
@@ -723,5 +729,43 @@ mod tests {
             config.dependency_bump_changelog_template,
             Some("Updated dependency `{dependency}` to v{version}".to_string())
         );
+    }
+
+    #[test]
+    fn base_branch_propagates_from_git_settings_input() {
+        let dir = tempfile::tempdir().expect("create temp dir");
+        let changeset_dir = dir.path().join(".changeset");
+        std::fs::create_dir_all(&changeset_dir).expect("create changeset dir");
+
+        let project_provider = MockProjectProvider::single_package("my-crate", "1.0.0")
+            .with_changeset_dir(changeset_dir.clone());
+        let manifest_writer = Arc::new(MockManifestWriter::new());
+        let interaction_provider = Arc::new(MockInitInteractionProvider::new());
+
+        let operation = InitOperation::new(project_provider)
+            .with_manifest_writer(Arc::clone(&manifest_writer))
+            .with_interaction_provider(Arc::clone(&interaction_provider));
+
+        let input = InitInput {
+            defaults: false,
+            git_config: Some(GitSettingsInput {
+                commit: true,
+                tags: true,
+                keep_changesets: false,
+                tag_format: TagFormat::VersionOnly,
+                base_branch: String::from("develop"),
+            }),
+            changelog_config: None,
+            version_config: None,
+        };
+
+        let _ = operation
+            .execute(Path::new("/any"), &input)
+            .expect("InitOperation failed");
+
+        let written = manifest_writer.written_metadata();
+        assert_eq!(written.len(), 1);
+        let (_, _, config) = &written[0];
+        assert_eq!(config.base_branch, Some(String::from("develop")));
     }
 }
