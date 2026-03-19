@@ -1,7 +1,7 @@
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
-use changeset_core::PackageInfo;
+use changeset_core::{NoneBumpBehavior, PackageInfo};
 use changeset_git::{FileChange, FileStatus};
 use changeset_project::map_files_to_packages;
 
@@ -10,8 +10,6 @@ use crate::traits::{
     ChangesetReader, DependencyGraphProvider, GitDiffProvider, GitStatusProvider,
     GitWorkdirDiffProvider, ProjectProvider,
 };
-use changeset_core::NoneBumpBehavior;
-
 use crate::verification::rules::{CoverageRule, DeletedChangesetsRule, NoneBumpDisallowedRule};
 use crate::verification::{VerificationContext, VerificationEngine, VerificationResult};
 
@@ -254,10 +252,11 @@ mod tests {
     use std::sync::Arc;
 
     use super::*;
-    use crate::mocks::{MockChangesetReader, MockGitProvider, MockProjectProvider};
     use changeset_core::{BumpType, NoneBumpBehavior};
     use changeset_git::FileStatus;
     use changeset_project::RootChangesetConfig;
+
+    use crate::mocks::{MockChangesetReader, MockGitProvider, MockProjectProvider};
 
     #[test]
     fn returns_no_changes_when_no_files_changed() {
