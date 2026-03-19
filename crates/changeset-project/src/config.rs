@@ -11,6 +11,7 @@ use crate::manifest::{ChangesetMetadata, TagFormatValue, read_manifest};
 use crate::project::{CargoProject, ProjectKind};
 const DEFAULT_DEPENDENCY_BUMP_CHANGELOG_TEMPLATE: &str =
     "Updated dependency `{dependency}` to v{version}";
+const DEFAULT_NONE_BUMP_PROMOTE_MESSAGE: &str = "Internal architectural changes";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum TagFormat {
@@ -108,7 +109,7 @@ impl Default for RootChangesetConfig {
             ),
             base_branch: String::from(DEFAULT_BASE_BRANCH),
             none_bump_behavior: changeset_core::NoneBumpBehavior::default(),
-            none_bump_promote_message: String::from("Internal architectural changes"),
+            none_bump_promote_message: String::from(DEFAULT_NONE_BUMP_PROMOTE_MESSAGE),
         }
     }
 }
@@ -310,7 +311,7 @@ fn parse_cargo_root_config(
     let none_bump_promote_message = changeset_metadata
         .as_ref()
         .and_then(|cs| cs.none_bump_promote_message.clone())
-        .unwrap_or_else(|| String::from("Internal architectural changes"));
+        .unwrap_or_else(|| String::from(DEFAULT_NONE_BUMP_PROMOTE_MESSAGE));
 
     Ok(RootChangesetConfig {
         ignored_files,

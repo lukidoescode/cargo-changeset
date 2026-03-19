@@ -50,105 +50,6 @@ pub enum NoneBumpBehavior {
     Disallow,
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn bump_type_ordering_none_is_smallest() {
-        assert!(BumpType::None < BumpType::Patch);
-        assert!(BumpType::None < BumpType::Minor);
-        assert!(BumpType::None < BumpType::Major);
-    }
-
-    #[test]
-    fn bump_type_ordering_patch_is_second() {
-        assert!(BumpType::Patch > BumpType::None);
-        assert!(BumpType::Patch < BumpType::Minor);
-        assert!(BumpType::Patch < BumpType::Major);
-    }
-
-    #[test]
-    fn bump_type_ordering_minor_is_middle() {
-        assert!(BumpType::Minor > BumpType::None);
-        assert!(BumpType::Minor > BumpType::Patch);
-        assert!(BumpType::Minor < BumpType::Major);
-    }
-
-    #[test]
-    fn bump_type_ordering_major_is_largest() {
-        assert!(BumpType::Major > BumpType::None);
-        assert!(BumpType::Major > BumpType::Patch);
-        assert!(BumpType::Major > BumpType::Minor);
-    }
-
-    #[test]
-    fn bump_type_max_returns_largest() {
-        let bumps = [BumpType::Patch, BumpType::Minor, BumpType::Major];
-        assert_eq!(bumps.iter().max(), Some(&BumpType::Major));
-    }
-
-    #[test]
-    fn bump_type_max_none_and_patch_returns_patch() {
-        let bumps = [BumpType::None, BumpType::Patch];
-        assert_eq!(bumps.iter().max(), Some(&BumpType::Patch));
-    }
-
-    #[test]
-    fn bump_type_max_all_none_returns_none() {
-        let bumps = [BumpType::None, BumpType::None];
-        assert_eq!(bumps.iter().max(), Some(&BumpType::None));
-    }
-
-    #[test]
-    fn bump_type_is_noop() {
-        assert!(BumpType::None.is_noop());
-        assert!(!BumpType::Patch.is_noop());
-        assert!(!BumpType::Minor.is_noop());
-        assert!(!BumpType::Major.is_noop());
-    }
-
-    #[test]
-    fn bump_type_display() {
-        assert_eq!(format!("{}", BumpType::None), "none");
-        assert_eq!(format!("{}", BumpType::Patch), "patch");
-        assert_eq!(format!("{}", BumpType::Minor), "minor");
-        assert_eq!(format!("{}", BumpType::Major), "major");
-    }
-
-    #[test]
-    fn none_bump_behavior_default_is_promote_to_patch() {
-        assert_eq!(
-            NoneBumpBehavior::default(),
-            NoneBumpBehavior::PromoteToPatch
-        );
-    }
-
-    #[test]
-    fn none_bump_behavior_serde_round_trip_promote_to_patch() {
-        let serialized = serde_json::to_string(&NoneBumpBehavior::PromoteToPatch).unwrap();
-        assert_eq!(serialized, r#""promote-to-patch""#);
-        let deserialized: NoneBumpBehavior = serde_json::from_str(&serialized).unwrap();
-        assert_eq!(deserialized, NoneBumpBehavior::PromoteToPatch);
-    }
-
-    #[test]
-    fn none_bump_behavior_serde_round_trip_allow() {
-        let serialized = serde_json::to_string(&NoneBumpBehavior::Allow).unwrap();
-        assert_eq!(serialized, r#""allow""#);
-        let deserialized: NoneBumpBehavior = serde_json::from_str(&serialized).unwrap();
-        assert_eq!(deserialized, NoneBumpBehavior::Allow);
-    }
-
-    #[test]
-    fn none_bump_behavior_serde_round_trip_disallow() {
-        let serialized = serde_json::to_string(&NoneBumpBehavior::Disallow).unwrap();
-        assert_eq!(serialized, r#""disallow""#);
-        let deserialized: NoneBumpBehavior = serde_json::from_str(&serialized).unwrap();
-        assert_eq!(deserialized, NoneBumpBehavior::Disallow);
-    }
-}
-
 #[derive(
     Debug,
     Clone,
@@ -293,8 +194,102 @@ impl ValueEnum for PrereleaseSpec {
 }
 
 #[cfg(test)]
-mod change_category_tests {
+mod tests {
     use super::*;
+
+    #[test]
+    fn bump_type_ordering_none_is_smallest() {
+        assert!(BumpType::None < BumpType::Patch);
+        assert!(BumpType::None < BumpType::Minor);
+        assert!(BumpType::None < BumpType::Major);
+    }
+
+    #[test]
+    fn bump_type_ordering_patch_is_second() {
+        assert!(BumpType::Patch > BumpType::None);
+        assert!(BumpType::Patch < BumpType::Minor);
+        assert!(BumpType::Patch < BumpType::Major);
+    }
+
+    #[test]
+    fn bump_type_ordering_minor_is_middle() {
+        assert!(BumpType::Minor > BumpType::None);
+        assert!(BumpType::Minor > BumpType::Patch);
+        assert!(BumpType::Minor < BumpType::Major);
+    }
+
+    #[test]
+    fn bump_type_ordering_major_is_largest() {
+        assert!(BumpType::Major > BumpType::None);
+        assert!(BumpType::Major > BumpType::Patch);
+        assert!(BumpType::Major > BumpType::Minor);
+    }
+
+    #[test]
+    fn bump_type_max_returns_largest() {
+        let bumps = [BumpType::Patch, BumpType::Minor, BumpType::Major];
+        assert_eq!(bumps.iter().max(), Some(&BumpType::Major));
+    }
+
+    #[test]
+    fn bump_type_max_none_and_patch_returns_patch() {
+        let bumps = [BumpType::None, BumpType::Patch];
+        assert_eq!(bumps.iter().max(), Some(&BumpType::Patch));
+    }
+
+    #[test]
+    fn bump_type_max_all_none_returns_none() {
+        let bumps = [BumpType::None, BumpType::None];
+        assert_eq!(bumps.iter().max(), Some(&BumpType::None));
+    }
+
+    #[test]
+    fn bump_type_is_noop() {
+        assert!(BumpType::None.is_noop());
+        assert!(!BumpType::Patch.is_noop());
+        assert!(!BumpType::Minor.is_noop());
+        assert!(!BumpType::Major.is_noop());
+    }
+
+    #[test]
+    fn bump_type_display() {
+        assert_eq!(format!("{}", BumpType::None), "none");
+        assert_eq!(format!("{}", BumpType::Patch), "patch");
+        assert_eq!(format!("{}", BumpType::Minor), "minor");
+        assert_eq!(format!("{}", BumpType::Major), "major");
+    }
+
+    #[test]
+    fn none_bump_behavior_default_is_promote_to_patch() {
+        assert_eq!(
+            NoneBumpBehavior::default(),
+            NoneBumpBehavior::PromoteToPatch
+        );
+    }
+
+    #[test]
+    fn none_bump_behavior_serde_round_trip_promote_to_patch() {
+        let serialized = serde_json::to_string(&NoneBumpBehavior::PromoteToPatch).unwrap();
+        assert_eq!(serialized, r#""promote-to-patch""#);
+        let deserialized: NoneBumpBehavior = serde_json::from_str(&serialized).unwrap();
+        assert_eq!(deserialized, NoneBumpBehavior::PromoteToPatch);
+    }
+
+    #[test]
+    fn none_bump_behavior_serde_round_trip_allow() {
+        let serialized = serde_json::to_string(&NoneBumpBehavior::Allow).unwrap();
+        assert_eq!(serialized, r#""allow""#);
+        let deserialized: NoneBumpBehavior = serde_json::from_str(&serialized).unwrap();
+        assert_eq!(deserialized, NoneBumpBehavior::Allow);
+    }
+
+    #[test]
+    fn none_bump_behavior_serde_round_trip_disallow() {
+        let serialized = serde_json::to_string(&NoneBumpBehavior::Disallow).unwrap();
+        assert_eq!(serialized, r#""disallow""#);
+        let deserialized: NoneBumpBehavior = serde_json::from_str(&serialized).unwrap();
+        assert_eq!(deserialized, NoneBumpBehavior::Disallow);
+    }
 
     #[test]
     fn ordering_matches_keep_a_changelog_convention() {
@@ -304,11 +299,6 @@ mod change_category_tests {
         assert!(ChangeCategory::Removed < ChangeCategory::Fixed);
         assert!(ChangeCategory::Fixed < ChangeCategory::Security);
     }
-}
-
-#[cfg(test)]
-mod prerelease_spec_tests {
-    use super::*;
 
     #[test]
     fn identifier_returns_correct_string() {

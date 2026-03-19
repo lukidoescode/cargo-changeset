@@ -605,7 +605,9 @@ key = "value"
 
     #[test]
     fn write_metadata_handles_all_config_options() {
-        use crate::config::{ChangelogLocation, ComparisonLinks, TagFormat, ZeroVersionBehavior};
+        use crate::config::{
+            ChangelogLocation, ComparisonLinks, NoneBumpBehavior, TagFormat, ZeroVersionBehavior,
+        };
 
         let toml = r#"
 [workspace]
@@ -625,8 +627,8 @@ members = ["crates/*"]
             zero_version_behavior: Some(ZeroVersionBehavior::AutoPromoteOnMajor),
             dependency_bump_changelog_template: None,
             base_branch: None,
-            none_bump_behavior: None,
-            none_bump_promote_message: None,
+            none_bump_behavior: Some(NoneBumpBehavior::Disallow),
+            none_bump_promote_message: Some("My message".to_string()),
         };
 
         write_metadata_section(&path, MetadataSection::Workspace, &config).expect("write metadata");
@@ -639,6 +641,8 @@ members = ["crates/*"]
         assert!(content.contains(r#"changelog = "per-package""#));
         assert!(content.contains(r#"comparison-links = "enabled""#));
         assert!(content.contains(r#"zero-version-behavior = "auto-promote-on-major""#));
+        assert!(content.contains(r#"none-bump-behavior = "disallow""#));
+        assert!(content.contains(r#"none-bump-promote-message = "My message""#));
     }
 
     #[test]

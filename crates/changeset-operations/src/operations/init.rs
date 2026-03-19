@@ -243,6 +243,8 @@ pub(crate) fn build_default_config(context: ProjectContext) -> InitConfig {
             "Updated dependency `{dependency}` to v{version}",
         )),
         base_branch: Some(String::from(DEFAULT_BASE_BRANCH)),
+        none_bump_behavior: None,
+        none_bump_promote_message: None,
     }
 }
 
@@ -729,6 +731,16 @@ mod tests {
             config.dependency_bump_changelog_template,
             Some("Updated dependency `{dependency}` to v{version}".to_string())
         );
+    }
+
+    #[test]
+    fn default_config_leaves_none_bump_fields_unset() {
+        let context = ProjectContext {
+            is_single_package: true,
+        };
+        let config = build_default_config(context);
+        assert!(config.none_bump_behavior.is_none());
+        assert!(config.none_bump_promote_message.is_none());
     }
 
     #[test]
