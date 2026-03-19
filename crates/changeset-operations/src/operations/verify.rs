@@ -10,7 +10,9 @@ use crate::traits::{
     ChangesetReader, DependencyGraphProvider, GitDiffProvider, GitStatusProvider,
     GitWorkdirDiffProvider, ProjectProvider,
 };
-use crate::verification::rules::{CoverageRule, DeletedChangesetsRule};
+use changeset_core::NoneBumpBehavior;
+
+use crate::verification::rules::{CoverageRule, DeletedChangesetsRule, NoneBumpDisallowedRule};
 use crate::verification::{VerificationContext, VerificationEngine, VerificationResult};
 
 pub struct VerifyInput {
@@ -162,10 +164,15 @@ where
 
         let deleted_rule = DeletedChangesetsRule::new(input.allow_deleted_changesets);
         let coverage_rule = CoverageRule::new(&self.changeset_reader);
+        let none_bump_rule = NoneBumpDisallowedRule::new(&self.changeset_reader);
 
         let mut engine = VerificationEngine::new();
         engine.add_rule(&deleted_rule);
         engine.add_rule(&coverage_rule);
+
+        if root_config.none_bump_behavior() == NoneBumpBehavior::Disallow {
+            engine.add_rule(&none_bump_rule);
+        }
 
         let result = engine.verify(&context)?;
 
@@ -248,8 +255,9 @@ mod tests {
 
     use super::*;
     use crate::mocks::{MockChangesetReader, MockGitProvider, MockProjectProvider};
-    use changeset_core::BumpType;
+    use changeset_core::{BumpType, NoneBumpBehavior};
     use changeset_git::FileStatus;
+    use changeset_project::RootChangesetConfig;
 
     #[test]
     fn returns_no_changes_when_no_files_changed() {
@@ -978,6 +986,160 @@ mod tests {
         assert!(!result.is_dirty);
         match result.outcome {
             VerifyOutcome::Success(verification_result) => {
+                assert!(verification_result.covered_packages.contains("my-crate"));
+            }
+            other => panic!("Expected VerifyOutcome::Success, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn disallow_rejects_none_bump_in_verify() {
+        let root_config =
+            RootChangesetConfig::default().with_none_bump_behavior(NoneBumpBehavior::Disallow);
+        let project_provider =
+            MockProjectProvider::single_package("my-crate", "1.0.0").with_root_config(root_config);
+
+        let git_provider = MockGitProvider::new().with_changed_files(vec![
+            FileChange {
+                path: PathBuf::from(".changeset/changesets/internal.md"),
+                status: FileStatus::Added,
+                old_path: None,
+            },
+            FileChange {
+                path: PathBuf::from("src/lib.rs"),
+                status: FileStatus::Modified,
+                old_path: None,
+            },
+        ]);
+
+        let changeset =
+            crate::mocks::make_changeset("my-crate", BumpType::None, "Internal refactoring");
+        let changeset_reader = MockChangesetReader::new().with_changeset(
+            PathBuf::from(".changeset/changesets/internal.md"),
+            changeset,
+        );
+
+        let operation = VerifyOperation::new(project_provider, git_provider, changeset_reader);
+
+        let input = VerifyInput {
+            base: "main".to_string(),
+            head: None,
+            allow_deleted_changesets: false,
+            exclude_dependents: false,
+            ignore_dirty: false,
+        };
+
+        let result = operation
+            .execute(Path::new("/any"), &input)
+            .expect("operation should not error");
+
+        match result.outcome {
+            VerifyOutcome::Failed(verification_result) => {
+                assert!(
+                    verification_result
+                        .none_bump_violations
+                        .contains(&"my-crate".to_string()),
+                    "my-crate should be in none_bump_violations"
+                );
+            }
+            other => panic!("Expected VerifyOutcome::Failed, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn allow_permits_none_bump_in_verify() {
+        let root_config =
+            RootChangesetConfig::default().with_none_bump_behavior(NoneBumpBehavior::Allow);
+        let project_provider =
+            MockProjectProvider::single_package("my-crate", "1.0.0").with_root_config(root_config);
+
+        let git_provider = MockGitProvider::new().with_changed_files(vec![
+            FileChange {
+                path: PathBuf::from(".changeset/changesets/internal.md"),
+                status: FileStatus::Added,
+                old_path: None,
+            },
+            FileChange {
+                path: PathBuf::from("src/lib.rs"),
+                status: FileStatus::Modified,
+                old_path: None,
+            },
+        ]);
+
+        let changeset =
+            crate::mocks::make_changeset("my-crate", BumpType::None, "Internal refactoring");
+        let changeset_reader = MockChangesetReader::new().with_changeset(
+            PathBuf::from(".changeset/changesets/internal.md"),
+            changeset,
+        );
+
+        let operation = VerifyOperation::new(project_provider, git_provider, changeset_reader);
+
+        let input = VerifyInput {
+            base: "main".to_string(),
+            head: None,
+            allow_deleted_changesets: false,
+            exclude_dependents: false,
+            ignore_dirty: false,
+        };
+
+        let result = operation
+            .execute(Path::new("/any"), &input)
+            .expect("operation should not error");
+
+        match result.outcome {
+            VerifyOutcome::Success(verification_result) => {
+                assert!(verification_result.none_bump_violations.is_empty());
+                assert!(verification_result.covered_packages.contains("my-crate"));
+            }
+            other => panic!("Expected VerifyOutcome::Success, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn promote_to_patch_permits_none_bump_in_verify() {
+        let root_config = RootChangesetConfig::default()
+            .with_none_bump_behavior(NoneBumpBehavior::PromoteToPatch);
+        let project_provider =
+            MockProjectProvider::single_package("my-crate", "1.0.0").with_root_config(root_config);
+
+        let git_provider = MockGitProvider::new().with_changed_files(vec![
+            FileChange {
+                path: PathBuf::from(".changeset/changesets/internal.md"),
+                status: FileStatus::Added,
+                old_path: None,
+            },
+            FileChange {
+                path: PathBuf::from("src/lib.rs"),
+                status: FileStatus::Modified,
+                old_path: None,
+            },
+        ]);
+
+        let changeset =
+            crate::mocks::make_changeset("my-crate", BumpType::None, "Internal refactoring");
+        let changeset_reader = MockChangesetReader::new().with_changeset(
+            PathBuf::from(".changeset/changesets/internal.md"),
+            changeset,
+        );
+
+        let operation = VerifyOperation::new(project_provider, git_provider, changeset_reader);
+
+        let input = VerifyInput {
+            base: "main".to_string(),
+            head: None,
+            allow_deleted_changesets: false,
+            exclude_dependents: false,
+            ignore_dirty: false,
+        };
+
+        let result = operation
+            .execute(Path::new("/any"), &input)
+            .expect("operation should not error");
+
+        match result.outcome {
+            VerifyOutcome::Success(verification_result) => {
+                assert!(verification_result.none_bump_violations.is_empty());
                 assert!(verification_result.covered_packages.contains("my-crate"));
             }
             other => panic!("Expected VerifyOutcome::Success, got {other:?}"),
