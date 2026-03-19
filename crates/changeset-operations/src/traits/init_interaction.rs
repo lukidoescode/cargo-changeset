@@ -39,8 +39,8 @@ pub struct ChangelogSettingsInput {
 
 #[derive(Debug, Clone, Default)]
 pub struct VersionSettingsInput {
-    pub zero_version_behavior: ZeroVersionBehavior,
-    pub none_bump_behavior: NoneBumpBehavior,
+    pub zero_version_behavior: Option<ZeroVersionBehavior>,
+    pub none_bump_behavior: Option<NoneBumpBehavior>,
     pub none_bump_promote_message: Option<String>,
 }
 

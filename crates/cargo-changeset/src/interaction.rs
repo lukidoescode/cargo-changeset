@@ -344,8 +344,8 @@ impl InitInteractionProvider for TerminalInitInteractionProvider {
         };
 
         Ok(Some(VersionSettingsInput {
-            zero_version_behavior,
-            none_bump_behavior,
+            zero_version_behavior: Some(zero_version_behavior),
+            none_bump_behavior: Some(none_bump_behavior),
             none_bump_promote_message,
         }))
     }

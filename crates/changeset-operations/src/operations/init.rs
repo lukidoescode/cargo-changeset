@@ -183,8 +183,8 @@ where
                 }
 
                 if let Some(version) = provider.configure_version_settings()? {
-                    config.zero_version_behavior = Some(version.zero_version_behavior);
-                    config.none_bump_behavior = Some(version.none_bump_behavior);
+                    config.zero_version_behavior = version.zero_version_behavior;
+                    config.none_bump_behavior = version.none_bump_behavior;
                     config
                         .none_bump_promote_message
                         .clone_from(&version.none_bump_promote_message);
@@ -247,7 +247,7 @@ pub(crate) fn build_default_config(context: ProjectContext) -> InitConfig {
             "Updated dependency `{dependency}` to v{version}",
         )),
         base_branch: Some(String::from(DEFAULT_BASE_BRANCH)),
-        none_bump_behavior: None,
+        none_bump_behavior: Some(changeset_manifest::NoneBumpBehavior::default()),
         none_bump_promote_message: None,
     }
 }
@@ -274,8 +274,8 @@ pub fn build_config_from_input(input: &InitInput, context: ProjectContext) -> In
     }
 
     if let Some(ref version) = input.version_config {
-        config.zero_version_behavior = Some(version.zero_version_behavior);
-        config.none_bump_behavior = Some(version.none_bump_behavior);
+        config.zero_version_behavior = version.zero_version_behavior;
+        config.none_bump_behavior = version.none_bump_behavior;
         config
             .none_bump_promote_message
             .clone_from(&version.none_bump_promote_message);
@@ -498,7 +498,7 @@ mod tests {
                 comparison_links: ComparisonLinks::Enabled,
             }),
             version_config: Some(VersionSettingsInput {
-                zero_version_behavior: ZeroVersionBehavior::AutoPromoteOnMajor,
+                zero_version_behavior: Some(ZeroVersionBehavior::AutoPromoteOnMajor),
                 ..Default::default()
             }),
         };
@@ -743,12 +743,14 @@ mod tests {
     }
 
     #[test]
-    fn default_config_leaves_none_bump_fields_unset() {
+    fn default_config_includes_none_bump_behavior() {
+        use changeset_manifest::NoneBumpBehavior;
+
         let context = ProjectContext {
             is_single_package: true,
         };
         let config = build_default_config(context);
-        assert!(config.none_bump_behavior.is_none());
+        assert_eq!(config.none_bump_behavior, Some(NoneBumpBehavior::default()));
         assert!(config.none_bump_promote_message.is_none());
     }
 
@@ -765,8 +767,8 @@ mod tests {
             git_config: None,
             changelog_config: None,
             version_config: Some(VersionSettingsInput {
-                zero_version_behavior: ZeroVersionBehavior::default(),
-                none_bump_behavior: NoneBumpBehavior::Disallow,
+                zero_version_behavior: Some(ZeroVersionBehavior::default()),
+                none_bump_behavior: Some(NoneBumpBehavior::Disallow),
                 none_bump_promote_message: Some("Custom message".to_string()),
             }),
         };

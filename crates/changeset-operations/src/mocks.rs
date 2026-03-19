@@ -1455,10 +1455,16 @@ impl MockInitInteractionProvider {
 
     #[must_use]
     pub fn all_defaults() -> Self {
+        use changeset_manifest::{NoneBumpBehavior, ZeroVersionBehavior};
+
         Self::new()
             .with_git_settings(Some(GitSettingsInput::default()))
             .with_changelog_settings(Some(ChangelogSettingsInput::default()))
-            .with_version_settings(Some(VersionSettingsInput::default()))
+            .with_version_settings(Some(VersionSettingsInput {
+                zero_version_behavior: Some(ZeroVersionBehavior::default()),
+                none_bump_behavior: Some(NoneBumpBehavior::default()),
+                none_bump_promote_message: None,
+            }))
     }
 }
 

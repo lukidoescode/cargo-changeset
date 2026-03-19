@@ -158,11 +158,8 @@ fn build_init_input_interactive(
 
     let version_config = if has_any_version_args(args) {
         Some(VersionSettingsInput {
-            zero_version_behavior: args
-                .zero_version_behavior
-                .map(Into::into)
-                .unwrap_or_default(),
-            none_bump_behavior: args.none_bump_behavior.map(Into::into).unwrap_or_default(),
+            zero_version_behavior: args.zero_version_behavior.map(Into::into),
+            none_bump_behavior: args.none_bump_behavior.map(Into::into),
             none_bump_promote_message: args.none_bump_promote_message.clone(),
         })
     } else {
@@ -279,11 +276,8 @@ fn build_init_input(args: &InitArgs, context: ProjectContext) -> InitInput {
 
     let version_config = if has_any_version_args(args) {
         Some(VersionSettingsInput {
-            zero_version_behavior: args
-                .zero_version_behavior
-                .map(Into::into)
-                .unwrap_or_default(),
-            none_bump_behavior: args.none_bump_behavior.map(Into::into).unwrap_or_default(),
+            zero_version_behavior: args.zero_version_behavior.map(Into::into),
+            none_bump_behavior: args.none_bump_behavior.map(Into::into),
             none_bump_promote_message: args.none_bump_promote_message.clone(),
         })
     } else {
