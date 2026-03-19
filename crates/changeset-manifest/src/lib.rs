@@ -4,7 +4,8 @@ mod reader;
 mod writer;
 
 pub use config::{
-    ChangelogLocation, ComparisonLinks, InitConfig, MetadataSection, TagFormat, ZeroVersionBehavior,
+    ChangelogLocation, ComparisonLinks, InitConfig, MetadataSection, NoneBumpBehavior, TagFormat,
+    ZeroVersionBehavior,
 };
 pub use error::ManifestError;
 pub use reader::{

@@ -228,6 +228,17 @@ pub fn write_metadata_section(
         changeset_table.insert("base-branch", value(base_branch.as_str()));
     }
 
+    if let Some(none_bump_behavior) = config.none_bump_behavior {
+        changeset_table.insert("none-bump-behavior", value(none_bump_behavior.as_str()));
+    }
+
+    if let Some(ref none_bump_promote_message) = config.none_bump_promote_message {
+        changeset_table.insert(
+            "none-bump-promote-message",
+            value(none_bump_promote_message.as_str()),
+        );
+    }
+
     std::fs::write(path, doc.to_string()).map_err(|source| ManifestError::Write {
         path: path.to_path_buf(),
         source,
@@ -614,6 +625,8 @@ members = ["crates/*"]
             zero_version_behavior: Some(ZeroVersionBehavior::AutoPromoteOnMajor),
             dependency_bump_changelog_template: None,
             base_branch: None,
+            none_bump_behavior: None,
+            none_bump_promote_message: None,
         };
 
         write_metadata_section(&path, MetadataSection::Workspace, &config).expect("write metadata");
@@ -648,6 +661,8 @@ members = ["crates/*"]
             zero_version_behavior: None,
             dependency_bump_changelog_template: None,
             base_branch: None,
+            none_bump_behavior: None,
+            none_bump_promote_message: None,
         };
 
         write_metadata_section(&path, MetadataSection::Workspace, &config).expect("write metadata");
@@ -996,5 +1011,51 @@ members = ["crates/*"]
         let content = std::fs::read_to_string(&path).expect("read file");
         assert!(content.contains("[workspace.metadata.changeset]"));
         assert!(content.contains(r#"base-branch = "develop""#));
+    }
+
+    #[test]
+    fn write_metadata_serializes_none_bump_behavior() {
+        use crate::config::NoneBumpBehavior;
+
+        let toml = r#"
+[workspace]
+members = ["crates/*"]
+"#;
+        let dir = tempfile::tempdir().expect("create temp dir");
+        let path = dir.path().join("Cargo.toml");
+        std::fs::write(&path, toml).expect("write test file");
+
+        let config = InitConfig {
+            none_bump_behavior: Some(NoneBumpBehavior::Disallow),
+            ..Default::default()
+        };
+
+        write_metadata_section(&path, MetadataSection::Workspace, &config).expect("write metadata");
+
+        let content = std::fs::read_to_string(&path).expect("read file");
+        assert!(content.contains("[workspace.metadata.changeset]"));
+        assert!(content.contains(r#"none-bump-behavior = "disallow""#));
+    }
+
+    #[test]
+    fn write_metadata_serializes_none_bump_promote_message() {
+        let toml = r#"
+[workspace]
+members = ["crates/*"]
+"#;
+        let dir = tempfile::tempdir().expect("create temp dir");
+        let path = dir.path().join("Cargo.toml");
+        std::fs::write(&path, toml).expect("write test file");
+
+        let config = InitConfig {
+            none_bump_promote_message: Some("chore: internal refactor".to_string()),
+            ..Default::default()
+        };
+
+        write_metadata_section(&path, MetadataSection::Workspace, &config).expect("write metadata");
+
+        let content = std::fs::read_to_string(&path).expect("read file");
+        assert!(content.contains("[workspace.metadata.changeset]"));
+        assert!(content.contains(r#"none-bump-promote-message = "chore: internal refactor""#));
     }
 }

@@ -41,6 +41,15 @@ pub enum ZeroVersionBehavior {
     AutoPromoteOnMajor,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum NoneBumpBehavior {
+    #[default]
+    PromoteToPatch,
+    Allow,
+    Disallow,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -105,6 +114,38 @@ mod tests {
         assert_eq!(format!("{}", BumpType::Patch), "patch");
         assert_eq!(format!("{}", BumpType::Minor), "minor");
         assert_eq!(format!("{}", BumpType::Major), "major");
+    }
+
+    #[test]
+    fn none_bump_behavior_default_is_promote_to_patch() {
+        assert_eq!(
+            NoneBumpBehavior::default(),
+            NoneBumpBehavior::PromoteToPatch
+        );
+    }
+
+    #[test]
+    fn none_bump_behavior_serde_round_trip_promote_to_patch() {
+        let serialized = serde_json::to_string(&NoneBumpBehavior::PromoteToPatch).unwrap();
+        assert_eq!(serialized, r#""promote-to-patch""#);
+        let deserialized: NoneBumpBehavior = serde_json::from_str(&serialized).unwrap();
+        assert_eq!(deserialized, NoneBumpBehavior::PromoteToPatch);
+    }
+
+    #[test]
+    fn none_bump_behavior_serde_round_trip_allow() {
+        let serialized = serde_json::to_string(&NoneBumpBehavior::Allow).unwrap();
+        assert_eq!(serialized, r#""allow""#);
+        let deserialized: NoneBumpBehavior = serde_json::from_str(&serialized).unwrap();
+        assert_eq!(deserialized, NoneBumpBehavior::Allow);
+    }
+
+    #[test]
+    fn none_bump_behavior_serde_round_trip_disallow() {
+        let serialized = serde_json::to_string(&NoneBumpBehavior::Disallow).unwrap();
+        assert_eq!(serialized, r#""disallow""#);
+        let deserialized: NoneBumpBehavior = serde_json::from_str(&serialized).unwrap();
+        assert_eq!(deserialized, NoneBumpBehavior::Disallow);
     }
 }
 
