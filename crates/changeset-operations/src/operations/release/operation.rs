@@ -269,6 +269,11 @@ where
                 context.root_config.none_bump_promote_message(),
             )?;
 
+            aggregator = ChangesetAggregator::new();
+            for cs in &changesets {
+                aggregator.add_changeset(cs);
+            }
+
             let base_releases = VersionPlanner::plan_releases_per_package(
                 &changesets,
                 context.project.packages(),

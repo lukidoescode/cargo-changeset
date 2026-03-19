@@ -171,6 +171,13 @@ impl RootChangesetConfig {
         self.git_config = git_config;
         self
     }
+
+    #[cfg(any(test, feature = "testing"))]
+    #[must_use]
+    pub fn with_none_bump_behavior(mut self, behavior: changeset_core::NoneBumpBehavior) -> Self {
+        self.none_bump_behavior = behavior;
+        self
+    }
 }
 
 #[derive(Debug, Default)]

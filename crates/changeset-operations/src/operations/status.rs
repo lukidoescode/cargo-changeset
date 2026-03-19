@@ -74,6 +74,12 @@ where
             changesets.push(changeset);
         }
 
+        let changesets = crate::none_bump::apply_none_bump_behavior(
+            &changesets,
+            root_config.none_bump_behavior(),
+            root_config.none_bump_promote_message(),
+        )?;
+
         let consumed_changeset_paths = self
             .changeset_reader
             .list_consumed_changesets(&changeset_dir)?;
@@ -746,5 +752,61 @@ mod tests {
             result.uncovered_dependents.is_empty(),
             "app is covered by a none-bump changeset and should not appear as uncovered"
         );
+    }
+
+    #[test]
+    fn promote_to_patch_shows_patch_not_none() {
+        use changeset_core::NoneBumpBehavior;
+        use changeset_project::RootChangesetConfig;
+
+        let custom_config = RootChangesetConfig::default()
+            .with_none_bump_behavior(NoneBumpBehavior::PromoteToPatch);
+        let project_provider = MockProjectProvider::single_package("my-crate", "1.0.0")
+            .with_root_config(custom_config);
+
+        let changeset = make_changeset("my-crate", BumpType::None, "Internal refactor");
+        let changeset_reader = MockChangesetReader::new().with_changeset(
+            PathBuf::from(".changeset/changesets/refactor.md"),
+            changeset,
+        );
+
+        let operation = make_operation(project_provider, changeset_reader);
+
+        let result = operation
+            .execute(Path::new("/any"))
+            .expect("StatusOperation failed");
+
+        assert!(
+            result.none_bump_packages.is_empty(),
+            "promoted None bumps should not appear in none_bump_packages"
+        );
+        assert_eq!(result.projected_releases.len(), 1);
+        assert_eq!(result.projected_releases[0].bump_type, BumpType::Patch);
+    }
+
+    #[test]
+    fn disallow_errors_in_status() {
+        use changeset_core::NoneBumpBehavior;
+        use changeset_project::RootChangesetConfig;
+
+        let custom_config =
+            RootChangesetConfig::default().with_none_bump_behavior(NoneBumpBehavior::Disallow);
+        let project_provider = MockProjectProvider::single_package("my-crate", "1.0.0")
+            .with_root_config(custom_config);
+
+        let changeset = make_changeset("my-crate", BumpType::None, "Internal refactor");
+        let changeset_reader = MockChangesetReader::new().with_changeset(
+            PathBuf::from(".changeset/changesets/refactor.md"),
+            changeset,
+        );
+
+        let operation = make_operation(project_provider, changeset_reader);
+
+        let result = operation.execute(Path::new("/any"));
+
+        assert!(matches!(
+            result,
+            Err(crate::error::OperationError::NoneBumpDisallowed { .. })
+        ));
     }
 }
