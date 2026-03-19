@@ -274,6 +274,14 @@ where
                 aggregator.add_changeset(cs);
             }
 
+            let consumed_paths = self
+                .changeset_io
+                .list_consumed_changesets(&context.changeset_dir)?;
+            for path in &consumed_paths {
+                let consumed_cs = self.changeset_io.read_changeset(path)?;
+                aggregator.add_changeset(&consumed_cs);
+            }
+
             let base_releases = VersionPlanner::plan_releases_per_package(
                 &changesets,
                 context.project.packages(),
