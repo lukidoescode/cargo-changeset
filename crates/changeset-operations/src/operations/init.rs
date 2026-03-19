@@ -184,6 +184,10 @@ where
 
                 if let Some(version) = provider.configure_version_settings()? {
                     config.zero_version_behavior = Some(version.zero_version_behavior);
+                    config.none_bump_behavior = Some(version.none_bump_behavior);
+                    config
+                        .none_bump_promote_message
+                        .clone_from(&version.none_bump_promote_message);
                 }
             }
         }
@@ -271,6 +275,10 @@ pub fn build_config_from_input(input: &InitInput, context: ProjectContext) -> In
 
     if let Some(ref version) = input.version_config {
         config.zero_version_behavior = Some(version.zero_version_behavior);
+        config.none_bump_behavior = Some(version.none_bump_behavior);
+        config
+            .none_bump_promote_message
+            .clone_from(&version.none_bump_promote_message);
     }
 
     config
@@ -491,6 +499,7 @@ mod tests {
             }),
             version_config: Some(VersionSettingsInput {
                 zero_version_behavior: ZeroVersionBehavior::AutoPromoteOnMajor,
+                ..Default::default()
             }),
         };
 
@@ -739,6 +748,51 @@ mod tests {
             is_single_package: true,
         };
         let config = build_default_config(context);
+        assert!(config.none_bump_behavior.is_none());
+        assert!(config.none_bump_promote_message.is_none());
+    }
+
+    #[test]
+    fn none_bump_fields_propagate_from_version_settings_input() {
+        use changeset_manifest::NoneBumpBehavior;
+
+        let context = ProjectContext {
+            is_single_package: true,
+        };
+
+        let input = InitInput {
+            defaults: false,
+            git_config: None,
+            changelog_config: None,
+            version_config: Some(VersionSettingsInput {
+                zero_version_behavior: ZeroVersionBehavior::default(),
+                none_bump_behavior: NoneBumpBehavior::Disallow,
+                none_bump_promote_message: Some("Custom message".to_string()),
+            }),
+        };
+
+        let config = build_config_from_input(&input, context);
+        assert_eq!(config.none_bump_behavior, Some(NoneBumpBehavior::Disallow));
+        assert_eq!(
+            config.none_bump_promote_message,
+            Some("Custom message".to_string())
+        );
+    }
+
+    #[test]
+    fn none_bump_fields_default_when_no_version_config() {
+        let context = ProjectContext {
+            is_single_package: true,
+        };
+
+        let input = InitInput {
+            defaults: false,
+            git_config: None,
+            changelog_config: None,
+            version_config: None,
+        };
+
+        let config = build_config_from_input(&input, context);
         assert!(config.none_bump_behavior.is_none());
         assert!(config.none_bump_promote_message.is_none());
     }

@@ -115,6 +115,8 @@ fn has_any_changelog_args(args: &InitArgs) -> bool {
 
 fn has_any_version_args(args: &InitArgs) -> bool {
     args.zero_version_behavior.is_some()
+        || args.none_bump_behavior.is_some()
+        || args.none_bump_promote_message.is_some()
 }
 
 fn build_init_input_interactive(
@@ -160,6 +162,8 @@ fn build_init_input_interactive(
                 .zero_version_behavior
                 .map(Into::into)
                 .unwrap_or_default(),
+            none_bump_behavior: args.none_bump_behavior.map(Into::into).unwrap_or_default(),
+            none_bump_promote_message: args.none_bump_promote_message.clone(),
         })
     } else {
         provider.configure_version_settings()?
@@ -234,6 +238,12 @@ fn print_config_summary(config: &InitConfig) {
     if let Some(ref base_branch) = config.base_branch {
         println!("  base_branch = \"{base_branch}\"");
     }
+    if let Some(ref none_bump_behavior) = config.none_bump_behavior {
+        println!("  none_bump_behavior = \"{}\"", none_bump_behavior.as_str());
+    }
+    if let Some(ref none_bump_promote_message) = config.none_bump_promote_message {
+        println!("  none_bump_promote_message = \"{none_bump_promote_message}\"");
+    }
 }
 
 fn build_init_input(args: &InitArgs, context: ProjectContext) -> InitInput {
@@ -273,6 +283,8 @@ fn build_init_input(args: &InitArgs, context: ProjectContext) -> InitInput {
                 .zero_version_behavior
                 .map(Into::into)
                 .unwrap_or_default(),
+            none_bump_behavior: args.none_bump_behavior.map(Into::into).unwrap_or_default(),
+            none_bump_promote_message: args.none_bump_promote_message.clone(),
         })
     } else {
         None
@@ -283,5 +295,67 @@ fn build_init_input(args: &InitArgs, context: ProjectContext) -> InitInput {
         git_config,
         changelog_config,
         version_config,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::commands::NoneBumpBehaviorArg;
+
+    fn default_init_args() -> InitArgs {
+        InitArgs {
+            defaults: false,
+            no_interactive: false,
+            commit: None,
+            tags: None,
+            keep_changesets: None,
+            tag_format: None,
+            changelog: None,
+            comparison_links: None,
+            zero_version_behavior: None,
+            base_branch: None,
+            none_bump_behavior: None,
+            none_bump_promote_message: None,
+        }
+    }
+
+    #[test]
+    fn has_any_version_args_false_when_no_args() {
+        let args = default_init_args();
+        assert!(!has_any_version_args(&args));
+    }
+
+    #[test]
+    fn has_any_version_args_true_when_none_bump_behavior_set() {
+        let mut args = default_init_args();
+        args.none_bump_behavior = Some(NoneBumpBehaviorArg::Allow);
+        assert!(has_any_version_args(&args));
+    }
+
+    #[test]
+    fn has_any_version_args_true_when_none_bump_promote_message_set() {
+        let mut args = default_init_args();
+        args.none_bump_promote_message = Some("custom message".to_string());
+        assert!(has_any_version_args(&args));
+    }
+
+    #[test]
+    fn print_config_summary_includes_none_bump_behavior() {
+        let config = changeset_manifest::InitConfig {
+            none_bump_behavior: Some(changeset_manifest::NoneBumpBehavior::Disallow),
+            ..Default::default()
+        };
+        print_config_summary(&config);
+    }
+
+    #[test]
+    fn print_config_summary_includes_none_bump_promote_message() {
+        let config = changeset_manifest::InitConfig {
+            none_bump_behavior: Some(changeset_manifest::NoneBumpBehavior::PromoteToPatch),
+            none_bump_promote_message: Some("Internal changes".to_string()),
+            ..Default::default()
+        };
+        print_config_summary(&config);
     }
 }
