@@ -23,6 +23,7 @@ use super::types::{
 use super::validator::{ReleaseCliInput, ReleaseValidator};
 use crate::Result;
 use crate::error::OperationError;
+use crate::none_bump;
 use crate::operations::changelog_aggregation::ChangesetAggregator;
 use crate::planner::VersionPlanner;
 use crate::traits::{
@@ -262,6 +263,12 @@ where
         let planned_releases = if context.classification.is_prerelease_graduation {
             VersionPlanner::plan_graduation(context.project.packages())?.releases
         } else {
+            let changesets = none_bump::apply_none_bump_behavior(
+                &changesets,
+                context.root_config.none_bump_behavior(),
+                context.root_config.none_bump_promote_message(),
+            )?;
+
             let base_releases = VersionPlanner::plan_releases_per_package(
                 &changesets,
                 context.project.packages(),
