@@ -266,7 +266,7 @@ where
             let changesets = none_bump::apply_none_bump_behavior(
                 &changesets,
                 context.root_config.none_bump_behavior(),
-                context.root_config.none_bump_promote_message(),
+                context.root_config.none_bump_promote_message_template(),
             )?;
 
             aggregator = ChangesetAggregator::new();

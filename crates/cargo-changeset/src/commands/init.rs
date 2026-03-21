@@ -116,7 +116,7 @@ fn has_any_changelog_args(args: &InitArgs) -> bool {
 fn has_any_version_args(args: &InitArgs) -> bool {
     args.zero_version_behavior.is_some()
         || args.none_bump_behavior.is_some()
-        || args.none_bump_promote_message.is_some()
+        || args.none_bump_promote_message_template.is_some()
 }
 
 fn build_init_input_interactive(
@@ -160,7 +160,7 @@ fn build_init_input_interactive(
         Some(VersionSettingsInput {
             zero_version_behavior: args.zero_version_behavior.map(Into::into),
             none_bump_behavior: args.none_bump_behavior.map(Into::into),
-            none_bump_promote_message: args.none_bump_promote_message.clone(),
+            none_bump_promote_message_template: args.none_bump_promote_message_template.clone(),
         })
     } else {
         provider.configure_version_settings()?
@@ -238,8 +238,9 @@ fn print_config_summary(config: &InitConfig) {
     if let Some(ref none_bump_behavior) = config.none_bump_behavior {
         println!("  none_bump_behavior = \"{}\"", none_bump_behavior.as_str());
     }
-    if let Some(ref none_bump_promote_message) = config.none_bump_promote_message {
-        println!("  none_bump_promote_message = \"{none_bump_promote_message}\"");
+    if let Some(ref none_bump_promote_message_template) = config.none_bump_promote_message_template
+    {
+        println!("  none_bump_promote_message_template = \"{none_bump_promote_message_template}\"");
     }
 }
 
@@ -278,7 +279,7 @@ fn build_init_input(args: &InitArgs, context: ProjectContext) -> InitInput {
         Some(VersionSettingsInput {
             zero_version_behavior: args.zero_version_behavior.map(Into::into),
             none_bump_behavior: args.none_bump_behavior.map(Into::into),
-            none_bump_promote_message: args.none_bump_promote_message.clone(),
+            none_bump_promote_message_template: args.none_bump_promote_message_template.clone(),
         })
     } else {
         None
@@ -310,7 +311,7 @@ mod tests {
             zero_version_behavior: None,
             base_branch: None,
             none_bump_behavior: None,
-            none_bump_promote_message: None,
+            none_bump_promote_message_template: None,
         }
     }
 
@@ -328,9 +329,9 @@ mod tests {
     }
 
     #[test]
-    fn has_any_version_args_true_when_none_bump_promote_message_set() {
+    fn has_any_version_args_true_when_none_bump_promote_message_template_set() {
         let mut args = default_init_args();
-        args.none_bump_promote_message = Some("custom message".to_string());
+        args.none_bump_promote_message_template = Some("custom message".to_string());
         assert!(has_any_version_args(&args));
     }
 
@@ -344,10 +345,10 @@ mod tests {
     }
 
     #[test]
-    fn print_config_summary_includes_none_bump_promote_message() {
+    fn print_config_summary_includes_none_bump_promote_message_template() {
         let config = changeset_manifest::InitConfig {
             none_bump_behavior: Some(changeset_manifest::NoneBumpBehavior::PromoteToPatch),
-            none_bump_promote_message: Some("Internal changes".to_string()),
+            none_bump_promote_message_template: Some("Internal changes".to_string()),
             ..Default::default()
         };
         print_config_summary(&config);

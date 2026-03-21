@@ -1463,7 +1463,7 @@ impl MockInitInteractionProvider {
             .with_version_settings(Some(VersionSettingsInput {
                 zero_version_behavior: Some(ZeroVersionBehavior::default()),
                 none_bump_behavior: Some(NoneBumpBehavior::default()),
-                none_bump_promote_message: None,
+                none_bump_promote_message_template: None,
             }))
     }
 }

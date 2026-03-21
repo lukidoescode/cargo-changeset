@@ -41,7 +41,7 @@ pub struct ChangelogSettingsInput {
 pub struct VersionSettingsInput {
     pub zero_version_behavior: Option<ZeroVersionBehavior>,
     pub none_bump_behavior: Option<NoneBumpBehavior>,
-    pub none_bump_promote_message: Option<String>,
+    pub none_bump_promote_message_template: Option<String>,
 }
 
 pub trait InitInteractionProvider: Send + Sync {

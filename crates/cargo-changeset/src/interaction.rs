@@ -337,16 +337,17 @@ impl InitInteractionProvider for TerminalInitInteractionProvider {
 
         let zero_version_behavior = select_zero_version_behavior()?;
         let none_bump_behavior = select_none_bump_behavior()?;
-        let none_bump_promote_message = if none_bump_behavior == NoneBumpBehavior::PromoteToPatch {
-            Some(prompt_none_bump_promote_message()?)
-        } else {
-            None
-        };
+        let none_bump_promote_message_template =
+            if none_bump_behavior == NoneBumpBehavior::PromoteToPatch {
+                Some(prompt_none_bump_promote_message_template()?)
+            } else {
+                None
+            };
 
         Ok(Some(VersionSettingsInput {
             zero_version_behavior: Some(zero_version_behavior),
             none_bump_behavior: Some(none_bump_behavior),
-            none_bump_promote_message,
+            none_bump_promote_message_template,
         }))
     }
 }
@@ -504,9 +505,9 @@ fn select_none_bump_behavior() -> Result<NoneBumpBehavior> {
     }
 }
 
-fn prompt_none_bump_promote_message() -> Result<String> {
+fn prompt_none_bump_promote_message_template() -> Result<String> {
     Input::new()
-        .with_prompt("Changelog message for promoted none bumps")
+        .with_prompt("Changelog message template for promoted none bumps")
         .default("Internal architectural changes".to_string())
         .interact_text()
         .map_err(|e| match e {

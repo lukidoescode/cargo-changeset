@@ -186,8 +186,8 @@ where
                     config.zero_version_behavior = version.zero_version_behavior;
                     config.none_bump_behavior = version.none_bump_behavior;
                     config
-                        .none_bump_promote_message
-                        .clone_from(&version.none_bump_promote_message);
+                        .none_bump_promote_message_template
+                        .clone_from(&version.none_bump_promote_message_template);
                 }
             }
         }
@@ -248,7 +248,7 @@ pub(crate) fn build_default_config(context: ProjectContext) -> InitConfig {
         )),
         base_branch: Some(String::from(DEFAULT_BASE_BRANCH)),
         none_bump_behavior: Some(changeset_manifest::NoneBumpBehavior::default()),
-        none_bump_promote_message: None,
+        none_bump_promote_message_template: None,
     }
 }
 
@@ -277,8 +277,8 @@ pub fn build_config_from_input(input: &InitInput, context: ProjectContext) -> In
         config.zero_version_behavior = version.zero_version_behavior;
         config.none_bump_behavior = version.none_bump_behavior;
         config
-            .none_bump_promote_message
-            .clone_from(&version.none_bump_promote_message);
+            .none_bump_promote_message_template
+            .clone_from(&version.none_bump_promote_message_template);
     }
 
     config
@@ -751,7 +751,7 @@ mod tests {
         };
         let config = build_default_config(context);
         assert_eq!(config.none_bump_behavior, Some(NoneBumpBehavior::default()));
-        assert!(config.none_bump_promote_message.is_none());
+        assert!(config.none_bump_promote_message_template.is_none());
     }
 
     #[test]
@@ -769,14 +769,14 @@ mod tests {
             version_config: Some(VersionSettingsInput {
                 zero_version_behavior: Some(ZeroVersionBehavior::default()),
                 none_bump_behavior: Some(NoneBumpBehavior::Disallow),
-                none_bump_promote_message: Some("Custom message".to_string()),
+                none_bump_promote_message_template: Some("Custom message".to_string()),
             }),
         };
 
         let config = build_config_from_input(&input, context);
         assert_eq!(config.none_bump_behavior, Some(NoneBumpBehavior::Disallow));
         assert_eq!(
-            config.none_bump_promote_message,
+            config.none_bump_promote_message_template,
             Some("Custom message".to_string())
         );
     }
@@ -796,7 +796,7 @@ mod tests {
 
         let config = build_config_from_input(&input, context);
         assert!(config.none_bump_behavior.is_none());
-        assert!(config.none_bump_promote_message.is_none());
+        assert!(config.none_bump_promote_message_template.is_none());
     }
 
     #[test]

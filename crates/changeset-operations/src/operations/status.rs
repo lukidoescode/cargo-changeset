@@ -77,7 +77,7 @@ where
         let changesets = crate::none_bump::apply_none_bump_behavior(
             &changesets,
             root_config.none_bump_behavior(),
-            root_config.none_bump_promote_message(),
+            root_config.none_bump_promote_message_template(),
         )?;
 
         let consumed_changeset_paths = self

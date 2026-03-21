@@ -118,7 +118,7 @@ pub(crate) struct ChangesetMetadata {
     #[serde(default)]
     pub(crate) none_bump_behavior: Option<changeset_core::NoneBumpBehavior>,
     #[serde(default)]
-    pub(crate) none_bump_promote_message: Option<String>,
+    pub(crate) none_bump_promote_message_template: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Clone, Copy)]

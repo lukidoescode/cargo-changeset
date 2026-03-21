@@ -232,10 +232,11 @@ pub fn write_metadata_section(
         changeset_table.insert("none-bump-behavior", value(none_bump_behavior.as_str()));
     }
 
-    if let Some(ref none_bump_promote_message) = config.none_bump_promote_message {
+    if let Some(ref none_bump_promote_message_template) = config.none_bump_promote_message_template
+    {
         changeset_table.insert(
-            "none-bump-promote-message",
-            value(none_bump_promote_message.as_str()),
+            "none-bump-promote-message-template",
+            value(none_bump_promote_message_template.as_str()),
         );
     }
 
@@ -628,7 +629,7 @@ members = ["crates/*"]
             dependency_bump_changelog_template: None,
             base_branch: None,
             none_bump_behavior: Some(NoneBumpBehavior::Disallow),
-            none_bump_promote_message: Some("My message".to_string()),
+            none_bump_promote_message_template: Some("My message".to_string()),
         };
 
         write_metadata_section(&path, MetadataSection::Workspace, &config).expect("write metadata");
@@ -642,7 +643,7 @@ members = ["crates/*"]
         assert!(content.contains(r#"comparison-links = "enabled""#));
         assert!(content.contains(r#"zero-version-behavior = "auto-promote-on-major""#));
         assert!(content.contains(r#"none-bump-behavior = "disallow""#));
-        assert!(content.contains(r#"none-bump-promote-message = "My message""#));
+        assert!(content.contains(r#"none-bump-promote-message-template = "My message""#));
     }
 
     #[test]
@@ -666,7 +667,7 @@ members = ["crates/*"]
             dependency_bump_changelog_template: None,
             base_branch: None,
             none_bump_behavior: None,
-            none_bump_promote_message: None,
+            none_bump_promote_message_template: None,
         };
 
         write_metadata_section(&path, MetadataSection::Workspace, &config).expect("write metadata");
@@ -1042,7 +1043,7 @@ members = ["crates/*"]
     }
 
     #[test]
-    fn write_metadata_serializes_none_bump_promote_message() {
+    fn write_metadata_serializes_none_bump_promote_message_template() {
         let toml = r#"
 [workspace]
 members = ["crates/*"]
@@ -1052,7 +1053,7 @@ members = ["crates/*"]
         std::fs::write(&path, toml).expect("write test file");
 
         let config = InitConfig {
-            none_bump_promote_message: Some("chore: internal refactor".to_string()),
+            none_bump_promote_message_template: Some("chore: internal refactor".to_string()),
             ..Default::default()
         };
 
@@ -1060,6 +1061,8 @@ members = ["crates/*"]
 
         let content = std::fs::read_to_string(&path).expect("read file");
         assert!(content.contains("[workspace.metadata.changeset]"));
-        assert!(content.contains(r#"none-bump-promote-message = "chore: internal refactor""#));
+        assert!(
+            content.contains(r#"none-bump-promote-message-template = "chore: internal refactor""#)
+        );
     }
 }

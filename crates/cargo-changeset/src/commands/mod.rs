@@ -94,9 +94,9 @@ pub(crate) struct InitArgs {
     #[arg(long, value_name = "BEHAVIOR")]
     pub none_bump_behavior: Option<NoneBumpBehaviorArg>,
 
-    /// Custom changelog message when none bumps are promoted to patch
+    /// Custom changelog message template when none bumps are promoted to patch
     #[arg(long, value_name = "MESSAGE")]
-    pub none_bump_promote_message: Option<String>,
+    pub none_bump_promote_message_template: Option<String>,
 }
 
 #[derive(Clone, Copy, ValueEnum)]

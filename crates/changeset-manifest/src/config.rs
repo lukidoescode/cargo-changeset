@@ -149,7 +149,7 @@ pub struct InitConfig {
     pub dependency_bump_changelog_template: Option<String>,
     pub base_branch: Option<String>,
     pub none_bump_behavior: Option<NoneBumpBehavior>,
-    pub none_bump_promote_message: Option<String>,
+    pub none_bump_promote_message_template: Option<String>,
 }
 
 impl InitConfig {
@@ -165,7 +165,7 @@ impl InitConfig {
             && self.dependency_bump_changelog_template.is_none()
             && self.base_branch.is_none()
             && self.none_bump_behavior.is_none()
-            && self.none_bump_promote_message.is_none()
+            && self.none_bump_promote_message_template.is_none()
     }
 }
 
@@ -203,9 +203,9 @@ mod tests {
     }
 
     #[test]
-    fn is_empty_returns_false_when_only_none_bump_promote_message_set() {
+    fn is_empty_returns_false_when_only_none_bump_promote_message_template_set() {
         let config = InitConfig {
-            none_bump_promote_message: Some("chore: internal changes".to_string()),
+            none_bump_promote_message_template: Some("chore: internal changes".to_string()),
             ..Default::default()
         };
         assert!(!config.is_empty());
