@@ -1,6 +1,4 @@
-use std::collections::HashMap;
-
-use changeset_core::BumpType;
+use changeset_core::Changeset;
 
 use super::{VerificationContext, VerificationResult, VerificationRule};
 use crate::Result;
@@ -18,26 +16,13 @@ impl<'a, R: ChangesetReader> NoneBumpDisallowedRule<'a, R> {
 
 impl<R: ChangesetReader> VerificationRule for NoneBumpDisallowedRule<'_, R> {
     fn check(&self, context: &VerificationContext, result: &mut VerificationResult) -> Result<()> {
-        let mut max_bumps: HashMap<String, BumpType> = HashMap::new();
+        let changesets: Vec<Changeset> = context
+            .changeset_files
+            .iter()
+            .map(|path| self.reader.read_changeset(path))
+            .collect::<Result<Vec<_>>>()?;
 
-        for path in &context.changeset_files {
-            let changeset = self.reader.read_changeset(path)?;
-            for release in changeset.releases {
-                let entry = max_bumps.entry(release.name).or_insert(BumpType::None);
-                if release.bump_type > *entry {
-                    *entry = release.bump_type;
-                }
-            }
-        }
-
-        let mut violations: Vec<String> = max_bumps
-            .into_iter()
-            .filter(|(_, bump)| bump.is_noop())
-            .map(|(name, _)| name)
-            .collect();
-
-        violations.sort();
-        result.none_bump_violations = violations;
+        result.none_bump_violations = crate::none_bump::find_none_only_packages(&changesets);
 
         Ok(())
     }

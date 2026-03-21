@@ -353,4 +353,50 @@ mod tests {
         };
         print_config_summary(&config);
     }
+
+    #[test]
+    fn build_init_input_passes_none_bump_behavior() {
+        let mut args = default_init_args();
+        args.none_bump_behavior = Some(NoneBumpBehaviorArg::Disallow);
+        let context = ProjectContext {
+            is_single_package: true,
+        };
+
+        let input = build_init_input(&args, context);
+
+        let version = input.version_config.expect("version_config should be Some");
+        assert_eq!(
+            version.none_bump_behavior,
+            Some(changeset_manifest::NoneBumpBehavior::Disallow)
+        );
+    }
+
+    #[test]
+    fn build_init_input_passes_none_bump_promote_message_template() {
+        let mut args = default_init_args();
+        args.none_bump_promote_message_template = Some("Custom message".to_string());
+        let context = ProjectContext {
+            is_single_package: true,
+        };
+
+        let input = build_init_input(&args, context);
+
+        let version = input.version_config.expect("version_config should be Some");
+        assert_eq!(
+            version.none_bump_promote_message_template,
+            Some("Custom message".to_string())
+        );
+    }
+
+    #[test]
+    fn build_init_input_no_version_args_returns_none_version_config() {
+        let args = default_init_args();
+        let context = ProjectContext {
+            is_single_package: true,
+        };
+
+        let input = build_init_input(&args, context);
+
+        assert!(input.version_config.is_none());
+    }
 }

@@ -6,19 +6,7 @@ use changeset_core::types::{
 
 use crate::error::{OperationError, Result};
 
-pub(crate) fn apply_none_bump_behavior(
-    changesets: &[Changeset],
-    behavior: NoneBumpBehavior,
-    promote_message: &str,
-) -> Result<Vec<Changeset>> {
-    match behavior {
-        NoneBumpBehavior::Allow => Ok(changesets.to_vec()),
-        NoneBumpBehavior::Disallow => validate_no_none_bumps(changesets),
-        NoneBumpBehavior::PromoteToPatch => Ok(promote_none_to_patch(changesets, promote_message)),
-    }
-}
-
-fn validate_no_none_bumps(changesets: &[Changeset]) -> Result<Vec<Changeset>> {
+pub(crate) fn find_none_only_packages(changesets: &[Changeset]) -> Vec<String> {
     let mut max_bump: HashMap<&str, BumpType> = HashMap::new();
 
     for changeset in changesets {
@@ -32,18 +20,36 @@ fn validate_no_none_bumps(changesets: &[Changeset]) -> Result<Vec<Changeset>> {
         }
     }
 
-    let disallowed: Vec<String> = max_bump
+    let mut result: Vec<String> = max_bump
         .into_iter()
         .filter(|(_, bump)| bump.is_noop())
         .map(|(name, _)| name.to_string())
         .collect();
 
+    result.sort();
+    result
+}
+
+pub(crate) fn apply_none_bump_behavior(
+    changesets: Vec<Changeset>,
+    behavior: NoneBumpBehavior,
+    promote_message: &str,
+) -> Result<Vec<Changeset>> {
+    match behavior {
+        NoneBumpBehavior::Allow => Ok(changesets),
+        NoneBumpBehavior::Disallow => validate_no_none_bumps(changesets),
+        _ => Ok(promote_none_to_patch(&changesets, promote_message)),
+    }
+}
+
+fn validate_no_none_bumps(changesets: Vec<Changeset>) -> Result<Vec<Changeset>> {
+    let disallowed = find_none_only_packages(&changesets);
     if disallowed.is_empty() {
-        Ok(changesets.to_vec())
+        Ok(changesets)
     } else {
-        let mut sorted = disallowed;
-        sorted.sort();
-        Err(OperationError::NoneBumpDisallowed { packages: sorted })
+        Err(OperationError::NoneBumpDisallowed {
+            packages: disallowed,
+        })
     }
 }
 
@@ -150,10 +156,11 @@ mod tests {
             ChangeCategory::Fixed,
             vec![("crate-a", BumpType::None)],
         )];
+        let expected = changesets.clone();
 
-        let result = apply_none_bump_behavior(&changesets, NoneBumpBehavior::Allow, "auto")?;
+        let result = apply_none_bump_behavior(changesets, NoneBumpBehavior::Allow, "auto")?;
 
-        assert_eq!(result, changesets);
+        assert_eq!(result, expected);
         Ok(())
     }
 
@@ -166,7 +173,7 @@ mod tests {
         )];
 
         let result =
-            apply_none_bump_behavior(&changesets, NoneBumpBehavior::PromoteToPatch, "auto")?;
+            apply_none_bump_behavior(changesets, NoneBumpBehavior::PromoteToPatch, "auto")?;
 
         assert_eq!(result.len(), 1);
         assert!(
@@ -187,7 +194,7 @@ mod tests {
         )];
 
         let result = apply_none_bump_behavior(
-            &changesets,
+            changesets,
             NoneBumpBehavior::PromoteToPatch,
             "promoted message",
         )?;
@@ -207,7 +214,7 @@ mod tests {
         )];
 
         let result =
-            apply_none_bump_behavior(&changesets, NoneBumpBehavior::PromoteToPatch, "auto")?;
+            apply_none_bump_behavior(changesets, NoneBumpBehavior::PromoteToPatch, "auto")?;
 
         assert_eq!(result.len(), 2);
 
@@ -236,11 +243,12 @@ mod tests {
             ChangeCategory::Added,
             vec![("crate-a", BumpType::Minor)],
         )];
+        let expected = changesets.clone();
 
         let result =
-            apply_none_bump_behavior(&changesets, NoneBumpBehavior::PromoteToPatch, "auto")?;
+            apply_none_bump_behavior(changesets, NoneBumpBehavior::PromoteToPatch, "auto")?;
 
-        assert_eq!(result, changesets);
+        assert_eq!(result, expected);
         Ok(())
     }
 
@@ -252,7 +260,7 @@ mod tests {
             vec![("crate-a", BumpType::None)],
         )];
 
-        let result = apply_none_bump_behavior(&changesets, NoneBumpBehavior::Disallow, "auto");
+        let result = apply_none_bump_behavior(changesets, NoneBumpBehavior::Disallow, "auto");
 
         assert!(matches!(
             result,
@@ -274,10 +282,54 @@ mod tests {
                 vec![("crate-a", BumpType::None)],
             ),
         ];
+        let expected = changesets.clone();
 
-        let result = apply_none_bump_behavior(&changesets, NoneBumpBehavior::Disallow, "auto")?;
+        let result = apply_none_bump_behavior(changesets, NoneBumpBehavior::Disallow, "auto")?;
 
-        assert_eq!(result, changesets);
+        assert_eq!(result, expected);
         Ok(())
+    }
+
+    #[test]
+    fn empty_changeset_list_returns_empty_for_all_behaviors() -> Result<()> {
+        for behavior in [
+            NoneBumpBehavior::Allow,
+            NoneBumpBehavior::Disallow,
+            NoneBumpBehavior::PromoteToPatch,
+        ] {
+            let result = apply_none_bump_behavior(vec![], behavior, "auto")?;
+            assert!(result.is_empty());
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn disallow_errors_with_multiple_none_packages_sorted() {
+        let changesets = vec![
+            make_changeset(
+                "change b",
+                ChangeCategory::Changed,
+                vec![("zeta-crate", BumpType::None)],
+            ),
+            make_changeset(
+                "change a",
+                ChangeCategory::Changed,
+                vec![("alpha-crate", BumpType::None)],
+            ),
+        ];
+
+        let result = apply_none_bump_behavior(changesets, NoneBumpBehavior::Disallow, "auto");
+
+        match result {
+            Err(OperationError::NoneBumpDisallowed { packages }) => {
+                assert_eq!(packages, vec!["alpha-crate", "zeta-crate"]);
+            }
+            other => panic!("Expected NoneBumpDisallowed error, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn find_none_only_packages_returns_empty_for_empty_input() {
+        assert!(find_none_only_packages(&[]).is_empty());
     }
 }

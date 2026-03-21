@@ -75,7 +75,7 @@ where
         }
 
         let changesets = crate::none_bump::apply_none_bump_behavior(
-            &changesets,
+            changesets,
             root_config.none_bump_behavior(),
             root_config.none_bump_promote_message_template(),
         )?;
@@ -808,5 +808,37 @@ mod tests {
             result,
             Err(crate::error::OperationError::NoneBumpDisallowed { .. })
         ));
+    }
+
+    #[test]
+    fn allow_passes_none_bumps_through() {
+        use changeset_core::NoneBumpBehavior;
+        use changeset_project::RootChangesetConfig;
+
+        let custom_config =
+            RootChangesetConfig::default().with_none_bump_behavior(NoneBumpBehavior::Allow);
+        let project_provider = MockProjectProvider::single_package("my-crate", "1.0.0")
+            .with_root_config(custom_config);
+
+        let changeset = make_changeset("my-crate", BumpType::None, "Internal refactor");
+        let changeset_reader = MockChangesetReader::new().with_changeset(
+            PathBuf::from(".changeset/changesets/refactor.md"),
+            changeset,
+        );
+
+        let operation = make_operation(project_provider, changeset_reader);
+
+        let result = operation
+            .execute(Path::new("/any"))
+            .expect("StatusOperation failed");
+
+        assert!(
+            result.none_bump_packages.contains(&"my-crate".to_string()),
+            "my-crate should appear in none_bump_packages with Allow behavior"
+        );
+        assert!(
+            result.projected_releases.is_empty(),
+            "None bump with Allow should not produce projected releases"
+        );
     }
 }

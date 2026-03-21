@@ -34,6 +34,7 @@ impl fmt::Display for BumpType {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[non_exhaustive]
 #[serde(rename_all = "kebab-case")]
 pub enum ZeroVersionBehavior {
     #[default]
@@ -42,6 +43,7 @@ pub enum ZeroVersionBehavior {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[non_exhaustive]
 #[serde(rename_all = "kebab-case")]
 pub enum NoneBumpBehavior {
     #[default]

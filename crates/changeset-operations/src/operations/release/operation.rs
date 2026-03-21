@@ -264,7 +264,7 @@ where
             VersionPlanner::plan_graduation(context.project.packages())?.releases
         } else {
             let changesets = none_bump::apply_none_bump_behavior(
-                &changesets,
+                changesets,
                 context.root_config.none_bump_behavior(),
                 context.root_config.none_bump_promote_message_template(),
             )?;
@@ -2189,5 +2189,154 @@ mod tests {
             "only the explicitly changed crate should be released"
         );
         assert_eq!(output.planned_releases[0].name, "crate-a");
+    }
+
+    #[test]
+    fn release_with_promote_to_patch_promotes_none_bump() {
+        use changeset_core::NoneBumpBehavior;
+        use changeset_project::RootChangesetConfig;
+
+        let root_config = RootChangesetConfig::default()
+            .with_none_bump_behavior(NoneBumpBehavior::PromoteToPatch);
+        let project_provider =
+            MockProjectProvider::single_package("my-crate", "1.0.0").with_root_config(root_config);
+        let changeset = make_changeset("my-crate", BumpType::None, "Internal refactor");
+        let changeset_reader = MockChangesetReader::new().with_changeset(
+            PathBuf::from(".changeset/changesets/refactor.md"),
+            changeset,
+        );
+        let manifest_writer = MockManifestWriter::new();
+
+        let operation = make_operation(project_provider, changeset_reader, manifest_writer);
+
+        let result = operation
+            .execute(Path::new("/any"), &default_input())
+            .expect("execute failed");
+
+        let ReleaseOutcome::DryRun(output) = result else {
+            panic!("expected DryRun outcome");
+        };
+
+        assert_eq!(output.planned_releases.len(), 1);
+        let release = &output.planned_releases[0];
+        assert_eq!(release.name, "my-crate");
+        assert_eq!(release.bump_type, BumpType::Patch);
+        assert_eq!(release.new_version.to_string(), "1.0.1");
+    }
+
+    #[test]
+    fn release_with_disallow_errors_on_none_bump() {
+        use changeset_core::NoneBumpBehavior;
+        use changeset_project::RootChangesetConfig;
+
+        let root_config =
+            RootChangesetConfig::default().with_none_bump_behavior(NoneBumpBehavior::Disallow);
+        let project_provider =
+            MockProjectProvider::single_package("my-crate", "1.0.0").with_root_config(root_config);
+        let changeset = make_changeset("my-crate", BumpType::None, "Internal refactor");
+        let changeset_reader = MockChangesetReader::new().with_changeset(
+            PathBuf::from(".changeset/changesets/refactor.md"),
+            changeset,
+        );
+        let manifest_writer = MockManifestWriter::new();
+
+        let operation = make_operation(project_provider, changeset_reader, manifest_writer);
+
+        let result = operation.execute(Path::new("/any"), &default_input());
+
+        assert!(matches!(
+            result,
+            Err(crate::error::OperationError::NoneBumpDisallowed { .. })
+        ));
+    }
+
+    #[test]
+    fn release_with_allow_excludes_none_bump_from_releases() {
+        use changeset_core::NoneBumpBehavior;
+        use changeset_project::RootChangesetConfig;
+
+        let root_config =
+            RootChangesetConfig::default().with_none_bump_behavior(NoneBumpBehavior::Allow);
+        let project_provider =
+            MockProjectProvider::single_package("my-crate", "1.0.0").with_root_config(root_config);
+        let changeset = make_changeset("my-crate", BumpType::None, "Internal refactor");
+        let changeset_reader = MockChangesetReader::new().with_changeset(
+            PathBuf::from(".changeset/changesets/refactor.md"),
+            changeset,
+        );
+        let manifest_writer = MockManifestWriter::new();
+
+        let operation = make_operation(project_provider, changeset_reader, manifest_writer);
+
+        let result = operation
+            .execute(Path::new("/any"), &default_input())
+            .expect("execute failed");
+
+        let ReleaseOutcome::DryRun(output) = result else {
+            panic!("expected DryRun outcome");
+        };
+
+        assert!(
+            output.planned_releases.is_empty(),
+            "None bump with Allow should not produce any planned releases"
+        );
+    }
+
+    #[test]
+    fn release_with_promote_handles_mixed_bumps() {
+        use changeset_core::NoneBumpBehavior;
+        use changeset_project::RootChangesetConfig;
+
+        let root_config = RootChangesetConfig::default()
+            .with_none_bump_behavior(NoneBumpBehavior::PromoteToPatch);
+        let project_provider =
+            MockProjectProvider::workspace(vec![("crate-a", "1.0.0"), ("crate-b", "2.0.0")])
+                .with_root_config(root_config);
+
+        let changeset = changeset_core::Changeset {
+            summary: "mixed change".to_string(),
+            category: changeset_core::ChangeCategory::Fixed,
+            releases: vec![
+                changeset_core::PackageRelease {
+                    name: "crate-a".to_string(),
+                    bump_type: BumpType::Patch,
+                },
+                changeset_core::PackageRelease {
+                    name: "crate-b".to_string(),
+                    bump_type: BumpType::None,
+                },
+            ],
+            consumed_for_prerelease: None,
+            graduate: false,
+        };
+        let changeset_reader = MockChangesetReader::new()
+            .with_changeset(PathBuf::from(".changeset/changesets/mixed.md"), changeset);
+        let manifest_writer = MockManifestWriter::new();
+
+        let operation = make_operation(project_provider, changeset_reader, manifest_writer);
+
+        let result = operation
+            .execute(Path::new("/any"), &default_input())
+            .expect("execute failed");
+
+        let ReleaseOutcome::DryRun(output) = result else {
+            panic!("expected DryRun outcome");
+        };
+
+        assert_eq!(output.planned_releases.len(), 2);
+
+        let release_a = output
+            .planned_releases
+            .iter()
+            .find(|r| r.name == "crate-a")
+            .expect("crate-a should be in planned releases");
+        assert_eq!(release_a.bump_type, BumpType::Patch);
+
+        let release_b = output
+            .planned_releases
+            .iter()
+            .find(|r| r.name == "crate-b")
+            .expect("crate-b should be in planned releases");
+        assert_eq!(release_b.bump_type, BumpType::Patch);
     }
 }
