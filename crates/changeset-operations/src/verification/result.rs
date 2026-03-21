@@ -10,6 +10,7 @@ pub struct VerificationResult {
     pub covered_packages: HashSet<String>,
     pub uncovered_packages: Vec<PackageInfo>,
     pub deleted_changesets: Vec<PathBuf>,
+    pub none_bump_violations: Vec<String>,
     pub project_files: Vec<PathBuf>,
     pub ignored_files: Vec<PathBuf>,
 }
@@ -17,6 +18,8 @@ pub struct VerificationResult {
 impl VerificationResult {
     #[must_use]
     pub fn is_success(&self) -> bool {
-        self.uncovered_packages.is_empty() && self.deleted_changesets.is_empty()
+        self.uncovered_packages.is_empty()
+            && self.deleted_changesets.is_empty()
+            && self.none_bump_violations.is_empty()
     }
 }

@@ -1,5 +1,7 @@
 use changeset_git::DEFAULT_BASE_BRANCH;
-use changeset_manifest::{ChangelogLocation, ComparisonLinks, TagFormat, ZeroVersionBehavior};
+use changeset_manifest::{
+    ChangelogLocation, ComparisonLinks, NoneBumpBehavior, TagFormat, ZeroVersionBehavior,
+};
 
 use crate::Result;
 
@@ -37,7 +39,9 @@ pub struct ChangelogSettingsInput {
 
 #[derive(Debug, Clone, Default)]
 pub struct VersionSettingsInput {
-    pub zero_version_behavior: ZeroVersionBehavior,
+    pub zero_version_behavior: Option<ZeroVersionBehavior>,
+    pub none_bump_behavior: Option<NoneBumpBehavior>,
+    pub none_bump_promote_message_template: Option<String>,
 }
 
 pub trait InitInteractionProvider: Send + Sync {

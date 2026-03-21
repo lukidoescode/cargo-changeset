@@ -28,6 +28,7 @@ impl<'a> VerificationEngine<'a> {
             covered_packages: HashSet::new(),
             uncovered_packages: Vec::new(),
             deleted_changesets: Vec::new(),
+            none_bump_violations: Vec::new(),
             project_files: context.project_files.clone(),
             ignored_files: context.ignored_files.clone(),
         };

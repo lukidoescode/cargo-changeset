@@ -6,7 +6,9 @@ use crate::environment::is_interactive;
 
 use changeset_core::{BumpType, ChangeCategory, PackageInfo};
 use changeset_git::DEFAULT_BASE_BRANCH;
-use changeset_manifest::{ChangelogLocation, ComparisonLinks, TagFormat, ZeroVersionBehavior};
+use changeset_manifest::{
+    ChangelogLocation, ComparisonLinks, NoneBumpBehavior, TagFormat, ZeroVersionBehavior,
+};
 use changeset_operations::Result;
 use changeset_operations::traits::{
     BumpSelection, CategorySelection, ChangelogSettingsInput, DescriptionInput, GitSettingsInput,
@@ -334,9 +336,18 @@ impl InitInteractionProvider for TerminalInitInteractionProvider {
         }
 
         let zero_version_behavior = select_zero_version_behavior()?;
+        let none_bump_behavior = select_none_bump_behavior()?;
+        let none_bump_promote_message_template =
+            if none_bump_behavior == NoneBumpBehavior::PromoteToPatch {
+                Some(prompt_none_bump_promote_message_template()?)
+            } else {
+                None
+            };
 
         Ok(Some(VersionSettingsInput {
-            zero_version_behavior,
+            zero_version_behavior: Some(zero_version_behavior),
+            none_bump_behavior: Some(none_bump_behavior),
+            none_bump_promote_message_template,
         }))
     }
 }
@@ -468,6 +479,40 @@ fn select_zero_version_behavior() -> Result<ZeroVersionBehavior> {
         Some(1) => Ok(ZeroVersionBehavior::AutoPromoteOnMajor),
         _ => Ok(ZeroVersionBehavior::default()),
     }
+}
+
+fn select_none_bump_behavior() -> Result<NoneBumpBehavior> {
+    let items = [
+        "promote-to-patch - Treat none bumps as patch releases (default)",
+        "allow - Allow none bumps without version change",
+        "disallow - Reject changesets with none bump type",
+    ];
+
+    let selection = Select::new()
+        .with_prompt("Select none bump behavior")
+        .items(items)
+        .default(0)
+        .interact_opt()
+        .map_err(|e| match e {
+            dialoguer::Error::IO(io) => cli_to_operation_error(CliError::Io(io)),
+        })?;
+
+    match selection {
+        Some(0) => Ok(NoneBumpBehavior::PromoteToPatch),
+        Some(1) => Ok(NoneBumpBehavior::Allow),
+        Some(2) => Ok(NoneBumpBehavior::Disallow),
+        _ => Ok(NoneBumpBehavior::default()),
+    }
+}
+
+fn prompt_none_bump_promote_message_template() -> Result<String> {
+    Input::new()
+        .with_prompt("Changelog message template for promoted none bumps")
+        .default("Internal architectural changes".to_string())
+        .interact_text()
+        .map_err(|e| match e {
+            dialoguer::Error::IO(io) => cli_to_operation_error(CliError::Io(io)),
+        })
 }
 
 /// Asks the user for confirmation before proceeding.

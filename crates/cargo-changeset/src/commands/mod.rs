@@ -8,7 +8,9 @@ mod verify;
 use std::path::Path;
 
 use changeset_core::{BumpType, ChangeCategory};
-use changeset_manifest::{ChangelogLocation, ComparisonLinks, TagFormat, ZeroVersionBehavior};
+use changeset_manifest::{
+    ChangelogLocation, ComparisonLinks, NoneBumpBehavior, TagFormat, ZeroVersionBehavior,
+};
 use clap::{Args, Subcommand, ValueEnum};
 
 use crate::error::Result;
@@ -87,6 +89,14 @@ pub(crate) struct InitArgs {
     /// Default base branch for git comparisons (default: main)
     #[arg(long, value_name = "BRANCH")]
     pub base_branch: Option<String>,
+
+    /// None bump behavior: "promote-to-patch", "allow", or "disallow" (default: promote-to-patch)
+    #[arg(long, value_name = "BEHAVIOR")]
+    pub none_bump_behavior: Option<NoneBumpBehaviorArg>,
+
+    /// Custom changelog message template when none bumps are promoted to patch
+    #[arg(long, value_name = "MESSAGE")]
+    pub none_bump_promote_message_template: Option<String>,
 }
 
 #[derive(Clone, Copy, ValueEnum)]
@@ -147,6 +157,23 @@ impl From<ZeroVersionBehaviorArg> for ZeroVersionBehavior {
         match arg {
             ZeroVersionBehaviorArg::EffectiveMinor => Self::EffectiveMinor,
             ZeroVersionBehaviorArg::AutoPromoteOnMajor => Self::AutoPromoteOnMajor,
+        }
+    }
+}
+
+#[derive(Clone, Copy, ValueEnum)]
+pub(crate) enum NoneBumpBehaviorArg {
+    PromoteToPatch,
+    Allow,
+    Disallow,
+}
+
+impl From<NoneBumpBehaviorArg> for NoneBumpBehavior {
+    fn from(value: NoneBumpBehaviorArg) -> Self {
+        match value {
+            NoneBumpBehaviorArg::PromoteToPatch => Self::PromoteToPatch,
+            NoneBumpBehaviorArg::Allow => Self::Allow,
+            NoneBumpBehaviorArg::Disallow => Self::Disallow,
         }
     }
 }

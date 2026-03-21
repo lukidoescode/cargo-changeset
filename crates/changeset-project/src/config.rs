@@ -11,6 +11,7 @@ use crate::manifest::{ChangesetMetadata, TagFormatValue, read_manifest};
 use crate::project::{CargoProject, ProjectKind};
 const DEFAULT_DEPENDENCY_BUMP_CHANGELOG_TEMPLATE: &str =
     "Updated dependency `{dependency}` to v{version}";
+const DEFAULT_NONE_BUMP_PROMOTE_MESSAGE_TEMPLATE: &str = "Internal architectural changes";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum TagFormat {
@@ -91,6 +92,8 @@ pub struct RootChangesetConfig {
     zero_version_behavior: ZeroVersionBehavior,
     dependency_bump_changelog_template: String,
     base_branch: String,
+    none_bump_behavior: changeset_core::NoneBumpBehavior,
+    none_bump_promote_message_template: String,
 }
 
 impl Default for RootChangesetConfig {
@@ -105,6 +108,10 @@ impl Default for RootChangesetConfig {
                 DEFAULT_DEPENDENCY_BUMP_CHANGELOG_TEMPLATE,
             ),
             base_branch: String::from(DEFAULT_BASE_BRANCH),
+            none_bump_behavior: changeset_core::NoneBumpBehavior::default(),
+            none_bump_promote_message_template: String::from(
+                DEFAULT_NONE_BUMP_PROMOTE_MESSAGE_TEMPLATE,
+            ),
         }
     }
 }
@@ -150,10 +157,27 @@ impl RootChangesetConfig {
         &self.base_branch
     }
 
+    #[must_use]
+    pub fn none_bump_behavior(&self) -> changeset_core::NoneBumpBehavior {
+        self.none_bump_behavior
+    }
+
+    #[must_use]
+    pub fn none_bump_promote_message_template(&self) -> &str {
+        &self.none_bump_promote_message_template
+    }
+
     #[cfg(any(test, feature = "testing"))]
     #[must_use]
     pub fn with_git_config(mut self, git_config: GitConfig) -> Self {
         self.git_config = git_config;
+        self
+    }
+
+    #[cfg(any(test, feature = "testing"))]
+    #[must_use]
+    pub fn with_none_bump_behavior(mut self, behavior: changeset_core::NoneBumpBehavior) -> Self {
+        self.none_bump_behavior = behavior;
         self
     }
 }
@@ -288,6 +312,16 @@ fn parse_cargo_root_config(
         .and_then(|cs| cs.base_branch.clone())
         .unwrap_or_else(|| String::from(DEFAULT_BASE_BRANCH));
 
+    let none_bump_behavior = changeset_metadata
+        .as_ref()
+        .and_then(|cs| cs.none_bump_behavior)
+        .unwrap_or_default();
+
+    let none_bump_promote_message_template = changeset_metadata
+        .as_ref()
+        .and_then(|cs| cs.none_bump_promote_message_template.clone())
+        .unwrap_or_else(|| String::from(DEFAULT_NONE_BUMP_PROMOTE_MESSAGE_TEMPLATE));
+
     Ok(RootChangesetConfig {
         ignored_files,
         changeset_dir: PathBuf::from(changeset_dir),
@@ -296,6 +330,8 @@ fn parse_cargo_root_config(
         zero_version_behavior,
         dependency_bump_changelog_template,
         base_branch,
+        none_bump_behavior,
+        none_bump_promote_message_template,
     })
 }
 
@@ -893,6 +929,105 @@ base-branch = "master"
         let config = parse_cargo_root_config(dir.path(), CargoRootConfigType::Package)?;
 
         assert_eq!(config.base_branch(), "master");
+
+        Ok(())
+    }
+
+    #[test]
+    fn parse_none_bump_behavior_default() -> anyhow::Result<()> {
+        let toml = r#"
+[workspace]
+members = ["crates/*"]
+"#;
+        let dir = setup_with_config(toml)?;
+
+        let config = parse_cargo_root_config(dir.path(), CargoRootConfigType::Workspace)?;
+
+        assert_eq!(
+            config.none_bump_behavior(),
+            changeset_core::NoneBumpBehavior::PromoteToPatch
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn parse_none_bump_behavior_allow() -> anyhow::Result<()> {
+        let toml = r#"
+[workspace]
+members = ["crates/*"]
+
+[workspace.metadata.changeset]
+none-bump-behavior = "allow"
+"#;
+        let dir = setup_with_config(toml)?;
+
+        let config = parse_cargo_root_config(dir.path(), CargoRootConfigType::Workspace)?;
+
+        assert_eq!(
+            config.none_bump_behavior(),
+            changeset_core::NoneBumpBehavior::Allow
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn parse_none_bump_behavior_disallow() -> anyhow::Result<()> {
+        let toml = r#"
+[workspace]
+members = ["crates/*"]
+
+[workspace.metadata.changeset]
+none-bump-behavior = "disallow"
+"#;
+        let dir = setup_with_config(toml)?;
+
+        let config = parse_cargo_root_config(dir.path(), CargoRootConfigType::Workspace)?;
+
+        assert_eq!(
+            config.none_bump_behavior(),
+            changeset_core::NoneBumpBehavior::Disallow
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn parse_none_bump_promote_message_template_custom() -> anyhow::Result<()> {
+        let toml = r#"
+[workspace]
+members = ["crates/*"]
+
+[workspace.metadata.changeset]
+none-bump-promote-message-template = "chore: internal refactor"
+"#;
+        let dir = setup_with_config(toml)?;
+
+        let config = parse_cargo_root_config(dir.path(), CargoRootConfigType::Workspace)?;
+
+        assert_eq!(
+            config.none_bump_promote_message_template(),
+            "chore: internal refactor"
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn parse_none_bump_promote_message_template_default() -> anyhow::Result<()> {
+        let toml = r#"
+[workspace]
+members = ["crates/*"]
+"#;
+        let dir = setup_with_config(toml)?;
+
+        let config = parse_cargo_root_config(dir.path(), CargoRootConfigType::Workspace)?;
+
+        assert_eq!(
+            config.none_bump_promote_message_template(),
+            "Internal architectural changes"
+        );
 
         Ok(())
     }

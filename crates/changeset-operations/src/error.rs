@@ -108,6 +108,9 @@ pub enum OperationError {
     #[error("packages with inherited versions require --convert flag: {}", packages.join(", "))]
     InheritedVersionsRequireConvert { packages: Vec<String> },
 
+    #[error("changesets with bump type 'none' are disallowed; affected packages: {}", packages.join(", "))]
+    NoneBumpDisallowed { packages: Vec<String> },
+
     #[error("comparison links enabled but no repository URL available")]
     ComparisonLinksRequired,
 

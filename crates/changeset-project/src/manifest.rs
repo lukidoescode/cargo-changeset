@@ -115,6 +115,10 @@ pub(crate) struct ChangesetMetadata {
     pub(crate) dependency_bump_changelog_template: Option<String>,
     #[serde(default)]
     pub(crate) base_branch: Option<String>,
+    #[serde(default)]
+    pub(crate) none_bump_behavior: Option<changeset_core::NoneBumpBehavior>,
+    #[serde(default)]
+    pub(crate) none_bump_promote_message_template: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Clone, Copy)]
