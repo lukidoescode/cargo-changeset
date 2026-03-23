@@ -7,20 +7,17 @@ use changeset_project::{CargoProject, ProjectKind, RootChangesetConfig};
 
 use crate::Result;
 use crate::traits::{
-    ChangelogSettingsInput, GitSettingsInput, InitInteractionProvider, ManifestMetadataWriter,
-    ProjectContext, ProjectProvider, VersionSettingsInput,
+    ChangelogSettingsInput, FilteringSettingsInput, GitSettingsInput, InitInteractionProvider,
+    ManifestMetadataWriter, ProjectContext, ProjectProvider, VersionSettingsInput,
 };
 
-/// Configuration sources have the following precedence (highest to lowest):
-/// 1. `defaults: true` - Uses all default values, ignores other fields
-/// 2. Explicit `git_config`, `changelog_config`, `version_config` fields
-/// 3. Interactive prompts via `InitInteractionProvider` (only if no explicit config)
 #[derive(Debug, Default)]
 pub struct InitInput {
     pub defaults: bool,
     pub git_config: Option<GitSettingsInput>,
     pub changelog_config: Option<ChangelogSettingsInput>,
     pub version_config: Option<VersionSettingsInput>,
+    pub filtering_config: Option<FilteringSettingsInput>,
 }
 
 #[derive(Debug)]
@@ -59,6 +56,54 @@ where
             interaction_provider: None,
         }
     }
+
+    /// # Errors
+    ///
+    /// Returns an error if the project cannot be discovered.
+    pub fn prepare_simple(&self, start_path: &Path) -> Result<InitPlan> {
+        let project = self.project_provider.discover_project(start_path)?;
+        let (root_config, _) = self.project_provider.load_configs(&project)?;
+
+        Ok(build_init_plan(
+            &project,
+            &root_config,
+            InitConfig::default(),
+        ))
+    }
+
+    /// # Errors
+    ///
+    /// Returns an error if the changeset directory cannot be created.
+    pub fn execute_simple_plan(&self, start_path: &Path, plan: &InitPlan) -> Result<InitOutput> {
+        let project = self.project_provider.discover_project(start_path)?;
+        let (root_config, _) = self.project_provider.load_configs(&project)?;
+
+        let changeset_dir = self
+            .project_provider
+            .ensure_changeset_dir(&project, &root_config)?;
+
+        let gitkeep_path = changeset_dir.join(".gitkeep");
+        if !plan.gitkeep_exists {
+            fs::write(&gitkeep_path, "")?;
+        }
+
+        Ok(InitOutput {
+            changeset_dir,
+            created_dir: !plan.dir_exists,
+            created_gitkeep: !plan.gitkeep_exists,
+            wrote_config: false,
+            config_location: None,
+        })
+    }
+
+    /// # Errors
+    ///
+    /// Returns an error if the project cannot be discovered or the changeset
+    /// directory cannot be created.
+    pub fn execute_simple(&self, start_path: &Path) -> Result<InitOutput> {
+        let plan = self.prepare_simple(start_path)?;
+        self.execute_simple_plan(start_path, &plan)
+    }
 }
 
 impl<P, M, I> InitOperation<P, M, I>
@@ -90,9 +135,6 @@ where
     M: ManifestMetadataWriter,
     I: InitInteractionProvider,
 {
-    /// Prepares an initialization plan by collecting all configuration without
-    /// performing any file system operations.
-    ///
     /// # Errors
     ///
     /// Returns an error if the project cannot be discovered or configuration
@@ -109,8 +151,6 @@ where
         Ok(build_init_plan(&project, &root_config, config))
     }
 
-    /// Executes the init operation using a pre-built plan.
-    ///
     /// # Errors
     ///
     /// Returns an error if the changeset directory cannot be created or
@@ -153,8 +193,6 @@ where
         })
     }
 
-    /// Executes the full init operation (prepare + execute).
-    ///
     /// # Errors
     ///
     /// Returns an error if the project cannot be discovered, the changeset
@@ -169,26 +207,14 @@ where
 
         if config.is_empty() {
             if let Some(ref provider) = self.interaction_provider {
-                if let Some(git) = provider.configure_git_settings(context)? {
-                    config.commit = Some(git.commit);
-                    config.tags = Some(git.tags);
-                    config.keep_changesets = Some(git.keep_changesets);
-                    config.tag_format = Some(git.tag_format);
-                    config.base_branch = Some(git.base_branch.clone());
-                }
-
-                if let Some(changelog) = provider.configure_changelog_settings(context)? {
-                    config.changelog = Some(changelog.changelog);
-                    config.comparison_links = Some(changelog.comparison_links);
-                }
-
-                if let Some(version) = provider.configure_version_settings()? {
-                    config.zero_version_behavior = version.zero_version_behavior;
-                    config.none_bump_behavior = version.none_bump_behavior;
-                    config
-                        .none_bump_promote_message_template
-                        .clone_from(&version.none_bump_promote_message_template);
-                }
+                let interactive_input = InitInput {
+                    git_config: provider.configure_git_settings(context)?,
+                    changelog_config: provider.configure_changelog_settings(context)?,
+                    version_config: provider.configure_version_settings()?,
+                    filtering_config: provider.configure_filtering_settings()?,
+                    ..Default::default()
+                };
+                apply_settings_to_config(&mut config, &interactive_input);
             }
         }
 
@@ -222,8 +248,6 @@ fn build_init_plan(
     }
 }
 
-/// Builds the default configuration with all options set to their defaults.
-///
 /// The tag format default varies by project type:
 /// - Single package: `version-only` (e.g., `v1.0.0`)
 /// - Workspace: `crate-prefixed` (e.g., `crate-name@1.0.0`)
@@ -249,6 +273,10 @@ pub(crate) fn build_default_config(context: ProjectContext) -> InitConfig {
         base_branch: Some(String::from(DEFAULT_BASE_BRANCH)),
         none_bump_behavior: Some(changeset_manifest::NoneBumpBehavior::default()),
         none_bump_promote_message_template: None,
+        commit_title_template: Some(String::from("{new-version}")),
+        changes_in_body: Some(true),
+        comparison_links_template: None,
+        ignored_files: None,
     }
 }
 
@@ -259,18 +287,32 @@ pub fn build_config_from_input(input: &InitInput, context: ProjectContext) -> In
     }
 
     let mut config = InitConfig::default();
+    apply_settings_to_config(&mut config, input);
+    config
+}
 
+fn apply_settings_to_config(config: &mut InitConfig, input: &InitInput) {
     if let Some(ref git) = input.git_config {
         config.commit = Some(git.commit);
         config.tags = Some(git.tags);
         config.keep_changesets = Some(git.keep_changesets);
         config.tag_format = Some(git.tag_format);
         config.base_branch = Some(git.base_branch.clone());
+        config
+            .commit_title_template
+            .clone_from(&git.commit_title_template);
+        config.changes_in_body = git.changes_in_body;
     }
 
     if let Some(ref changelog) = input.changelog_config {
         config.changelog = Some(changelog.changelog);
         config.comparison_links = Some(changelog.comparison_links);
+        config
+            .comparison_links_template
+            .clone_from(&changelog.comparison_links_template);
+        config
+            .dependency_bump_changelog_template
+            .clone_from(&changelog.dependency_bump_changelog_template);
     }
 
     if let Some(ref version) = input.version_config {
@@ -281,66 +323,10 @@ pub fn build_config_from_input(input: &InitInput, context: ProjectContext) -> In
             .clone_from(&version.none_bump_promote_message_template);
     }
 
-    config
-}
-
-impl<P> InitOperation<P, (), ()>
-where
-    P: ProjectProvider,
-{
-    /// Prepares a simple initialization plan without configuration.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the project cannot be discovered.
-    pub fn prepare_simple(&self, start_path: &Path) -> Result<InitPlan> {
-        let project = self.project_provider.discover_project(start_path)?;
-        let (root_config, _) = self.project_provider.load_configs(&project)?;
-
-        Ok(build_init_plan(
-            &project,
-            &root_config,
-            InitConfig::default(),
-        ))
-    }
-
-    /// Executes the simple init operation using a pre-built plan.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the changeset directory cannot be created.
-    pub fn execute_simple_plan(&self, start_path: &Path, plan: &InitPlan) -> Result<InitOutput> {
-        let project = self.project_provider.discover_project(start_path)?;
-        let (root_config, _) = self.project_provider.load_configs(&project)?;
-
-        let changeset_dir = self
-            .project_provider
-            .ensure_changeset_dir(&project, &root_config)?;
-
-        let gitkeep_path = changeset_dir.join(".gitkeep");
-        if !plan.gitkeep_exists {
-            fs::write(&gitkeep_path, "")?;
+    if let Some(ref filtering) = input.filtering_config {
+        if !filtering.ignored_files.is_empty() {
+            config.ignored_files = Some(filtering.ignored_files.clone());
         }
-
-        Ok(InitOutput {
-            changeset_dir,
-            created_dir: !plan.dir_exists,
-            created_gitkeep: !plan.gitkeep_exists,
-            wrote_config: false,
-            config_location: None,
-        })
-    }
-
-    /// Simple execute method for backward compatibility when no manifest writer
-    /// or interaction provider is configured.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the project cannot be discovered or the changeset
-    /// directory cannot be created.
-    pub fn execute_simple(&self, start_path: &Path) -> Result<InitOutput> {
-        let plan = self.prepare_simple(start_path)?;
-        self.execute_simple_plan(start_path, &plan)
     }
 }
 
@@ -492,15 +478,18 @@ mod tests {
                 keep_changesets: true,
                 tag_format: TagFormat::CratePrefixed,
                 base_branch: String::from("main"),
+                ..Default::default()
             }),
             changelog_config: Some(ChangelogSettingsInput {
                 changelog: ChangelogLocation::PerPackage,
                 comparison_links: ComparisonLinks::Enabled,
+                ..Default::default()
             }),
             version_config: Some(VersionSettingsInput {
                 zero_version_behavior: Some(ZeroVersionBehavior::AutoPromoteOnMajor),
                 ..Default::default()
             }),
+            ..Default::default()
         };
 
         let result = operation
@@ -547,9 +536,11 @@ mod tests {
                 keep_changesets: false,
                 tag_format: TagFormat::VersionOnly,
                 base_branch: String::from("main"),
+                ..Default::default()
             }),
             changelog_config: None,
             version_config: None,
+            ..Default::default()
         };
 
         let result = operation
@@ -763,14 +754,12 @@ mod tests {
         };
 
         let input = InitInput {
-            defaults: false,
-            git_config: None,
-            changelog_config: None,
             version_config: Some(VersionSettingsInput {
                 zero_version_behavior: Some(ZeroVersionBehavior::default()),
                 none_bump_behavior: Some(NoneBumpBehavior::Disallow),
                 none_bump_promote_message_template: Some("Custom message".to_string()),
             }),
+            ..Default::default()
         };
 
         let config = build_config_from_input(&input, context);
@@ -787,16 +776,170 @@ mod tests {
             is_single_package: true,
         };
 
-        let input = InitInput {
-            defaults: false,
-            git_config: None,
-            changelog_config: None,
-            version_config: None,
-        };
+        let input = InitInput::default();
 
         let config = build_config_from_input(&input, context);
         assert!(config.none_bump_behavior.is_none());
         assert!(config.none_bump_promote_message_template.is_none());
+    }
+
+    #[test]
+    fn commit_title_template_propagates_from_git_settings() {
+        let context = ProjectContext {
+            is_single_package: true,
+        };
+
+        let input = InitInput {
+            git_config: Some(GitSettingsInput {
+                commit_title_template: Some("Release {new-version}".to_string()),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+
+        let config = build_config_from_input(&input, context);
+        assert_eq!(
+            config.commit_title_template,
+            Some("Release {new-version}".to_string())
+        );
+    }
+
+    #[test]
+    fn changes_in_body_propagates_from_git_settings() {
+        let context = ProjectContext {
+            is_single_package: true,
+        };
+
+        let input = InitInput {
+            git_config: Some(GitSettingsInput {
+                changes_in_body: Some(false),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+
+        let config = build_config_from_input(&input, context);
+        assert_eq!(config.changes_in_body, Some(false));
+    }
+
+    #[test]
+    fn comparison_links_template_propagates_from_changelog_settings() {
+        let context = ProjectContext {
+            is_single_package: true,
+        };
+
+        let input = InitInput {
+            changelog_config: Some(ChangelogSettingsInput {
+                comparison_links_template: Some(
+                    "https://github.com/org/repo/compare/{base}...{target}".to_string(),
+                ),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+
+        let config = build_config_from_input(&input, context);
+        assert_eq!(
+            config.comparison_links_template,
+            Some("https://github.com/org/repo/compare/{base}...{target}".to_string())
+        );
+    }
+
+    #[test]
+    fn dependency_bump_changelog_template_propagates_from_changelog_settings() {
+        let context = ProjectContext {
+            is_single_package: true,
+        };
+
+        let input = InitInput {
+            changelog_config: Some(ChangelogSettingsInput {
+                dependency_bump_changelog_template: Some(
+                    "Updated `{dependency}` to v{version}".to_string(),
+                ),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+
+        let config = build_config_from_input(&input, context);
+        assert_eq!(
+            config.dependency_bump_changelog_template,
+            Some("Updated `{dependency}` to v{version}".to_string())
+        );
+    }
+
+    #[test]
+    fn filtering_config_propagates_ignored_files() {
+        let context = ProjectContext {
+            is_single_package: true,
+        };
+
+        let input = InitInput {
+            filtering_config: Some(FilteringSettingsInput {
+                ignored_files: vec!["*.lock".to_string(), "docs/**".to_string()],
+            }),
+            ..Default::default()
+        };
+
+        let config = build_config_from_input(&input, context);
+        assert_eq!(
+            config.ignored_files,
+            Some(vec!["*.lock".to_string(), "docs/**".to_string()])
+        );
+    }
+
+    #[test]
+    fn filtering_config_skips_empty_ignored_files() {
+        let context = ProjectContext {
+            is_single_package: true,
+        };
+
+        let input = InitInput {
+            filtering_config: Some(FilteringSettingsInput {
+                ignored_files: vec![],
+            }),
+            ..Default::default()
+        };
+
+        let config = build_config_from_input(&input, context);
+        assert!(config.ignored_files.is_none());
+    }
+
+    #[test]
+    fn interactive_mode_collects_filtering_settings() {
+        let dir = tempfile::tempdir().expect("create temp dir");
+        let changeset_dir = dir.path().join(".changeset");
+        std::fs::create_dir_all(&changeset_dir).expect("create changeset dir");
+
+        let project_provider = MockProjectProvider::single_package("my-crate", "1.0.0")
+            .with_changeset_dir(changeset_dir.clone());
+        let manifest_writer = Arc::new(MockManifestWriter::new());
+        let interaction_provider = Arc::new(
+            MockInitInteractionProvider::new()
+                .with_git_settings(Some(GitSettingsInput::default()))
+                .with_changelog_settings(None)
+                .with_version_settings(None)
+                .with_filtering_settings(Some(FilteringSettingsInput {
+                    ignored_files: vec!["*.lock".to_string()],
+                })),
+        );
+
+        let operation = InitOperation::new(project_provider)
+            .with_manifest_writer(Arc::clone(&manifest_writer))
+            .with_interaction_provider(Arc::clone(&interaction_provider));
+
+        let input = InitInput::default();
+
+        let result = operation
+            .execute(Path::new("/any"), &input)
+            .expect("InitOperation failed");
+
+        assert!(result.wrote_config);
+
+        let written = manifest_writer.written_metadata();
+        assert_eq!(written.len(), 1);
+        let (_, _, config) = &written[0];
+        assert_eq!(config.ignored_files, Some(vec!["*.lock".to_string()]));
     }
 
     #[test]
@@ -815,16 +958,15 @@ mod tests {
             .with_interaction_provider(Arc::clone(&interaction_provider));
 
         let input = InitInput {
-            defaults: false,
             git_config: Some(GitSettingsInput {
                 commit: true,
                 tags: true,
                 keep_changesets: false,
                 tag_format: TagFormat::VersionOnly,
                 base_branch: String::from("develop"),
+                ..Default::default()
             }),
-            changelog_config: None,
-            version_config: None,
+            ..Default::default()
         };
 
         let _ = operation

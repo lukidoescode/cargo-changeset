@@ -150,6 +150,10 @@ pub struct InitConfig {
     pub base_branch: Option<String>,
     pub none_bump_behavior: Option<NoneBumpBehavior>,
     pub none_bump_promote_message_template: Option<String>,
+    pub commit_title_template: Option<String>,
+    pub changes_in_body: Option<bool>,
+    pub comparison_links_template: Option<String>,
+    pub ignored_files: Option<Vec<String>>,
 }
 
 impl InitConfig {
@@ -166,6 +170,10 @@ impl InitConfig {
             && self.base_branch.is_none()
             && self.none_bump_behavior.is_none()
             && self.none_bump_promote_message_template.is_none()
+            && self.commit_title_template.is_none()
+            && self.changes_in_body.is_none()
+            && self.comparison_links_template.is_none()
+            && self.ignored_files.is_none()
     }
 }
 
@@ -206,6 +214,44 @@ mod tests {
     fn is_empty_returns_false_when_only_none_bump_promote_message_template_set() {
         let config = InitConfig {
             none_bump_promote_message_template: Some("chore: internal changes".to_string()),
+            ..Default::default()
+        };
+        assert!(!config.is_empty());
+    }
+
+    #[test]
+    fn is_empty_returns_false_when_only_commit_title_template_set() {
+        let config = InitConfig {
+            commit_title_template: Some("{new-version}".to_string()),
+            ..Default::default()
+        };
+        assert!(!config.is_empty());
+    }
+
+    #[test]
+    fn is_empty_returns_false_when_only_changes_in_body_set() {
+        let config = InitConfig {
+            changes_in_body: Some(true),
+            ..Default::default()
+        };
+        assert!(!config.is_empty());
+    }
+
+    #[test]
+    fn is_empty_returns_false_when_only_comparison_links_template_set() {
+        let config = InitConfig {
+            comparison_links_template: Some(
+                "https://example.com/{repository}/compare/{base}...{target}".to_string(),
+            ),
+            ..Default::default()
+        };
+        assert!(!config.is_empty());
+    }
+
+    #[test]
+    fn is_empty_returns_false_when_only_ignored_files_set() {
+        let config = InitConfig {
+            ignored_files: Some(vec!["*.md".to_string()]),
             ..Default::default()
         };
         assert!(!config.is_empty());

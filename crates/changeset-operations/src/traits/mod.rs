@@ -17,8 +17,8 @@ pub use git_provider::{
 };
 pub use inherited_version_checker::InheritedVersionChecker;
 pub use init_interaction::{
-    ChangelogSettingsInput, GitSettingsInput, InitInteractionProvider, ProjectContext,
-    VersionSettingsInput,
+    ChangelogSettingsInput, FilteringSettingsInput, GitSettingsInput, InitInteractionProvider,
+    ProjectContext, VersionSettingsInput,
 };
 pub use interaction::{
     BumpSelection, CategorySelection, DescriptionInput, InteractionProvider, PackageSelection,

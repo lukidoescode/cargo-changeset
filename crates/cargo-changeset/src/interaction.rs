@@ -11,21 +11,21 @@ use changeset_manifest::{
 };
 use changeset_operations::Result;
 use changeset_operations::traits::{
-    BumpSelection, CategorySelection, ChangelogSettingsInput, DescriptionInput, GitSettingsInput,
-    InitInteractionProvider, InteractionProvider, PackageSelection, ProjectContext,
-    VersionSettingsInput,
+    BumpSelection, CategorySelection, ChangelogSettingsInput, DescriptionInput,
+    FilteringSettingsInput, GitSettingsInput, InitInteractionProvider, InteractionProvider,
+    PackageSelection, ProjectContext, VersionSettingsInput,
 };
 use dialoguer::{Confirm, Input, MultiSelect, Select};
 
 use crate::error::CliError;
 
-pub struct TerminalInteractionProvider {
+pub(crate) struct TerminalInteractionProvider {
     use_editor: bool,
 }
 
 impl TerminalInteractionProvider {
     #[must_use]
-    pub fn new(use_editor: bool) -> Self {
+    pub(crate) fn new(use_editor: bool) -> Self {
         Self { use_editor }
     }
 }
@@ -56,9 +56,7 @@ impl InteractionProvider for TerminalInteractionProvider {
             .with_prompt("Select packages to include in changeset")
             .items(items)
             .interact_opt()
-            .map_err(|e| match e {
-                dialoguer::Error::IO(io_err) => cli_to_operation_error(CliError::Io(io_err)),
-            })?;
+            .map_err(from_dialoguer)?;
 
         match selection {
             Some(indices) => {
@@ -82,9 +80,7 @@ impl InteractionProvider for TerminalInteractionProvider {
             .items(items)
             .default(0)
             .interact_opt()
-            .map_err(|e| match e {
-                dialoguer::Error::IO(io_err) => cli_to_operation_error(CliError::Io(io_err)),
-            })?;
+            .map_err(from_dialoguer)?;
 
         match selection {
             Some(0) => Ok(BumpSelection::Selected(BumpType::Patch)),
@@ -110,9 +106,7 @@ impl InteractionProvider for TerminalInteractionProvider {
             .items(items)
             .default(0)
             .interact_opt()
-            .map_err(|e| match e {
-                dialoguer::Error::IO(io_err) => cli_to_operation_error(CliError::Io(io_err)),
-            })?;
+            .map_err(from_dialoguer)?;
 
         match selection {
             Some(0) => Ok(CategorySelection::Selected(ChangeCategory::Changed)),
@@ -131,6 +125,12 @@ impl InteractionProvider for TerminalInteractionProvider {
         } else {
             get_description_terminal().map_err(cli_to_operation_error)
         }
+    }
+}
+
+fn from_dialoguer(e: dialoguer::Error) -> std::io::Error {
+    match e {
+        dialoguer::Error::IO(io) => io,
     }
 }
 
@@ -217,7 +217,7 @@ fn get_description_editor() -> std::result::Result<DescriptionInput, CliError> {
     Ok(DescriptionInput::Provided(description))
 }
 
-pub struct NonInteractiveProvider;
+pub(crate) struct NonInteractiveProvider;
 
 impl InteractionProvider for NonInteractiveProvider {
     fn select_packages(
@@ -243,11 +243,12 @@ impl InteractionProvider for NonInteractiveProvider {
     }
 }
 
-pub struct TerminalInitInteractionProvider;
+#[derive(Default)]
+pub(crate) struct TerminalInitInteractionProvider;
 
 impl TerminalInitInteractionProvider {
     #[must_use]
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self
     }
 }
@@ -262,9 +263,7 @@ impl InitInteractionProvider for TerminalInitInteractionProvider {
             .with_prompt("Configure git settings?")
             .default(true)
             .interact_opt()
-            .map_err(|e| match e {
-                dialoguer::Error::IO(io) => cli_to_operation_error(CliError::Io(io)),
-            })?;
+            .map_err(from_dialoguer)?;
 
         if configure != Some(true) {
             return Ok(None);
@@ -276,12 +275,22 @@ impl InitInteractionProvider for TerminalInitInteractionProvider {
         let tag_format = select_tag_format(context.is_single_package)?;
         let base_branch = prompt_base_branch()?;
 
+        let (commit_title_template, changes_in_body) = if commit {
+            let template = prompt_commit_title_template()?;
+            let body = select_bool("Include version details in commit body?", true)?;
+            (Some(template), Some(body))
+        } else {
+            (None, None)
+        };
+
         Ok(Some(GitSettingsInput {
             commit,
             tags,
             keep_changesets,
             tag_format,
             base_branch,
+            commit_title_template,
+            changes_in_body,
         }))
     }
 
@@ -297,9 +306,7 @@ impl InitInteractionProvider for TerminalInitInteractionProvider {
             .with_prompt("Configure changelog settings?")
             .default(true)
             .interact_opt()
-            .map_err(|e| match e {
-                dialoguer::Error::IO(io) => cli_to_operation_error(CliError::Io(io)),
-            })?;
+            .map_err(from_dialoguer)?;
 
         if configure != Some(true) {
             return Ok(None);
@@ -312,9 +319,30 @@ impl InitInteractionProvider for TerminalInitInteractionProvider {
         };
         let comparison_links = select_comparison_links()?;
 
+        let comparison_links_template = if comparison_links != ComparisonLinks::Disabled {
+            let template = prompt_comparison_links_template()?;
+            if template.is_empty() {
+                None
+            } else {
+                Some(template)
+            }
+        } else {
+            None
+        };
+
+        let dep_template = prompt_dependency_bump_changelog_template()?;
+        let dependency_bump_changelog_template =
+            if dep_template == "Updated dependency `{dependency}` to v{version}" {
+                None
+            } else {
+                Some(dep_template)
+            };
+
         Ok(Some(ChangelogSettingsInput {
             changelog,
             comparison_links,
+            comparison_links_template,
+            dependency_bump_changelog_template,
         }))
     }
 
@@ -327,9 +355,7 @@ impl InitInteractionProvider for TerminalInitInteractionProvider {
             .with_prompt("Configure version settings?")
             .default(true)
             .interact_opt()
-            .map_err(|e| match e {
-                dialoguer::Error::IO(io) => cli_to_operation_error(CliError::Io(io)),
-            })?;
+            .map_err(from_dialoguer)?;
 
         if configure != Some(true) {
             return Ok(None);
@@ -350,26 +376,46 @@ impl InitInteractionProvider for TerminalInitInteractionProvider {
             none_bump_promote_message_template,
         }))
     }
+
+    fn configure_filtering_settings(&self) -> Result<Option<FilteringSettingsInput>> {
+        if !is_interactive() {
+            return Ok(None);
+        }
+
+        let configure = Confirm::new()
+            .with_prompt("Configure file filtering?")
+            .default(false)
+            .interact_opt()
+            .map_err(from_dialoguer)?;
+
+        if configure != Some(true) {
+            return Ok(None);
+        }
+
+        let ignored_files = prompt_ignored_files_loop()?;
+
+        if ignored_files.is_empty() {
+            return Ok(None);
+        }
+
+        Ok(Some(FilteringSettingsInput { ignored_files }))
+    }
 }
 
 fn prompt_base_branch() -> Result<String> {
-    Input::new()
+    Ok(Input::new()
         .with_prompt("Default base branch for git comparisons")
         .default(DEFAULT_BASE_BRANCH.to_string())
         .interact_text()
-        .map_err(|e| match e {
-            dialoguer::Error::IO(io) => cli_to_operation_error(CliError::Io(io)),
-        })
+        .map_err(from_dialoguer)?)
 }
 
 fn select_bool(prompt: &str, default: bool) -> Result<bool> {
-    Confirm::new()
+    Ok(Confirm::new()
         .with_prompt(prompt)
         .default(default)
         .interact()
-        .map_err(|e| match e {
-            dialoguer::Error::IO(io) => cli_to_operation_error(CliError::Io(io)),
-        })
+        .map_err(from_dialoguer)?)
 }
 
 fn select_tag_format(is_single_package: bool) -> Result<TagFormat> {
@@ -396,9 +442,7 @@ fn select_tag_format(is_single_package: bool) -> Result<TagFormat> {
         .items(items)
         .default(default_idx)
         .interact_opt()
-        .map_err(|e| match e {
-            dialoguer::Error::IO(io) => cli_to_operation_error(CliError::Io(io)),
-        })?;
+        .map_err(from_dialoguer)?;
 
     match selection {
         Some(0) => Ok(TagFormat::VersionOnly),
@@ -424,9 +468,7 @@ fn select_changelog_location() -> Result<ChangelogLocation> {
         .items(items)
         .default(0)
         .interact_opt()
-        .map_err(|e| match e {
-            dialoguer::Error::IO(io) => cli_to_operation_error(CliError::Io(io)),
-        })?;
+        .map_err(from_dialoguer)?;
 
     match selection {
         Some(0) => Ok(ChangelogLocation::Root),
@@ -447,9 +489,7 @@ fn select_comparison_links() -> Result<ComparisonLinks> {
         .items(items)
         .default(0)
         .interact_opt()
-        .map_err(|e| match e {
-            dialoguer::Error::IO(io) => cli_to_operation_error(CliError::Io(io)),
-        })?;
+        .map_err(from_dialoguer)?;
 
     match selection {
         Some(0) => Ok(ComparisonLinks::Auto),
@@ -470,9 +510,7 @@ fn select_zero_version_behavior() -> Result<ZeroVersionBehavior> {
         .items(items)
         .default(0)
         .interact_opt()
-        .map_err(|e| match e {
-            dialoguer::Error::IO(io) => cli_to_operation_error(CliError::Io(io)),
-        })?;
+        .map_err(from_dialoguer)?;
 
     match selection {
         Some(0) => Ok(ZeroVersionBehavior::EffectiveMinor),
@@ -493,9 +531,7 @@ fn select_none_bump_behavior() -> Result<NoneBumpBehavior> {
         .items(items)
         .default(0)
         .interact_opt()
-        .map_err(|e| match e {
-            dialoguer::Error::IO(io) => cli_to_operation_error(CliError::Io(io)),
-        })?;
+        .map_err(from_dialoguer)?;
 
     match selection {
         Some(0) => Ok(NoneBumpBehavior::PromoteToPatch),
@@ -505,14 +541,58 @@ fn select_none_bump_behavior() -> Result<NoneBumpBehavior> {
     }
 }
 
+fn prompt_commit_title_template() -> Result<String> {
+    Ok(Input::new()
+        .with_prompt("Commit title template (placeholder: {new-version})")
+        .default("{new-version}".to_string())
+        .interact_text()
+        .map_err(from_dialoguer)?)
+}
+
+fn prompt_comparison_links_template() -> Result<String> {
+    Ok(Input::new()
+        .with_prompt(
+            "Comparison links template (empty=auto-detect, placeholders: {repository}, {base}, {target})",
+        )
+        .default(String::new())
+        .allow_empty(true)
+        .interact_text()
+        .map_err(from_dialoguer)?)
+}
+
+fn prompt_dependency_bump_changelog_template() -> Result<String> {
+    Ok(Input::new()
+        .with_prompt("Dependency bump changelog template (placeholders: {dependency}, {version})")
+        .default("Updated dependency `{dependency}` to v{version}".to_string())
+        .interact_text()
+        .map_err(from_dialoguer)?)
+}
+
+fn prompt_ignored_files_loop() -> Result<Vec<String>> {
+    let mut patterns = Vec::new();
+    loop {
+        let pattern: String = Input::new()
+            .with_prompt("Add ignore pattern (empty to finish)")
+            .default(String::new())
+            .allow_empty(true)
+            .interact_text()
+            .map_err(from_dialoguer)?;
+
+        let trimmed = pattern.trim().to_string();
+        if trimmed.is_empty() {
+            break;
+        }
+        patterns.push(trimmed);
+    }
+    Ok(patterns)
+}
+
 fn prompt_none_bump_promote_message_template() -> Result<String> {
-    Input::new()
+    Ok(Input::new()
         .with_prompt("Changelog message template for promoted none bumps")
         .default("Internal architectural changes".to_string())
         .interact_text()
-        .map_err(|e| match e {
-            dialoguer::Error::IO(io) => cli_to_operation_error(CliError::Io(io)),
-        })
+        .map_err(from_dialoguer)?)
 }
 
 /// Asks the user for confirmation before proceeding.
@@ -531,9 +611,7 @@ pub fn confirm_proceed(prompt: &str) -> crate::error::Result<bool> {
         .with_prompt(prompt)
         .default(true)
         .interact_opt()
-        .map_err(|e| match e {
-            dialoguer::Error::IO(io) => CliError::Io(io),
-        })?;
+        .map_err(from_dialoguer)?;
 
     Ok(confirmed == Some(true))
 }
