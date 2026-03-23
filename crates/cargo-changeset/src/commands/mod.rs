@@ -97,6 +97,26 @@ pub(crate) struct InitArgs {
     /// Custom changelog message template when none bumps are promoted to patch
     #[arg(long, value_name = "MESSAGE")]
     pub none_bump_promote_message_template: Option<String>,
+
+    /// Commit title template (default: "{new-version}")
+    #[arg(long, value_name = "TEMPLATE")]
+    pub commit_title_template: Option<String>,
+
+    /// Include version transition details in commit body (default: true)
+    #[arg(long)]
+    pub changes_in_body: Option<bool>,
+
+    /// Custom comparison links template for changelogs
+    #[arg(long, value_name = "TEMPLATE")]
+    pub comparison_links_template: Option<String>,
+
+    /// Custom dependency bump changelog template
+    #[arg(long, value_name = "TEMPLATE")]
+    pub dependency_bump_changelog_template: Option<String>,
+
+    /// Glob patterns for files to ignore in change detection (can be repeated)
+    #[arg(long = "ignored-file", value_name = "PATTERN")]
+    pub ignored_files: Vec<String>,
 }
 
 #[derive(Clone, Copy, ValueEnum)]

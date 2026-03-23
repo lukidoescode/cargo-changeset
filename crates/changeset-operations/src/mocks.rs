@@ -16,12 +16,13 @@ use crate::Result;
 use crate::traits::{
     BumpSelection, CategorySelection, ChangelogSettingsInput, ChangelogWriteResult,
     ChangelogWriter, ChangesetReader, ChangesetWriter, DependencyGraphProvider, DescriptionInput,
-    GitCommitProvider, GitDiffProvider, GitSettingsInput, GitStagingProvider, GitStatusProvider,
-    GitTagProvider, GitWorkdirDiffProvider, GraduationAction, GraduationInteractionProvider,
-    InheritedVersionChecker, InitInteractionProvider, InteractionProvider, LockfileUpdater,
-    ManifestDependencyWriter, ManifestMetadataWriter, ManifestVersionWriter, MenuSelection,
-    PackageSelection, PrereleaseAction, PrereleaseInteractionProvider, ProjectContext,
-    ProjectProvider, ReleaseStateIO, VersionSettingsInput, WorkspaceVersionManager,
+    FilteringSettingsInput, GitCommitProvider, GitDiffProvider, GitSettingsInput,
+    GitStagingProvider, GitStatusProvider, GitTagProvider, GitWorkdirDiffProvider,
+    GraduationAction, GraduationInteractionProvider, InheritedVersionChecker,
+    InitInteractionProvider, InteractionProvider, LockfileUpdater, ManifestDependencyWriter,
+    ManifestMetadataWriter, ManifestVersionWriter, MenuSelection, PackageSelection,
+    PrereleaseAction, PrereleaseInteractionProvider, ProjectContext, ProjectProvider,
+    ReleaseStateIO, VersionSettingsInput, WorkspaceVersionManager,
 };
 
 macro_rules! impl_arc_delegation {
@@ -187,9 +188,6 @@ impl MockChangesetReader {
         }
     }
 
-    /// # Panics
-    ///
-    /// Panics if the internal mutex is poisoned.
     #[must_use]
     pub fn with_changeset(mut self, path: PathBuf, changeset: Changeset) -> Self {
         self.listed_files.push(path.clone());
@@ -200,9 +198,6 @@ impl MockChangesetReader {
         self
     }
 
-    /// # Panics
-    ///
-    /// Panics if the internal mutex is poisoned.
     #[must_use]
     pub fn with_changesets(mut self, changesets: Vec<(PathBuf, Changeset)>) -> Self {
         {
@@ -215,9 +210,6 @@ impl MockChangesetReader {
         self
     }
 
-    /// # Panics
-    ///
-    /// Panics if the internal mutex is poisoned.
     #[must_use]
     pub fn with_consumed_changeset(
         mut self,
@@ -234,9 +226,6 @@ impl MockChangesetReader {
         self
     }
 
-    /// # Panics
-    ///
-    /// Panics if the internal mutex is poisoned.
     #[must_use]
     pub fn get_consumed_status(&self, path: &Path) -> Option<String> {
         self.changesets
@@ -376,9 +365,6 @@ impl MockChangesetWriter {
         self
     }
 
-    /// # Panics
-    ///
-    /// Panics if the internal mutex is poisoned.
     #[must_use]
     pub fn written_changesets(&self) -> Vec<(PathBuf, Changeset)> {
         self.written.lock().expect("lock poisoned").clone()
@@ -504,9 +490,6 @@ impl MockGitProvider {
         self
     }
 
-    /// # Panics
-    ///
-    /// Panics if the internal mutex is poisoned.
     #[must_use]
     pub fn staged_files(&self) -> Vec<PathBuf> {
         self.state
@@ -516,17 +499,11 @@ impl MockGitProvider {
             .clone()
     }
 
-    /// # Panics
-    ///
-    /// Panics if the internal mutex is poisoned.
     #[must_use]
     pub fn commits(&self) -> Vec<String> {
         self.state.lock().expect("lock poisoned").commits.clone()
     }
 
-    /// # Panics
-    ///
-    /// Panics if the internal mutex is poisoned.
     #[must_use]
     pub fn tags_created(&self) -> Vec<(String, String)> {
         self.state
@@ -536,9 +513,6 @@ impl MockGitProvider {
             .clone()
     }
 
-    /// # Panics
-    ///
-    /// Panics if the internal mutex is poisoned.
     #[must_use]
     pub fn deleted_files(&self) -> Vec<PathBuf> {
         self.state
@@ -548,9 +522,6 @@ impl MockGitProvider {
             .clone()
     }
 
-    /// # Panics
-    ///
-    /// Panics if the internal mutex is poisoned.
     #[must_use]
     pub fn deleted_tags(&self) -> Vec<String> {
         self.state
@@ -560,31 +531,19 @@ impl MockGitProvider {
             .clone()
     }
 
-    /// # Panics
-    ///
-    /// Panics if the internal mutex is poisoned.
     #[must_use]
     pub fn reset_count(&self) -> usize {
         self.state.lock().expect("lock poisoned").reset_count
     }
 
-    /// # Panics
-    ///
-    /// Panics if the internal mutex is poisoned.
     pub fn set_fail_on_commit(&self, fail: bool) {
         self.state.lock().expect("lock poisoned").fail_on_commit = fail;
     }
 
-    /// # Panics
-    ///
-    /// Panics if the internal mutex is poisoned.
     pub fn set_fail_on_create_tag(&self, fail: bool) {
         self.state.lock().expect("lock poisoned").fail_on_create_tag = fail;
     }
 
-    /// # Panics
-    ///
-    /// Panics if the internal mutex is poisoned.
     pub fn set_fail_on_create_tag_nth(&self, n: usize) {
         self.state
             .lock()
@@ -592,9 +551,6 @@ impl MockGitProvider {
             .fail_on_create_tag_nth = Some(n);
     }
 
-    /// # Panics
-    ///
-    /// Panics if the internal mutex is poisoned.
     pub fn set_fail_on_stage_files(&self, fail: bool) {
         self.state
             .lock()
@@ -602,9 +558,6 @@ impl MockGitProvider {
             .fail_on_stage_files = fail;
     }
 
-    /// # Panics
-    ///
-    /// Panics if the internal mutex is poisoned.
     pub fn set_fail_on_is_clean(&self, fail: bool) {
         self.state.lock().expect("lock poisoned").fail_on_is_clean = fail;
     }
@@ -915,9 +868,6 @@ impl MockManifestWriter {
         self
     }
 
-    /// # Panics
-    ///
-    /// Panics if the internal mutex is poisoned.
     #[must_use]
     pub fn with_dependency_updates_returning_true(self) -> Self {
         self.state
@@ -927,9 +877,6 @@ impl MockManifestWriter {
         self
     }
 
-    /// # Panics
-    ///
-    /// Panics if the internal mutex is poisoned.
     #[must_use]
     pub fn dependency_version_updates(&self) -> Vec<(PathBuf, String, Version)> {
         self.state
@@ -939,18 +886,12 @@ impl MockManifestWriter {
             .clone()
     }
 
-    /// # Panics
-    ///
-    /// Panics if the internal mutex is poisoned.
     #[must_use]
     pub fn with_workspace_version(self, version: Version) -> Self {
         self.state.lock().expect("lock poisoned").workspace_version = Some(version);
         self
     }
 
-    /// # Panics
-    ///
-    /// Panics if the internal mutex is poisoned.
     #[must_use]
     pub fn written_versions(&self) -> Vec<(PathBuf, Version)> {
         self.state
@@ -960,9 +901,6 @@ impl MockManifestWriter {
             .clone()
     }
 
-    /// # Panics
-    ///
-    /// Panics if the internal mutex is poisoned.
     #[must_use]
     pub fn workspace_version_removed(&self) -> bool {
         self.state
@@ -971,9 +909,6 @@ impl MockManifestWriter {
             .removed_workspace_version
     }
 
-    /// # Panics
-    ///
-    /// Panics if the internal mutex is poisoned.
     #[must_use]
     pub fn get_workspace_version(&self) -> Option<Version> {
         self.state
@@ -983,9 +918,6 @@ impl MockManifestWriter {
             .clone()
     }
 
-    /// # Panics
-    ///
-    /// Panics if the internal mutex is poisoned.
     #[must_use]
     pub fn written_metadata(&self) -> Vec<(PathBuf, MetadataSection, InitConfig)> {
         self.state
@@ -995,18 +927,12 @@ impl MockManifestWriter {
             .clone()
     }
 
-    /// # Panics
-    ///
-    /// Panics if the internal mutex is poisoned.
     #[must_use]
     pub fn with_lockfile_content(self, content: Vec<u8>) -> Self {
         self.state.lock().expect("lock poisoned").lockfile_content = Some(content);
         self
     }
 
-    /// # Panics
-    ///
-    /// Panics if the internal mutex is poisoned.
     #[must_use]
     pub fn lockfile_restored(&self) -> Option<Vec<u8>> {
         self.state
@@ -1016,9 +942,6 @@ impl MockManifestWriter {
             .clone()
     }
 
-    /// # Panics
-    ///
-    /// Panics if the internal mutex is poisoned.
     #[must_use]
     pub fn lockfile_removed(&self) -> bool {
         self.state.lock().expect("lock poisoned").lockfile_removed
@@ -1200,9 +1123,6 @@ impl MockChangelogWriter {
         self
     }
 
-    /// # Panics
-    ///
-    /// Panics if the internal mutex is poisoned.
     #[must_use]
     pub fn written_releases(&self) -> Vec<(PathBuf, VersionRelease)> {
         self.written.lock().expect("lock poisoned").clone()
@@ -1323,35 +1243,23 @@ impl MockReleaseStateIO {
         }
     }
 
-    /// # Panics
-    ///
-    /// Panics if the internal lock is poisoned.
     #[must_use]
     pub fn with_prerelease_state(self, state: PrereleaseState) -> Self {
         *self.prerelease_state.write().expect("lock poisoned") = Some(state);
         self
     }
 
-    /// # Panics
-    ///
-    /// Panics if the internal lock is poisoned.
     #[must_use]
     pub fn with_graduation_state(self, state: GraduationState) -> Self {
         *self.graduation_state.write().expect("lock poisoned") = Some(state);
         self
     }
 
-    /// # Panics
-    ///
-    /// Panics if the internal lock is poisoned.
     #[must_use]
     pub fn get_graduation_state(&self) -> Option<GraduationState> {
         self.graduation_state.read().expect("lock poisoned").clone()
     }
 
-    /// # Panics
-    ///
-    /// Panics if the internal lock is poisoned.
     #[must_use]
     pub fn get_prerelease_state(&self) -> Option<PrereleaseState> {
         self.prerelease_state.read().expect("lock poisoned").clone()
@@ -1406,6 +1314,7 @@ pub struct MockInitInteractionProvider {
     git_settings: Mutex<Option<Option<GitSettingsInput>>>,
     changelog_settings: Mutex<Option<Option<ChangelogSettingsInput>>>,
     version_settings: Mutex<Option<Option<VersionSettingsInput>>>,
+    filtering_settings: Mutex<Option<Option<FilteringSettingsInput>>>,
 }
 
 impl MockInitInteractionProvider {
@@ -1415,33 +1324,31 @@ impl MockInitInteractionProvider {
             git_settings: Mutex::new(None),
             changelog_settings: Mutex::new(None),
             version_settings: Mutex::new(None),
+            filtering_settings: Mutex::new(None),
         }
     }
 
-    /// # Panics
-    ///
-    /// Panics if the internal mutex is poisoned.
     #[must_use]
     pub fn with_git_settings(self, settings: Option<GitSettingsInput>) -> Self {
         *self.git_settings.lock().expect("lock poisoned") = Some(settings);
         self
     }
 
-    /// # Panics
-    ///
-    /// Panics if the internal mutex is poisoned.
     #[must_use]
     pub fn with_changelog_settings(self, settings: Option<ChangelogSettingsInput>) -> Self {
         *self.changelog_settings.lock().expect("lock poisoned") = Some(settings);
         self
     }
 
-    /// # Panics
-    ///
-    /// Panics if the internal mutex is poisoned.
     #[must_use]
     pub fn with_version_settings(self, settings: Option<VersionSettingsInput>) -> Self {
         *self.version_settings.lock().expect("lock poisoned") = Some(settings);
+        self
+    }
+
+    #[must_use]
+    pub fn with_filtering_settings(self, settings: Option<FilteringSettingsInput>) -> Self {
+        *self.filtering_settings.lock().expect("lock poisoned") = Some(settings);
         self
     }
 
@@ -1451,6 +1358,7 @@ impl MockInitInteractionProvider {
             .with_git_settings(None)
             .with_changelog_settings(None)
             .with_version_settings(None)
+            .with_filtering_settings(None)
     }
 
     #[must_use]
@@ -1465,6 +1373,7 @@ impl MockInitInteractionProvider {
                 none_bump_behavior: Some(NoneBumpBehavior::default()),
                 none_bump_promote_message_template: None,
             }))
+            .with_filtering_settings(None)
     }
 }
 
@@ -1504,6 +1413,15 @@ impl InitInteractionProvider for MockInitInteractionProvider {
             .clone()
             .flatten())
     }
+
+    fn configure_filtering_settings(&self) -> Result<Option<FilteringSettingsInput>> {
+        Ok(self
+            .filtering_settings
+            .lock()
+            .expect("lock poisoned")
+            .clone()
+            .flatten())
+    }
 }
 
 impl_arc_delegation! {
@@ -1511,6 +1429,7 @@ impl_arc_delegation! {
         fn configure_git_settings(&self, context: ProjectContext) -> Result<Option<GitSettingsInput>>;
         fn configure_changelog_settings(&self, context: ProjectContext) -> Result<Option<ChangelogSettingsInput>>;
         fn configure_version_settings(&self) -> Result<Option<VersionSettingsInput>>;
+        fn configure_filtering_settings(&self) -> Result<Option<FilteringSettingsInput>>;
     }
 }
 
@@ -1538,45 +1457,30 @@ impl MockManageInteractionProvider {
         }
     }
 
-    /// # Panics
-    ///
-    /// Panics if the internal mutex is poisoned.
     #[must_use]
     pub fn with_prerelease_actions(self, actions: Vec<MenuSelection<PrereleaseAction>>) -> Self {
         *self.prerelease_actions.lock().expect("lock poisoned") = actions.into();
         self
     }
 
-    /// # Panics
-    ///
-    /// Panics if the internal mutex is poisoned.
     #[must_use]
     pub fn with_graduation_actions(self, actions: Vec<MenuSelection<GraduationAction>>) -> Self {
         *self.graduation_actions.lock().expect("lock poisoned") = actions.into();
         self
     }
 
-    /// # Panics
-    ///
-    /// Panics if the internal mutex is poisoned.
     #[must_use]
     pub fn with_package_selections(self, selections: Vec<MenuSelection<usize>>) -> Self {
         *self.package_selections.lock().expect("lock poisoned") = selections.into();
         self
     }
 
-    /// # Panics
-    ///
-    /// Panics if the internal mutex is poisoned.
     #[must_use]
     pub fn with_graduation_selections(self, selections: Vec<MenuSelection<usize>>) -> Self {
         *self.graduation_selections.lock().expect("lock poisoned") = selections.into();
         self
     }
 
-    /// # Panics
-    ///
-    /// Panics if the internal mutex is poisoned.
     #[must_use]
     pub fn with_remove_prerelease_selections(self, selections: Vec<MenuSelection<usize>>) -> Self {
         *self
@@ -1586,9 +1490,6 @@ impl MockManageInteractionProvider {
         self
     }
 
-    /// # Panics
-    ///
-    /// Panics if the internal mutex is poisoned.
     #[must_use]
     pub fn with_remove_graduation_selections(self, selections: Vec<MenuSelection<usize>>) -> Self {
         *self
@@ -1598,9 +1499,6 @@ impl MockManageInteractionProvider {
         self
     }
 
-    /// # Panics
-    ///
-    /// Panics if the internal mutex is poisoned.
     #[must_use]
     pub fn with_prerelease_tags(self, tags: Vec<String>) -> Self {
         *self.prerelease_tags.lock().expect("lock poisoned") = tags.into();

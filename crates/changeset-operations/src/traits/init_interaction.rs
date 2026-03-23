@@ -17,6 +17,8 @@ pub struct GitSettingsInput {
     pub keep_changesets: bool,
     pub tag_format: TagFormat,
     pub base_branch: String,
+    pub commit_title_template: Option<String>,
+    pub changes_in_body: Option<bool>,
 }
 
 impl Default for GitSettingsInput {
@@ -27,6 +29,8 @@ impl Default for GitSettingsInput {
             keep_changesets: false,
             tag_format: TagFormat::default(),
             base_branch: String::from(DEFAULT_BASE_BRANCH),
+            commit_title_template: None,
+            changes_in_body: None,
         }
     }
 }
@@ -35,6 +39,8 @@ impl Default for GitSettingsInput {
 pub struct ChangelogSettingsInput {
     pub changelog: ChangelogLocation,
     pub comparison_links: ComparisonLinks,
+    pub comparison_links_template: Option<String>,
+    pub dependency_bump_changelog_template: Option<String>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -44,19 +50,17 @@ pub struct VersionSettingsInput {
     pub none_bump_promote_message_template: Option<String>,
 }
 
+#[derive(Debug, Clone, Default)]
+pub struct FilteringSettingsInput {
+    pub ignored_files: Vec<String>,
+}
+
 pub trait InitInteractionProvider: Send + Sync {
-    /// Prompts user to configure git settings. Returns None if user skips this group.
-    ///
-    /// The `context` parameter provides project information (e.g., whether it's a
-    /// single-package project) so the provider can adapt defaults accordingly.
-    ///
     /// # Errors
     ///
     /// Returns an error if the interaction cannot be completed.
     fn configure_git_settings(&self, context: ProjectContext) -> Result<Option<GitSettingsInput>>;
 
-    /// Prompts user to configure changelog settings. Returns None if user skips this group.
-    ///
     /// For single-package projects, the changelog location question should be skipped
     /// (defaulting to root), but `comparison_links` should still be prompted.
     ///
@@ -68,10 +72,13 @@ pub trait InitInteractionProvider: Send + Sync {
         context: ProjectContext,
     ) -> Result<Option<ChangelogSettingsInput>>;
 
-    /// Prompts user to configure version settings. Returns None if user skips this group.
-    ///
     /// # Errors
     ///
     /// Returns an error if the interaction cannot be completed.
     fn configure_version_settings(&self) -> Result<Option<VersionSettingsInput>>;
+
+    /// # Errors
+    ///
+    /// Returns an error if the interaction cannot be completed.
+    fn configure_filtering_settings(&self) -> Result<Option<FilteringSettingsInput>>;
 }
