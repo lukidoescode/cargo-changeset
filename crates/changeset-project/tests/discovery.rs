@@ -210,7 +210,7 @@ members = ["[invalid"]
 
     let result = discover_project(temp_dir.path());
     assert!(
-        matches!(result, Err(ProjectError::GlobPattern { pattern, .. }) if pattern == "[invalid")
+        matches!(result, Err(ProjectError::GlobPatternParse { pattern, .. }) if pattern == "[invalid")
     );
 }
 

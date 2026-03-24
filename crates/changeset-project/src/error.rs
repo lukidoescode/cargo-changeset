@@ -45,6 +45,19 @@ pub enum ProjectError {
         source: globset::Error,
     },
 
+    #[error("failed to parse glob pattern '{pattern}'")]
+    GlobPatternParse {
+        pattern: String,
+        #[source]
+        source: glob::PatternError,
+    },
+
+    #[error("glob traversal error")]
+    GlobTraversal(#[from] glob::GlobError),
+
+    #[error("path contains invalid UTF-8: '{path}'")]
+    NonUtf8Path { path: PathBuf },
+
     #[error("failed to create directory '{path}'")]
     DirectoryCreate {
         path: PathBuf,
