@@ -19,6 +19,7 @@ testing = []
 changeset-changelog = { workspace = true }
 changeset-core = { workspace = true }
 changeset-git = { workspace = true }
+glob = { workspace = true }
 globset = "0.4"
 semver = { workspace = true }
 serde = { workspace = true }
