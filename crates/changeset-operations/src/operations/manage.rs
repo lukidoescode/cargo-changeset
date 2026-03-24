@@ -95,7 +95,7 @@ where
         let available: Vec<_> = project
             .packages()
             .iter()
-            .filter(|p| !prerelease_state.contains(&p.name))
+            .filter(|p| !prerelease_state.contains(p.name()))
             .collect();
 
         if available.is_empty() {
@@ -111,7 +111,7 @@ where
             return Ok(());
         };
 
-        let crate_name = &available[index].name;
+        let crate_name = available[index].name().clone();
         let tag = self.interaction_provider.get_prerelease_tag()?;
 
         validate_prerelease_tag(&tag)?;
@@ -119,10 +119,7 @@ where
         prerelease_state.insert(crate_name.clone(), tag.clone());
         self.release_state_io
             .save_prerelease_state(changeset_dir, prerelease_state)?;
-        events.push(PrereleaseEvent::Added {
-            crate_name: crate_name.clone(),
-            tag,
-        });
+        events.push(PrereleaseEvent::Added { crate_name, tag });
 
         Ok(())
     }
@@ -176,7 +173,7 @@ where
         let eligible: Vec<_> = project
             .packages()
             .iter()
-            .filter(|p| is_zero_version(&p.version) && !is_prerelease(&p.version))
+            .filter(|p| is_zero_version(p.version()) && !is_prerelease(p.version()))
             .collect();
 
         if eligible.is_empty() {
@@ -192,9 +189,9 @@ where
             return Ok(());
         };
 
-        let crate_name = &eligible[index].name;
+        let crate_name = eligible[index].name().clone();
 
-        if prerelease_state.remove(crate_name).is_some() {
+        if prerelease_state.remove(&crate_name).is_some() {
             self.release_state_io
                 .save_prerelease_state(changeset_dir, prerelease_state)?;
         }
@@ -202,9 +199,7 @@ where
         graduation_state.add(crate_name.clone());
         self.release_state_io
             .save_graduation_state(changeset_dir, graduation_state)?;
-        events.push(PrereleaseEvent::MovedToGraduation {
-            crate_name: crate_name.clone(),
-        });
+        events.push(PrereleaseEvent::MovedToGraduation { crate_name });
 
         Ok(())
     }
@@ -258,9 +253,9 @@ where
                         .packages()
                         .iter()
                         .filter(|p| {
-                            is_zero_version(&p.version)
-                                && !is_prerelease(&p.version)
-                                && !state.contains(&p.name)
+                            is_zero_version(p.version())
+                                && !is_prerelease(p.version())
+                                && !state.contains(p.name())
                         })
                         .collect();
 
@@ -277,7 +272,7 @@ where
                         continue;
                     };
 
-                    let crate_name = &eligible[index].name;
+                    let crate_name = eligible[index].name().clone();
                     state.add(crate_name.clone());
                     self.release_state_io
                         .save_graduation_state(&changeset_dir, &state)?;
@@ -565,7 +560,7 @@ fn validate_prerelease_tag(tag: &str) -> Result<()> {
 }
 
 fn validate_package_exists(project: &CargoProject, name: &str) -> Result<()> {
-    if !project.packages().iter().any(|p| p.name == name) {
+    if !project.packages().iter().any(|p| p.name() == name) {
         return Err(OperationError::PackageNotFound {
             name: name.to_string(),
         });
@@ -577,22 +572,22 @@ fn validate_can_graduate(project: &CargoProject, name: &str) -> Result<()> {
     let package = project
         .packages()
         .iter()
-        .find(|p| p.name == name)
+        .find(|p| p.name() == name)
         .ok_or_else(|| OperationError::PackageNotFound {
             name: name.to_string(),
         })?;
 
-    if is_prerelease(&package.version) {
+    if is_prerelease(package.version()) {
         return Err(OperationError::CannotGraduatePrerelease {
             package: name.to_string(),
-            version: package.version.clone(),
+            version: package.version().clone(),
         });
     }
 
-    if !is_zero_version(&package.version) {
+    if !is_zero_version(package.version()) {
         return Err(OperationError::CannotGraduateStable {
             package: name.to_string(),
-            version: package.version.clone(),
+            version: package.version().clone(),
         });
     }
 
@@ -612,10 +607,12 @@ mod tests {
             ProjectKind::VirtualWorkspace,
             packages
                 .into_iter()
-                .map(|(name, version)| PackageInfo {
-                    name: name.to_string(),
-                    version: version.parse().expect("valid version"),
-                    path: PathBuf::from(format!("/mock/project/crates/{name}")),
+                .map(|(name, version)| {
+                    PackageInfo::new(
+                        name.to_string(),
+                        version.parse().expect("valid version"),
+                        PathBuf::from(format!("/mock/project/crates/{name}")),
+                    )
                 })
                 .collect(),
         )

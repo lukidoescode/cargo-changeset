@@ -77,12 +77,12 @@ fn mark_consumed_for_prerelease_updates_frontmatter() {
     let parsed = parse_changeset(&content).expect("parse changeset");
 
     assert_eq!(
-        parsed.consumed_for_prerelease,
+        parsed.consumed_for_prerelease().cloned(),
         Some("1.0.1-alpha.1".to_string()),
         "consumed_for_prerelease should be set to the version"
     );
     assert_eq!(
-        parsed.releases.len(),
+        parsed.releases().len(),
         1,
         "changeset should still have one release"
     );
@@ -169,7 +169,7 @@ fn clear_consumed_for_prerelease_removes_flag() {
     let content_before = read_changeset_file(&dir, "consumed.md");
     let parsed_before = parse_changeset(&content_before).expect("parse before");
     assert!(
-        parsed_before.consumed_for_prerelease.is_some(),
+        parsed_before.consumed_for_prerelease().is_some(),
         "precondition: changeset should be consumed"
     );
 
@@ -185,11 +185,11 @@ fn clear_consumed_for_prerelease_removes_flag() {
     let parsed_after = parse_changeset(&content_after).expect("parse after");
 
     assert!(
-        parsed_after.consumed_for_prerelease.is_none(),
+        parsed_after.consumed_for_prerelease().is_none(),
         "consumed_for_prerelease should be None after clearing"
     );
     assert_eq!(
-        parsed_after.releases.len(),
+        parsed_after.releases().len(),
         1,
         "changeset should still have one release"
     );
@@ -228,12 +228,12 @@ Fix a security issue.
     let parsed = parse_changeset(&content_after).expect("parse changeset");
 
     assert_eq!(
-        parsed.consumed_for_prerelease,
+        parsed.consumed_for_prerelease().cloned(),
         Some("1.0.1-rc.1".to_string()),
         "consumed_for_prerelease should be set"
     );
     assert_eq!(
-        parsed.category,
+        parsed.category(),
         changeset_core::ChangeCategory::Fixed,
         "category should be preserved as 'fixed'"
     );
@@ -267,7 +267,7 @@ fn mark_multiple_changesets_consumed() {
         let content = read_changeset_file(&dir, filename);
         let parsed = parse_changeset(&content).expect("parse changeset");
         assert_eq!(
-            parsed.consumed_for_prerelease,
+            parsed.consumed_for_prerelease().cloned(),
             Some("1.0.0-alpha.1".to_string()),
             "{filename} should be marked as consumed"
         );

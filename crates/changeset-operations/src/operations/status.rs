@@ -178,7 +178,7 @@ where
         let mut consumed = Vec::new();
         for path in paths {
             let changeset = reader.read_changeset(path)?;
-            if let Some(version) = changeset.consumed_for_prerelease {
+            if let Some(version) = changeset.consumed_for_prerelease().cloned() {
                 consumed.push((path.clone(), version));
             }
         }
@@ -229,7 +229,7 @@ mod tests {
         assert!(result.projected_releases.is_empty());
         assert!(result.bumps_by_package.is_empty());
         assert_eq!(result.unchanged_packages.len(), 1);
-        assert_eq!(result.unchanged_packages[0].name, "my-crate");
+        assert_eq!(result.unchanged_packages[0].name(), "my-crate");
         assert!(result.packages_with_inherited_versions.is_empty());
         assert!(result.unknown_packages.is_empty());
     }
@@ -310,7 +310,7 @@ mod tests {
             .expect("StatusOperation failed to identify unchanged packages");
 
         assert_eq!(result.unchanged_packages.len(), 1);
-        assert_eq!(result.unchanged_packages[0].name, "crate-b");
+        assert_eq!(result.unchanged_packages[0].name(), "crate-b");
     }
 
     #[test]
@@ -428,7 +428,7 @@ mod tests {
         let project_provider = MockProjectProvider::single_package("my-crate", "1.0.0");
 
         let mut consumed_changeset = make_changeset("my-crate", BumpType::Patch, "Fix bug");
-        consumed_changeset.consumed_for_prerelease = Some("1.0.1-alpha.1".to_string());
+        consumed_changeset.set_consumed_for_prerelease(Some("1.0.1-alpha.1".to_string()));
 
         let changeset_reader = MockChangesetReader::new().with_changeset(
             PathBuf::from(".changeset/changesets/fix-bug.md"),
@@ -458,7 +458,7 @@ mod tests {
         let pending_changeset = make_changeset("my-crate", BumpType::Minor, "Add feature");
 
         let mut consumed_changeset = make_changeset("my-crate", BumpType::Patch, "Fix bug");
-        consumed_changeset.consumed_for_prerelease = Some("1.0.1-alpha.1".to_string());
+        consumed_changeset.set_consumed_for_prerelease(Some("1.0.1-alpha.1".to_string()));
 
         let changeset_reader = MockChangesetReader::new().with_changesets(vec![
             (
@@ -484,7 +484,7 @@ mod tests {
         );
 
         assert_eq!(result.changesets.len(), 1);
-        assert_eq!(result.changesets[0].summary, "Add feature");
+        assert_eq!(result.changesets[0].summary(), "Add feature");
 
         assert_eq!(result.consumed_prerelease_changesets.len(), 1);
         assert_eq!(
@@ -499,10 +499,10 @@ mod tests {
         let project_provider = MockProjectProvider::single_package("my-crate", "1.0.0");
 
         let mut consumed1 = make_changeset("my-crate", BumpType::Patch, "Fix bug 1");
-        consumed1.consumed_for_prerelease = Some("1.0.1-alpha.1".to_string());
+        consumed1.set_consumed_for_prerelease(Some("1.0.1-alpha.1".to_string()));
 
         let mut consumed2 = make_changeset("my-crate", BumpType::Patch, "Fix bug 2");
-        consumed2.consumed_for_prerelease = Some("1.0.1-alpha.2".to_string());
+        consumed2.set_consumed_for_prerelease(Some("1.0.1-alpha.2".to_string()));
 
         let changeset_reader = MockChangesetReader::new().with_changesets(vec![
             (PathBuf::from(".changeset/changesets/fix1.md"), consumed1),

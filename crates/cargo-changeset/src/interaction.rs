@@ -46,7 +46,7 @@ impl InteractionProvider for TerminalInteractionProvider {
             None => {
                 default_labels = available
                     .iter()
-                    .map(|p| format!("{} ({})", p.name, p.version))
+                    .map(|p| format!("{} ({})", p.name(), p.version()))
                     .collect();
                 &default_labels
             }

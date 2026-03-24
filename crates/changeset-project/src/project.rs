@@ -145,11 +145,11 @@ fn collect_packages(
                 workspace_version,
                 &root.join("Cargo.toml"),
             )?;
-            packages.push(PackageInfo {
-                name: pkg.name.clone(),
+            packages.push(PackageInfo::new(
+                pkg.name.clone(),
                 version,
-                path: root.to_path_buf(),
-            });
+                root.to_path_buf(),
+            ));
         }
     }
 
@@ -160,11 +160,11 @@ fn collect_packages(
                 workspace_version,
                 &root.join("Cargo.toml"),
             )?;
-            return Ok(vec![PackageInfo {
-                name: pkg.name.clone(),
+            return Ok(vec![PackageInfo::new(
+                pkg.name.clone(),
                 version,
-                path: root.to_path_buf(),
-            }]);
+                root.to_path_buf(),
+            )]);
         }
     }
 
@@ -188,11 +188,7 @@ fn collect_packages(
                         workspace_version,
                         &member_manifest_path,
                     )?;
-                    packages.push(PackageInfo {
-                        name: pkg.name,
-                        version,
-                        path: member_dir,
-                    });
+                    packages.push(PackageInfo::new(pkg.name, version, member_dir));
                 }
             }
         }

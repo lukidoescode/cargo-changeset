@@ -55,7 +55,7 @@ pub(super) fn build_release_config(
     if let Some(global) = cli_input.global_prerelease.as_ref() {
         for pkg in packages {
             per_package
-                .entry(pkg.name.clone())
+                .entry(pkg.name().clone())
                 .or_insert_with(PackageReleaseConfig::default)
                 .prerelease = Some(global.clone());
         }
@@ -79,9 +79,9 @@ pub(super) fn build_release_config(
 
     if cli_input.graduate_all {
         for pkg in packages {
-            if is_zero_version(&pkg.version) {
+            if is_zero_version(pkg.version()) {
                 per_package
-                    .entry(pkg.name.clone())
+                    .entry(pkg.name().clone())
                     .or_insert_with(PackageReleaseConfig::default)
                     .graduate_zero = true;
             }

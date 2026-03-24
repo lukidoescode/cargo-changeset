@@ -103,13 +103,16 @@ fn parse_prerelease_args(
     for arg in args {
         if arg.is_empty() {
             // Empty string means infer from existing prerelease
-            let has_prerelease = project.packages().iter().any(|p| is_prerelease(&p.version));
+            let has_prerelease = project
+                .packages()
+                .iter()
+                .any(|p| is_prerelease(p.version()));
             if has_prerelease {
                 let first_prerelease = project
                     .packages()
                     .iter()
-                    .find(|p| is_prerelease(&p.version))
-                    .and_then(|p| changeset_version::extract_prerelease_tag(&p.version));
+                    .find(|p| is_prerelease(p.version()))
+                    .and_then(|p| changeset_version::extract_prerelease_tag(p.version()));
 
                 if let Some(existing_tag) = first_prerelease {
                     global = Some(parse_prerelease_spec(&existing_tag)?);

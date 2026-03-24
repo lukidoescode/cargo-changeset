@@ -125,15 +125,17 @@ where
             && !affected_packages.is_empty()
         {
             let graph = self.project_provider.build_dependency_graph(&project)?;
-            let affected_names: Vec<&str> =
-                affected_packages.iter().map(|p| p.name.as_str()).collect();
+            let affected_names: Vec<&str> = affected_packages
+                .iter()
+                .map(|p| p.name().as_str())
+                .collect();
             let dependents = graph.transitive_dependents_of_set(&affected_names);
 
             for pkg in project.packages() {
-                if dependents.contains(pkg.name.as_str())
-                    && !affected_packages.iter().any(|p| p.name == pkg.name)
+                if dependents.contains(pkg.name().as_str())
+                    && !affected_packages.iter().any(|p| p.name() == pkg.name())
                 {
-                    transitive_dependents.insert(pkg.name.clone());
+                    transitive_dependents.insert(pkg.name().clone());
                     affected_packages.push(pkg.clone());
                 }
             }
@@ -505,7 +507,7 @@ mod tests {
                     verification_result
                         .uncovered_packages
                         .iter()
-                        .any(|p| p.name == "app"),
+                        .any(|p| p.name() == "app"),
                     "app should be uncovered as a transitive dependent of core"
                 );
             }
@@ -532,22 +534,14 @@ mod tests {
             },
         ]);
 
-        let changeset = changeset_core::Changeset {
-            summary: "Fix core bug".to_string(),
-            releases: vec![
-                changeset_core::PackageRelease {
-                    name: "core".to_string(),
-                    bump_type: BumpType::Patch,
-                },
-                changeset_core::PackageRelease {
-                    name: "app".to_string(),
-                    bump_type: BumpType::Patch,
-                },
+        let changeset = changeset_core::Changeset::new(
+            "Fix core bug".to_string(),
+            vec![
+                changeset_core::PackageRelease::new("core".to_string(), BumpType::Patch),
+                changeset_core::PackageRelease::new("app".to_string(), BumpType::Patch),
             ],
-            category: changeset_core::ChangeCategory::Changed,
-            consumed_for_prerelease: None,
-            graduate: false,
-        };
+            changeset_core::ChangeCategory::Changed,
+        );
         let changeset_reader = MockChangesetReader::new()
             .with_changeset(PathBuf::from(".changeset/changesets/fix.md"), changeset);
 
@@ -930,7 +924,7 @@ mod tests {
                     verification_result
                         .uncovered_packages
                         .iter()
-                        .any(|p| p.name == "app"),
+                        .any(|p| p.name() == "app"),
                     "app should be uncovered as a transitive dependent of core"
                 );
             }

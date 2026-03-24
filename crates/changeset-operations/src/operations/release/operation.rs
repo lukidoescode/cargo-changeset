@@ -314,7 +314,7 @@ where
             .project
             .packages()
             .iter()
-            .map(|p| (p.name.clone(), p.clone()))
+            .map(|p| (p.name().clone(), p.clone()))
             .collect();
 
         let unchanged_packages =
@@ -366,7 +366,7 @@ where
         let package_paths: IndexMap<String, PathBuf> = plan
             .package_lookup
             .iter()
-            .map(|(name, info)| (name.clone(), info.path.clone()))
+            .map(|(name, info)| (name.clone(), info.path().clone()))
             .collect();
 
         let saga_data = ReleaseSagaData::new(
@@ -2293,22 +2293,14 @@ mod tests {
             MockProjectProvider::workspace(vec![("crate-a", "1.0.0"), ("crate-b", "2.0.0")])
                 .with_root_config(root_config);
 
-        let changeset = changeset_core::Changeset {
-            summary: "mixed change".to_string(),
-            category: changeset_core::ChangeCategory::Fixed,
-            releases: vec![
-                changeset_core::PackageRelease {
-                    name: "crate-a".to_string(),
-                    bump_type: BumpType::Patch,
-                },
-                changeset_core::PackageRelease {
-                    name: "crate-b".to_string(),
-                    bump_type: BumpType::None,
-                },
+        let changeset = changeset_core::Changeset::new(
+            "mixed change".to_string(),
+            vec![
+                changeset_core::PackageRelease::new("crate-a".to_string(), BumpType::Patch),
+                changeset_core::PackageRelease::new("crate-b".to_string(), BumpType::None),
             ],
-            consumed_for_prerelease: None,
-            graduate: false,
-        };
+            changeset_core::ChangeCategory::Fixed,
+        );
         let changeset_reader = MockChangesetReader::new()
             .with_changeset(PathBuf::from(".changeset/changesets/mixed.md"), changeset);
         let manifest_writer = MockManifestWriter::new();

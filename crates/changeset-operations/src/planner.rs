@@ -44,7 +44,8 @@ impl VersionPlanner {
         packages: &[PackageInfo],
         prerelease: Option<&PrereleaseSpec>,
     ) -> Result<ReleasePlan, VersionError> {
-        let package_lookup: IndexMap<_, _> = packages.iter().map(|p| (p.name.clone(), p)).collect();
+        let package_lookup: IndexMap<_, _> =
+            packages.iter().map(|p| (p.name().clone(), p)).collect();
         let bumps_by_package = Self::aggregate_bumps(changesets);
         let graduates = Self::collect_graduates(changesets);
 
@@ -61,14 +62,14 @@ impl VersionPlanner {
 
             if let Some(pkg) = package_lookup.get(name) {
                 let (new_version, effective_bump) = Self::compute_version_and_bump(
-                    &pkg.version,
+                    pkg.version(),
                     bump_type,
                     prerelease,
                     should_graduate,
                 )?;
                 releases.push(PackageVersion {
                     name: name.clone(),
-                    current_version: pkg.version.clone(),
+                    current_version: pkg.version().clone(),
                     new_version,
                     bump_type: effective_bump,
                     auto_bumped: false,
@@ -93,11 +94,11 @@ impl VersionPlanner {
         let mut releases = Vec::new();
 
         for pkg in packages {
-            if changeset_version::is_prerelease(&pkg.version) {
-                let new_version = calculate_new_version(&pkg.version, None, None)?;
+            if changeset_version::is_prerelease(pkg.version()) {
+                let new_version = calculate_new_version(pkg.version(), None, None)?;
                 releases.push(PackageVersion {
-                    name: pkg.name.clone(),
-                    current_version: pkg.version.clone(),
+                    name: pkg.name().clone(),
+                    current_version: pkg.version().clone(),
                     new_version,
                     bump_type: BumpType::Patch,
                     auto_bumped: false,
@@ -122,7 +123,8 @@ impl VersionPlanner {
         prerelease: Option<&PrereleaseSpec>,
         zero_behavior: ZeroVersionBehavior,
     ) -> Result<ReleasePlan, VersionError> {
-        let package_lookup: IndexMap<_, _> = packages.iter().map(|p| (p.name.clone(), p)).collect();
+        let package_lookup: IndexMap<_, _> =
+            packages.iter().map(|p| (p.name().clone(), p)).collect();
         let bumps_by_package = Self::aggregate_bumps(changesets);
         let graduates = Self::collect_graduates(changesets);
 
@@ -140,7 +142,7 @@ impl VersionPlanner {
             if let Some(pkg) = package_lookup.get(name) {
                 let (new_version, effective_bump) =
                     Self::compute_version_and_bump_with_zero_behavior(
-                        &pkg.version,
+                        pkg.version(),
                         bump_type,
                         prerelease,
                         zero_behavior,
@@ -148,7 +150,7 @@ impl VersionPlanner {
                     )?;
                 releases.push(PackageVersion {
                     name: name.clone(),
-                    current_version: pkg.version.clone(),
+                    current_version: pkg.version().clone(),
                     new_version,
                     bump_type: effective_bump,
                     auto_bumped: false,
@@ -176,17 +178,17 @@ impl VersionPlanner {
         let mut releases = Vec::new();
 
         for pkg in packages {
-            if is_zero_version(&pkg.version) {
+            if is_zero_version(pkg.version()) {
                 let new_version = calculate_new_version_with_zero_behavior(
-                    &pkg.version,
+                    pkg.version(),
                     None,
                     prerelease,
                     ZeroVersionBehavior::EffectiveMinor,
                     true,
                 )?;
                 releases.push(PackageVersion {
-                    name: pkg.name.clone(),
-                    current_version: pkg.version.clone(),
+                    name: pkg.name().clone(),
+                    current_version: pkg.version().clone(),
                     new_version,
                     bump_type: BumpType::Major,
                     auto_bumped: false,
@@ -214,7 +216,8 @@ impl VersionPlanner {
         per_package_config: &HashMap<String, PackageReleaseConfig>,
         zero_behavior: ZeroVersionBehavior,
     ) -> Result<ReleasePlan, VersionError> {
-        let package_lookup: IndexMap<_, _> = packages.iter().map(|p| (p.name.clone(), p)).collect();
+        let package_lookup: IndexMap<_, _> =
+            packages.iter().map(|p| (p.name().clone(), p)).collect();
         let bumps_by_package = Self::aggregate_bumps(changesets);
         let changeset_graduates = Self::collect_graduates(changesets);
 
@@ -236,7 +239,7 @@ impl VersionPlanner {
             if let Some(pkg) = package_lookup.get(name) {
                 let (new_version, effective_bump) =
                     Self::compute_version_and_bump_with_zero_behavior(
-                        &pkg.version,
+                        pkg.version(),
                         bump_type,
                         prerelease,
                         zero_behavior,
@@ -244,7 +247,7 @@ impl VersionPlanner {
                     )?;
                 releases.push(PackageVersion {
                     name: name.clone(),
-                    current_version: pkg.version.clone(),
+                    current_version: pkg.version().clone(),
                     new_version,
                     bump_type: effective_bump,
                     auto_bumped: false,
@@ -266,7 +269,7 @@ impl VersionPlanner {
             if let Some(pkg) = package_lookup.get(name) {
                 let (new_version, effective_bump) =
                     Self::compute_version_and_bump_with_zero_behavior(
-                        &pkg.version,
+                        pkg.version(),
                         None,
                         config.prerelease.as_ref(),
                         zero_behavior,
@@ -274,7 +277,7 @@ impl VersionPlanner {
                     )?;
                 releases.push(PackageVersion {
                     name: name.clone(),
-                    current_version: pkg.version.clone(),
+                    current_version: pkg.version().clone(),
                     new_version,
                     bump_type: effective_bump,
                     auto_bumped: false,
@@ -351,8 +354,8 @@ impl VersionPlanner {
     fn collect_graduates(changesets: &[Changeset]) -> HashSet<String> {
         changesets
             .iter()
-            .filter(|c| c.graduate)
-            .flat_map(|c| c.releases.iter().map(|r| r.name.clone()))
+            .filter(|c| c.graduate())
+            .flat_map(|c| c.releases().iter().map(|r| r.name().clone()))
             .collect()
     }
 
@@ -361,11 +364,11 @@ impl VersionPlanner {
         let mut bumps_by_package: IndexMap<String, Vec<BumpType>> = IndexMap::new();
 
         for changeset in changesets {
-            for release in &changeset.releases {
+            for release in changeset.releases() {
                 bumps_by_package
-                    .entry(release.name.clone())
+                    .entry(release.name().clone())
                     .or_default()
-                    .push(release.bump_type);
+                    .push(release.bump_type());
             }
         }
 
@@ -380,12 +383,12 @@ impl VersionPlanner {
     ) -> (HashSet<String>, Vec<PackageInfo>) {
         let packages_with_changesets: HashSet<String> = changesets
             .iter()
-            .flat_map(|c| c.releases.iter().map(|r| r.name.clone()))
+            .flat_map(|c| c.releases().iter().map(|r| r.name().clone()))
             .collect();
 
         let unchanged_packages: Vec<PackageInfo> = packages
             .iter()
-            .filter(|p| !packages_with_changesets.contains(&p.name))
+            .filter(|p| !packages_with_changesets.contains(p.name()))
             .cloned()
             .collect();
 
@@ -401,40 +404,30 @@ mod tests {
     use std::path::PathBuf;
 
     fn make_package(name: &str, version: &str) -> PackageInfo {
-        PackageInfo {
-            name: name.to_string(),
-            version: version.parse().expect("valid version"),
-            path: PathBuf::from(format!("/mock/crates/{name}")),
-        }
+        PackageInfo::new(
+            name.to_string(),
+            version.parse().expect("valid version"),
+            PathBuf::from(format!("/mock/crates/{name}")),
+        )
     }
 
     fn make_changeset(package_name: &str, bump: BumpType, summary: &str) -> Changeset {
-        Changeset {
-            summary: summary.to_string(),
-            releases: vec![PackageRelease {
-                name: package_name.to_string(),
-                bump_type: bump,
-            }],
-            category: ChangeCategory::Changed,
-            consumed_for_prerelease: None,
-            graduate: false,
-        }
+        Changeset::new(
+            summary.to_string(),
+            vec![PackageRelease::new(package_name.to_string(), bump)],
+            ChangeCategory::Changed,
+        )
     }
 
     fn make_multi_changeset(releases: Vec<(&str, BumpType)>, summary: &str) -> Changeset {
-        Changeset {
-            summary: summary.to_string(),
-            releases: releases
+        Changeset::new(
+            summary.to_string(),
+            releases
                 .into_iter()
-                .map(|(name, bump)| PackageRelease {
-                    name: name.to_string(),
-                    bump_type: bump,
-                })
+                .map(|(name, bump)| PackageRelease::new(name.to_string(), bump))
                 .collect(),
-            category: ChangeCategory::Changed,
-            consumed_for_prerelease: None,
-            graduate: false,
-        }
+            ChangeCategory::Changed,
+        )
     }
 
     #[test]
@@ -568,7 +561,7 @@ mod tests {
         assert!(with_changesets.contains("changed"));
         assert!(!with_changesets.contains("unchanged"));
         assert_eq!(without.len(), 1);
-        assert_eq!(without[0].name, "unchanged");
+        assert_eq!(without[0].name(), "unchanged");
     }
 
     #[test]
@@ -886,16 +879,12 @@ mod tests {
         use super::*;
 
         fn make_graduating_changeset(package_name: &str, bump: BumpType) -> Changeset {
-            Changeset {
-                summary: "Graduate to 1.0".to_string(),
-                releases: vec![PackageRelease {
-                    name: package_name.to_string(),
-                    bump_type: bump,
-                }],
-                category: ChangeCategory::Changed,
-                consumed_for_prerelease: None,
-                graduate: true,
-            }
+            Changeset::new(
+                "Graduate to 1.0".to_string(),
+                vec![PackageRelease::new(package_name.to_string(), bump)],
+                ChangeCategory::Changed,
+            )
+            .with_graduate(true)
         }
 
         #[test]
@@ -972,16 +961,12 @@ mod tests {
         use super::*;
 
         fn make_graduating_changeset(package_name: &str, bump: BumpType) -> Changeset {
-            Changeset {
-                summary: "Graduate to 1.0".to_string(),
-                releases: vec![PackageRelease {
-                    name: package_name.to_string(),
-                    bump_type: bump,
-                }],
-                category: ChangeCategory::Changed,
-                consumed_for_prerelease: None,
-                graduate: true,
-            }
+            Changeset::new(
+                "Graduate to 1.0".to_string(),
+                vec![PackageRelease::new(package_name.to_string(), bump)],
+                ChangeCategory::Changed,
+            )
+            .with_graduate(true)
         }
 
         #[test]
@@ -1300,16 +1285,14 @@ mod tests {
         fn changeset_graduate_field_combined_with_config() {
             let packages = vec![make_package("crate-a", "0.5.0")];
 
-            let changesets = vec![Changeset {
-                summary: "Graduate".to_string(),
-                releases: vec![PackageRelease {
-                    name: "crate-a".to_string(),
-                    bump_type: BumpType::Major,
-                }],
-                category: ChangeCategory::Changed,
-                consumed_for_prerelease: None,
-                graduate: true,
-            }];
+            let changesets = vec![
+                Changeset::new(
+                    "Graduate".to_string(),
+                    vec![PackageRelease::new("crate-a".to_string(), BumpType::Major)],
+                    ChangeCategory::Changed,
+                )
+                .with_graduate(true),
+            ];
 
             let mut config = HashMap::new();
             config.insert(
@@ -1554,7 +1537,7 @@ mod tests {
             let mut config = HashMap::new();
             for pkg in &packages {
                 config.insert(
-                    pkg.name.clone(),
+                    pkg.name().clone(),
                     PackageReleaseConfig {
                         prerelease: None,
                         graduate_zero: true,

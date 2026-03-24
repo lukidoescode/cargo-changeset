@@ -17,10 +17,10 @@ impl ChangesetAggregator {
     }
 
     pub(crate) fn add_changeset(&mut self, changeset: &Changeset) {
-        for release in &changeset.releases {
-            let entry = ChangelogEntry::new(changeset.category, &changeset.summary);
+        for release in changeset.releases() {
+            let entry = ChangelogEntry::new(changeset.category(), changeset.summary());
             self.entries_by_package
-                .entry(release.name.clone())
+                .entry(release.name().clone())
                 .or_default()
                 .push(entry);
         }
@@ -90,19 +90,14 @@ mod tests {
     use super::*;
 
     fn make_changeset(packages: &[&str], category: ChangeCategory, summary: &str) -> Changeset {
-        Changeset {
-            summary: summary.to_string(),
-            releases: packages
+        Changeset::new(
+            summary.to_string(),
+            packages
                 .iter()
-                .map(|name| PackageRelease {
-                    name: name.to_string(),
-                    bump_type: BumpType::Patch,
-                })
+                .map(|name| PackageRelease::new(name.to_string(), BumpType::Patch))
                 .collect(),
             category,
-            consumed_for_prerelease: None,
-            graduate: false,
-        }
+        )
     }
 
     fn test_date() -> NaiveDate {

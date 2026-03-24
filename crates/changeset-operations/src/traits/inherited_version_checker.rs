@@ -19,9 +19,9 @@ pub trait InheritedVersionChecker: Send + Sync {
     ) -> Result<Vec<String>> {
         let mut inherited = Vec::new();
         for pkg in packages {
-            let manifest_path = pkg.path.join("Cargo.toml");
+            let manifest_path = pkg.path().join("Cargo.toml");
             if self.has_inherited_version(&manifest_path)? {
-                inherited.push(pkg.name.clone());
+                inherited.push(pkg.name().clone());
             }
         }
         Ok(inherited)
@@ -72,11 +72,11 @@ mod tests {
     }
 
     fn make_package(name: &str, path: &str) -> PackageInfo {
-        PackageInfo {
-            name: name.to_string(),
-            version: "1.0.0".parse().expect("valid version"),
-            path: PathBuf::from(path),
-        }
+        PackageInfo::new(
+            name.to_string(),
+            "1.0.0".parse().expect("valid version"),
+            PathBuf::from(path),
+        )
     }
 
     #[test]

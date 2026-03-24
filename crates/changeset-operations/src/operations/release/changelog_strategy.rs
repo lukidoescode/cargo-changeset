@@ -143,7 +143,7 @@ impl ChangelogHandler for PerPackageChangelogStrategy {
 
         for release in ctx.planned_releases {
             if let Some(pkg) = ctx.package_lookup.get(&release.name) {
-                let changelog_path = pkg.path.join("CHANGELOG.md");
+                let changelog_path = pkg.path().join("CHANGELOG.md");
                 let file_existed = ctx.changelog_writer.changelog_exists(&changelog_path);
                 let original_content = if file_existed {
                     Some(read_changelog_content(&changelog_path)?)
@@ -167,7 +167,7 @@ impl ChangelogHandler for PerPackageChangelogStrategy {
 
         for release in ctx.planned_releases {
             if let Some(pkg) = ctx.package_lookup.get(&release.name) {
-                let changelog_path = pkg.path.join("CHANGELOG.md");
+                let changelog_path = pkg.path().join("CHANGELOG.md");
 
                 if let Some(version_release) = ctx.aggregator.build_package_release(
                     &release.name,

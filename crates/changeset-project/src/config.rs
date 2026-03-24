@@ -383,8 +383,8 @@ pub fn load_changeset_configs(
 
     let mut package_configs = HashMap::new();
     for package in project.packages() {
-        let config = parse_package_config(&package.path)?;
-        package_configs.insert(package.name.clone(), config);
+        let config = parse_package_config(package.path())?;
+        package_configs.insert(package.name().clone(), config);
     }
 
     Ok((root_config, package_configs))

@@ -82,7 +82,7 @@ impl PlainTextStatusFormatter {
         output.push('\n');
         output.push_str("Packages without changesets:\n");
         for pkg in &status.unchanged_packages {
-            output.push_str(&format!("  {} ({})\n", pkg.name, pkg.version));
+            output.push_str(&format!("  {} ({})\n", pkg.name(), pkg.version()));
         }
     }
 
@@ -230,11 +230,11 @@ mod tests {
     }
 
     fn make_package_info(name: &str, version: &str) -> PackageInfo {
-        PackageInfo {
-            name: name.to_string(),
-            version: version.parse().expect("valid version"),
-            path: PathBuf::from(format!("/mock/{name}")),
-        }
+        PackageInfo::new(
+            name.to_string(),
+            version.parse().expect("valid version"),
+            PathBuf::from(format!("/mock/{name}")),
+        )
     }
 
     fn make_changeset(
@@ -242,19 +242,14 @@ mod tests {
         category: ChangeCategory,
         summary: &str,
     ) -> Changeset {
-        Changeset {
-            summary: summary.to_string(),
-            releases: packages
+        Changeset::new(
+            summary.to_string(),
+            packages
                 .iter()
-                .map(|(name, bump)| PackageRelease {
-                    name: name.to_string(),
-                    bump_type: *bump,
-                })
+                .map(|(name, bump)| PackageRelease::new(name.to_string(), *bump))
                 .collect(),
             category,
-            consumed_for_prerelease: None,
-            graduate: false,
-        }
+        )
     }
 
     #[test]

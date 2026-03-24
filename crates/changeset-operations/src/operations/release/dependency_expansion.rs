@@ -24,17 +24,17 @@ pub(crate) fn expand_with_reverse_dependencies(
             continue;
         }
 
-        if let Some(pkg) = packages.iter().find(|p| p.name == dep_name) {
+        if let Some(pkg) = packages.iter().find(|p| p.name() == dep_name) {
             let new_version = calculate_new_version_with_zero_behavior(
-                &pkg.version,
+                pkg.version(),
                 Some(BumpType::Patch),
                 None,
                 zero_behavior,
                 false,
             )?;
             result.push(PackageVersion {
-                name: pkg.name.clone(),
-                current_version: pkg.version.clone(),
+                name: pkg.name().clone(),
+                current_version: pkg.version().clone(),
                 new_version,
                 bump_type: BumpType::Patch,
                 auto_bumped: true,
@@ -56,11 +56,11 @@ mod tests {
     use super::*;
 
     fn make_package(name: &str, version: &str) -> PackageInfo {
-        PackageInfo {
-            name: name.to_string(),
-            version: version.parse().expect("valid version"),
-            path: std::path::PathBuf::from(format!("crates/{name}")),
-        }
+        PackageInfo::new(
+            name.to_string(),
+            version.parse().expect("valid version"),
+            std::path::PathBuf::from(format!("crates/{name}")),
+        )
     }
 
     fn make_release(name: &str, current: &str, new: &str, bump: BumpType) -> PackageVersion {

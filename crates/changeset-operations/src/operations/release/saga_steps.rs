@@ -413,7 +413,7 @@ where
                     let changeset = ctx.changeset_rw().read_changeset(path)?;
                     consumed_files.push(super::steps::ChangesetFileState {
                         path: path.clone(),
-                        original_consumed_status: changeset.consumed_for_prerelease.clone(),
+                        original_consumed_status: changeset.consumed_for_prerelease().cloned(),
                         backup: Some(changeset),
                     });
                 }
@@ -1699,16 +1699,11 @@ mod tests {
         use super::*;
 
         fn make_test_changeset(name: &str) -> Changeset {
-            Changeset {
-                summary: format!("Fix {name}"),
-                releases: vec![PackageRelease {
-                    name: name.to_string(),
-                    bump_type: BumpType::Patch,
-                }],
-                category: ChangeCategory::Fixed,
-                consumed_for_prerelease: None,
-                graduate: false,
-            }
+            Changeset::new(
+                format!("Fix {name}"),
+                vec![PackageRelease::new(name.to_string(), BumpType::Patch)],
+                ChangeCategory::Fixed,
+            )
         }
 
         #[test]
@@ -1906,8 +1901,8 @@ mod tests {
                 "changeset file should be restored after rollback"
             );
             let restored = restored.expect("changeset should exist");
-            assert_eq!(restored.summary, original_changeset.summary);
-            assert_eq!(restored.category, original_changeset.category);
+            assert_eq!(restored.summary(), original_changeset.summary());
+            assert_eq!(restored.category(), original_changeset.category());
         }
 
         #[test]
@@ -1973,7 +1968,7 @@ mod tests {
             let changeset_path = PathBuf::from("/mock/project/.changeset/changesets/fix.md");
 
             let mut consumed_changeset = make_test_changeset("pkg-a");
-            consumed_changeset.consumed_for_prerelease = Some("1.0.1-alpha.1".to_string());
+            consumed_changeset.set_consumed_for_prerelease(Some("1.0.1-alpha.1".to_string()));
 
             let changeset_rw = Arc::new(MockChangesetReader::new().with_consumed_changeset(
                 changeset_path.clone(),

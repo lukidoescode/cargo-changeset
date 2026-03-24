@@ -10,12 +10,12 @@ pub(crate) fn find_none_only_packages(changesets: &[Changeset]) -> Vec<String> {
     let mut max_bump: HashMap<&str, BumpType> = HashMap::new();
 
     for changeset in changesets {
-        for release in &changeset.releases {
+        for release in changeset.releases() {
             let entry = max_bump
-                .entry(release.name.as_str())
+                .entry(release.name().as_str())
                 .or_insert(BumpType::None);
-            if release.bump_type > *entry {
-                *entry = release.bump_type;
+            if release.bump_type() > *entry {
+                *entry = release.bump_type();
             }
         }
     }
@@ -62,61 +62,52 @@ fn promote_none_to_patch(changesets: &[Changeset], message: &str) -> Vec<Changes
 
 fn split_changeset(changeset: &Changeset, message: &str) -> Vec<Changeset> {
     let none_releases: Vec<&PackageRelease> = changeset
-        .releases
+        .releases()
         .iter()
-        .filter(|r| r.bump_type.is_noop())
+        .filter(|r| r.bump_type().is_noop())
         .collect();
 
     let non_none_releases: Vec<&PackageRelease> = changeset
-        .releases
+        .releases()
         .iter()
-        .filter(|r| !r.bump_type.is_noop())
+        .filter(|r| !r.bump_type().is_noop())
         .collect();
 
     match (none_releases.is_empty(), non_none_releases.is_empty()) {
         (true, _) => vec![changeset.clone()],
-        (false, true) => vec![Changeset {
-            summary: message.to_string(),
-            category: ChangeCategory::Changed,
-            releases: changeset
-                .releases
-                .iter()
-                .map(|r| PackageRelease {
-                    name: r.name.clone(),
-                    bump_type: BumpType::Patch,
-                })
-                .collect(),
-            consumed_for_prerelease: changeset.consumed_for_prerelease.clone(),
-            graduate: changeset.graduate,
-        }],
+        (false, true) => vec![
+            Changeset::new(
+                message.to_string(),
+                changeset
+                    .releases()
+                    .iter()
+                    .map(|r| PackageRelease::new(r.name().clone(), BumpType::Patch))
+                    .collect(),
+                ChangeCategory::Changed,
+            )
+            .with_consumed_for_prerelease(changeset.consumed_for_prerelease().cloned())
+            .with_graduate(changeset.graduate()),
+        ],
         (false, false) => {
-            let original = Changeset {
-                summary: changeset.summary.clone(),
-                category: changeset.category,
-                releases: non_none_releases
+            let original = Changeset::new(
+                changeset.summary().clone(),
+                non_none_releases
                     .iter()
-                    .map(|r| PackageRelease {
-                        name: r.name.clone(),
-                        bump_type: r.bump_type,
-                    })
+                    .map(|r| PackageRelease::new(r.name().clone(), r.bump_type()))
                     .collect(),
-                consumed_for_prerelease: changeset.consumed_for_prerelease.clone(),
-                graduate: changeset.graduate,
-            };
+                changeset.category(),
+            )
+            .with_consumed_for_prerelease(changeset.consumed_for_prerelease().cloned())
+            .with_graduate(changeset.graduate());
 
-            let promoted = Changeset {
-                summary: message.to_string(),
-                category: ChangeCategory::Changed,
-                releases: none_releases
+            let promoted = Changeset::new(
+                message.to_string(),
+                none_releases
                     .iter()
-                    .map(|r| PackageRelease {
-                        name: r.name.clone(),
-                        bump_type: BumpType::Patch,
-                    })
+                    .map(|r| PackageRelease::new(r.name().clone(), BumpType::Patch))
                     .collect(),
-                consumed_for_prerelease: None,
-                graduate: false,
-            };
+                ChangeCategory::Changed,
+            );
 
             vec![original, promoted]
         }
@@ -134,19 +125,14 @@ mod tests {
         category: ChangeCategory,
         releases: Vec<(&str, BumpType)>,
     ) -> Changeset {
-        Changeset {
-            summary: summary.to_string(),
-            category,
-            releases: releases
+        Changeset::new(
+            summary.to_string(),
+            releases
                 .into_iter()
-                .map(|(name, bump_type)| PackageRelease {
-                    name: name.to_string(),
-                    bump_type,
-                })
+                .map(|(name, bump_type)| PackageRelease::new(name.to_string(), bump_type))
                 .collect(),
-            consumed_for_prerelease: None,
-            graduate: false,
-        }
+            category,
+        )
     }
 
     #[test]
@@ -178,9 +164,9 @@ mod tests {
         assert_eq!(result.len(), 1);
         assert!(
             result[0]
-                .releases
+                .releases()
                 .iter()
-                .all(|r| r.bump_type == BumpType::Patch)
+                .all(|r| r.bump_type() == BumpType::Patch)
         );
         Ok(())
     }
@@ -200,8 +186,8 @@ mod tests {
         )?;
 
         assert_eq!(result.len(), 1);
-        assert_eq!(result[0].summary, "promoted message");
-        assert_eq!(result[0].category, ChangeCategory::Changed);
+        assert_eq!(result[0].summary(), "promoted message");
+        assert_eq!(result[0].category(), ChangeCategory::Changed);
         Ok(())
     }
 
@@ -219,20 +205,20 @@ mod tests {
         assert_eq!(result.len(), 2);
 
         let original = &result[0];
-        assert_eq!(original.summary, "mixed change");
-        assert_eq!(original.category, ChangeCategory::Fixed);
-        assert_eq!(original.releases.len(), 1);
-        assert_eq!(original.releases[0].name, "crate-a");
-        assert_eq!(original.releases[0].bump_type, BumpType::Patch);
+        assert_eq!(original.summary(), "mixed change");
+        assert_eq!(original.category(), ChangeCategory::Fixed);
+        assert_eq!(original.releases().len(), 1);
+        assert_eq!(original.releases()[0].name(), "crate-a");
+        assert_eq!(original.releases()[0].bump_type(), BumpType::Patch);
 
         let promoted = &result[1];
-        assert_eq!(promoted.summary, "auto");
-        assert_eq!(promoted.category, ChangeCategory::Changed);
-        assert_eq!(promoted.releases.len(), 1);
-        assert_eq!(promoted.releases[0].name, "crate-b");
-        assert_eq!(promoted.releases[0].bump_type, BumpType::Patch);
-        assert_eq!(promoted.consumed_for_prerelease, None);
-        assert!(!promoted.graduate);
+        assert_eq!(promoted.summary(), "auto");
+        assert_eq!(promoted.category(), ChangeCategory::Changed);
+        assert_eq!(promoted.releases().len(), 1);
+        assert_eq!(promoted.releases()[0].name(), "crate-b");
+        assert_eq!(promoted.releases()[0].bump_type(), BumpType::Patch);
+        assert_eq!(promoted.consumed_for_prerelease(), None);
+        assert!(!promoted.graduate());
         Ok(())
     }
 

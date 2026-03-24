@@ -191,7 +191,7 @@ impl PrereleaseInteractionProvider for TerminalManageInteractionProvider {
     ) -> changeset_operations::Result<MenuSelection<usize>> {
         let items: Vec<String> = available
             .iter()
-            .map(|p| format!("{} ({})", p.name, p.version))
+            .map(|p| format!("{} ({})", p.name(), p.version()))
             .collect();
 
         let selection = Select::new()
@@ -267,7 +267,7 @@ impl GraduationInteractionProvider for TerminalManageInteractionProvider {
     ) -> changeset_operations::Result<MenuSelection<usize>> {
         let items: Vec<String> = eligible
             .iter()
-            .map(|p| format!("{} ({})", p.name, p.version))
+            .map(|p| format!("{} ({})", p.name(), p.version()))
             .collect();
 
         let selection = Select::new()

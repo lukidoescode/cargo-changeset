@@ -1,7 +1,9 @@
 use std::fmt;
+use std::path::PathBuf;
 use std::str::FromStr;
 
 use clap::ValueEnum;
+use gset::Getset;
 use semver::Version;
 use serde::{Deserialize, Serialize};
 
@@ -91,46 +93,85 @@ impl fmt::Display for ChangeCategory {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Getset)]
 pub struct PackageRelease {
-    pub name: String,
-    pub bump_type: BumpType,
+    #[getset(get, vis = "pub")]
+    name: String,
+    #[getset(get_copy, vis = "pub")]
+    bump_type: BumpType,
 }
 
-/// A changeset represents a single unit of change affecting one or more packages.
-///
-/// Changesets capture the intent to release: which packages are affected, what type of
-/// version bump each requires, and a human-readable summary of the change.
-///
-/// # Prerelease Consumption
-///
-/// The `consumed_for_prerelease` field tracks whether this changeset has been included
-/// in a prerelease. When set, it contains the prerelease version string (e.g., "1.0.1-alpha.1").
-/// Consumed changesets are excluded from subsequent prereleases but are aggregated into
-/// the changelog when graduating to a stable release.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+impl PackageRelease {
+    pub fn new(name: String, bump_type: BumpType) -> Self {
+        Self { name, bump_type }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Getset)]
 pub struct Changeset {
-    pub summary: String,
-    pub releases: Vec<PackageRelease>,
+    #[getset(get, vis = "pub")]
+    summary: String,
+    #[getset(get, vis = "pub")]
+    releases: Vec<PackageRelease>,
     #[serde(default)]
-    pub category: ChangeCategory,
-    /// Version string of the prerelease that consumed this changeset, if any.
-    /// Set during prerelease creation, cleared during graduation to stable.
+    #[getset(get_copy, vis = "pub")]
+    category: ChangeCategory,
     #[serde(
         default,
         skip_serializing_if = "Option::is_none",
         rename = "consumedForPrerelease"
     )]
-    pub consumed_for_prerelease: Option<String>,
+    #[getset(get_as_ref, vis = "pub", ty = "Option<&String>")]
+    consumed_for_prerelease: Option<String>,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
-    pub graduate: bool,
+    #[getset(get_copy, vis = "pub")]
+    graduate: bool,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+impl Changeset {
+    pub fn new(summary: String, releases: Vec<PackageRelease>, category: ChangeCategory) -> Self {
+        Self {
+            summary,
+            releases,
+            category,
+            consumed_for_prerelease: None,
+            graduate: false,
+        }
+    }
+
+    pub fn with_consumed_for_prerelease(mut self, v: Option<String>) -> Self {
+        self.consumed_for_prerelease = v;
+        self
+    }
+
+    pub fn with_graduate(mut self, v: bool) -> Self {
+        self.graduate = v;
+        self
+    }
+
+    pub fn set_consumed_for_prerelease(&mut self, v: Option<String>) {
+        self.consumed_for_prerelease = v;
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Getset)]
 pub struct PackageInfo {
-    pub name: String,
-    pub version: Version,
-    pub path: std::path::PathBuf,
+    #[getset(get, vis = "pub")]
+    name: String,
+    #[getset(get, vis = "pub")]
+    version: Version,
+    #[getset(get, vis = "pub")]
+    path: PathBuf,
+}
+
+impl PackageInfo {
+    pub fn new(name: String, version: Version, path: PathBuf) -> Self {
+        Self {
+            name,
+            version,
+            path,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]

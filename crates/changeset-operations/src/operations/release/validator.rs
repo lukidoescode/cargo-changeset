@@ -279,9 +279,10 @@ impl ReleaseValidator {
         project_kind: &ProjectKind,
     ) -> Result<ValidatedReleaseConfig, ValidationErrors> {
         let mut collector = ValidationErrorCollector::new();
-        let package_names: HashSet<_> = packages.iter().map(|p| p.name.as_str()).collect();
-        let available_packages: Vec<String> = packages.iter().map(|p| p.name.clone()).collect();
-        let package_lookup: HashMap<_, _> = packages.iter().map(|p| (p.name.as_str(), p)).collect();
+        let package_names: HashSet<_> = packages.iter().map(|p| p.name().as_str()).collect();
+        let available_packages: Vec<String> = packages.iter().map(|p| p.name().clone()).collect();
+        let package_lookup: HashMap<_, _> =
+            packages.iter().map(|p| (p.name().as_str(), p)).collect();
 
         Self::validate_packages_exist(
             cli_input.cli_prerelease.keys().map(String::as_str),
@@ -377,10 +378,10 @@ impl ReleaseValidator {
     ) {
         for pkg_name in &cli_input.cli_graduate {
             if let Some(pkg) = package_lookup.get(pkg_name.as_str()) {
-                if is_prerelease(&pkg.version) {
+                if is_prerelease(pkg.version()) {
                     collector.push(ValidationError::CannotGraduateFromPrerelease {
                         package: pkg_name.clone(),
-                        current_version: pkg.version.clone(),
+                        current_version: pkg.version().clone(),
                     });
                 }
             }
@@ -389,10 +390,10 @@ impl ReleaseValidator {
         if let Some(state) = graduation_state {
             for pkg_name in state.iter() {
                 if let Some(pkg) = package_lookup.get(pkg_name) {
-                    if is_prerelease(&pkg.version) {
+                    if is_prerelease(pkg.version()) {
                         collector.push(ValidationError::CannotGraduateFromPrerelease {
                             package: pkg_name.to_string(),
-                            current_version: pkg.version.clone(),
+                            current_version: pkg.version().clone(),
                         });
                     }
                 }
@@ -408,10 +409,10 @@ impl ReleaseValidator {
     ) {
         for pkg_name in &cli_input.cli_graduate {
             if let Some(pkg) = package_lookup.get(pkg_name.as_str()) {
-                if !is_zero_version(&pkg.version) && !is_prerelease(&pkg.version) {
+                if !is_zero_version(pkg.version()) && !is_prerelease(pkg.version()) {
                     collector.push(ValidationError::CannotGraduateStableVersion {
                         package: pkg_name.clone(),
-                        version: pkg.version.clone(),
+                        version: pkg.version().clone(),
                     });
                 }
             }
@@ -420,10 +421,10 @@ impl ReleaseValidator {
         if let Some(state) = graduation_state {
             for pkg_name in state.iter() {
                 if let Some(pkg) = package_lookup.get(pkg_name) {
-                    if !is_zero_version(&pkg.version) && !is_prerelease(&pkg.version) {
+                    if !is_zero_version(pkg.version()) && !is_prerelease(pkg.version()) {
                         collector.push(ValidationError::CannotGraduateStableVersion {
                             package: pkg_name.to_string(),
-                            version: pkg.version.clone(),
+                            version: pkg.version().clone(),
                         });
                     }
                 }
@@ -489,11 +490,11 @@ mod tests {
     use std::path::PathBuf;
 
     fn make_package(name: &str, version: &str) -> PackageInfo {
-        PackageInfo {
-            name: name.to_string(),
-            version: version.parse().expect("valid version"),
-            path: PathBuf::from(format!("/mock/{name}")),
-        }
+        PackageInfo::new(
+            name.to_string(),
+            version.parse().expect("valid version"),
+            PathBuf::from(format!("/mock/{name}")),
+        )
     }
 
     mod prerelease_consistency {
@@ -1009,7 +1010,7 @@ mod tests {
             for pkg in &packages {
                 let pkg_config = config
                     .per_package()
-                    .get(&pkg.name)
+                    .get(pkg.name())
                     .expect("each package should have config");
                 assert!(matches!(pkg_config.prerelease, Some(PrereleaseSpec::Beta)));
             }

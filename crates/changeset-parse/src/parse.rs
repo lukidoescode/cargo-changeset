@@ -89,16 +89,14 @@ pub fn parse_changeset(content: &str) -> Result<Changeset, FormatError> {
     let releases = parsed
         .releases
         .into_iter()
-        .map(|(name, bump_type)| PackageRelease { name, bump_type })
+        .map(|(name, bump_type)| PackageRelease::new(name, bump_type))
         .collect();
 
-    Ok(Changeset {
-        summary: body.trim().to_string(),
-        releases,
-        category: parsed.category,
-        consumed_for_prerelease: parsed.consumed_for_prerelease,
-        graduate: parsed.graduate,
-    })
+    Ok(
+        Changeset::new(body.trim().to_string(), releases, parsed.category)
+            .with_consumed_for_prerelease(parsed.consumed_for_prerelease)
+            .with_graduate(parsed.graduate),
+    )
 }
 
 #[cfg(test)]
@@ -114,11 +112,11 @@ Fix critical bug in authentication flow.
 "#;
 
         let changeset = parse_changeset(content).expect("should parse");
-        assert_eq!(changeset.releases.len(), 1);
-        assert_eq!(changeset.releases[0].name, "my-package");
-        assert_eq!(changeset.releases[0].bump_type, BumpType::Patch);
+        assert_eq!(changeset.releases().len(), 1);
+        assert_eq!(changeset.releases()[0].name(), "my-package");
+        assert_eq!(changeset.releases()[0].bump_type(), BumpType::Patch);
         assert_eq!(
-            changeset.summary,
+            changeset.summary(),
             "Fix critical bug in authentication flow."
         );
     }
@@ -134,14 +132,14 @@ Breaking change to API.
 "#;
 
         let changeset = parse_changeset(content).expect("should parse");
-        assert_eq!(changeset.releases.len(), 3);
+        assert_eq!(changeset.releases().len(), 3);
 
-        assert_eq!(changeset.releases[0].name, "crate-one");
-        assert_eq!(changeset.releases[0].bump_type, BumpType::Major);
-        assert_eq!(changeset.releases[1].name, "crate-two");
-        assert_eq!(changeset.releases[1].bump_type, BumpType::Minor);
-        assert_eq!(changeset.releases[2].name, "crate-three");
-        assert_eq!(changeset.releases[2].bump_type, BumpType::Patch);
+        assert_eq!(changeset.releases()[0].name(), "crate-one");
+        assert_eq!(changeset.releases()[0].bump_type(), BumpType::Major);
+        assert_eq!(changeset.releases()[1].name(), "crate-two");
+        assert_eq!(changeset.releases()[1].bump_type(), BumpType::Minor);
+        assert_eq!(changeset.releases()[2].name(), "crate-three");
+        assert_eq!(changeset.releases()[2].bump_type(), BumpType::Patch);
     }
 
     #[test]
@@ -158,9 +156,9 @@ It contains multiple paragraphs and describes the change in detail.
 "#;
 
         let changeset = parse_changeset(content).expect("should parse");
-        assert!(changeset.summary.contains("multiline summary"));
-        assert!(changeset.summary.contains("Feature one"));
-        assert!(changeset.summary.contains("Feature two"));
+        assert!(changeset.summary().contains("multiline summary"));
+        assert!(changeset.summary().contains("Feature one"));
+        assert!(changeset.summary().contains("Feature two"));
     }
 
     #[test]
@@ -171,7 +169,7 @@ It contains multiple paragraphs and describes the change in detail.
 "#;
 
         let changeset = parse_changeset(content).expect("should parse");
-        assert!(changeset.summary.is_empty());
+        assert!(changeset.summary().is_empty());
     }
 
     #[test]
@@ -183,7 +181,7 @@ Summary with --- inside text should not break parsing.
 "#;
 
         let changeset = parse_changeset(content).expect("should parse");
-        assert!(changeset.summary.contains("---"));
+        assert!(changeset.summary().contains("---"));
     }
 
     #[test]
@@ -191,9 +189,9 @@ Summary with --- inside text should not break parsing.
         let content = "---\r\n\"my-crate\": patch\r\n---\r\nWindows style summary.\r\n";
 
         let changeset = parse_changeset(content).expect("should parse");
-        assert_eq!(changeset.releases.len(), 1);
-        assert_eq!(changeset.releases[0].name, "my-crate");
-        assert!(changeset.summary.contains("Windows style summary"));
+        assert_eq!(changeset.releases().len(), 1);
+        assert_eq!(changeset.releases()[0].name(), "my-crate");
+        assert!(changeset.summary().contains("Windows style summary"));
     }
 
     #[test]
@@ -201,9 +199,9 @@ Summary with --- inside text should not break parsing.
         let content = "---\r\n\"crate-a\": major\n\"crate-b\": minor\r\n---\nMixed endings.\r\n";
 
         let changeset = parse_changeset(content).expect("should parse");
-        assert_eq!(changeset.releases.len(), 2);
-        assert_eq!(changeset.releases[0].name, "crate-a");
-        assert_eq!(changeset.releases[1].name, "crate-b");
+        assert_eq!(changeset.releases().len(), 2);
+        assert_eq!(changeset.releases()[0].name(), "crate-a");
+        assert_eq!(changeset.releases()[1].name(), "crate-b");
     }
 
     #[test]
@@ -211,7 +209,7 @@ Summary with --- inside text should not break parsing.
         let content = "---\n\"my-crate\": patch\n---\nSummary without trailing newline";
 
         let changeset = parse_changeset(content).expect("should parse");
-        assert_eq!(changeset.summary, "Summary without trailing newline");
+        assert_eq!(changeset.summary(), "Summary without trailing newline");
     }
 
     #[test]
@@ -223,9 +221,9 @@ Summary with --- inside text should not break parsing.
 "#;
 
         let changeset = parse_changeset(content).expect("should parse");
-        assert_eq!(changeset.releases[0].name, "über-crate");
-        assert!(changeset.summary.contains("Добавлена"));
-        assert!(changeset.summary.contains("🎉"));
+        assert_eq!(changeset.releases()[0].name(), "über-crate");
+        assert!(changeset.summary().contains("Добавлена"));
+        assert!(changeset.summary().contains("🎉"));
     }
 
     #[test]
@@ -234,7 +232,7 @@ Summary with --- inside text should not break parsing.
         let content = format!("---\n\"my-crate\": patch\n---\n{long_summary}\n");
 
         let changeset = parse_changeset(&content).expect("should parse");
-        assert_eq!(changeset.summary.len(), 10000);
+        assert_eq!(changeset.summary().len(), 10000);
     }
 
     #[test]
@@ -242,7 +240,7 @@ Summary with --- inside text should not break parsing.
         let content = "---\n\"my-crate\": patch\n---\n   \n\t\n   \n";
 
         let changeset = parse_changeset(content).expect("should parse");
-        assert!(changeset.summary.is_empty());
+        assert!(changeset.summary().is_empty());
     }
 
     #[test]
@@ -337,7 +335,7 @@ Some summary.
 "#;
 
         let changeset = parse_changeset(content).expect("should parse");
-        assert_eq!(changeset.category, ChangeCategory::Changed);
+        assert_eq!(changeset.category(), ChangeCategory::Changed);
     }
 
     #[test]
@@ -350,8 +348,8 @@ Fixed a bug.
 "#;
 
         let changeset = parse_changeset(content).expect("should parse");
-        assert_eq!(changeset.category, ChangeCategory::Fixed);
-        assert_eq!(changeset.releases[0].name, "my-crate");
+        assert_eq!(changeset.category(), ChangeCategory::Fixed);
+        assert_eq!(changeset.releases()[0].name(), "my-crate");
     }
 
     #[test]
@@ -364,7 +362,7 @@ Added new feature.
 "#;
 
         let changeset = parse_changeset(content).expect("should parse");
-        assert_eq!(changeset.category, ChangeCategory::Added);
+        assert_eq!(changeset.category(), ChangeCategory::Added);
     }
 
     #[test]
@@ -377,7 +375,7 @@ Deprecated old API.
 "#;
 
         let changeset = parse_changeset(content).expect("should parse");
-        assert_eq!(changeset.category, ChangeCategory::Deprecated);
+        assert_eq!(changeset.category(), ChangeCategory::Deprecated);
     }
 
     #[test]
@@ -390,7 +388,7 @@ Removed old feature.
 "#;
 
         let changeset = parse_changeset(content).expect("should parse");
-        assert_eq!(changeset.category, ChangeCategory::Removed);
+        assert_eq!(changeset.category(), ChangeCategory::Removed);
     }
 
     #[test]
@@ -403,7 +401,7 @@ Fixed security vulnerability.
 "#;
 
         let changeset = parse_changeset(content).expect("should parse");
-        assert_eq!(changeset.category, ChangeCategory::Security);
+        assert_eq!(changeset.category(), ChangeCategory::Security);
     }
 
     #[test]
@@ -416,7 +414,7 @@ Changed behavior.
 "#;
 
         let changeset = parse_changeset(content).expect("should parse");
-        assert_eq!(changeset.category, ChangeCategory::Changed);
+        assert_eq!(changeset.category(), ChangeCategory::Changed);
     }
 
     #[test]
@@ -441,7 +439,7 @@ Some summary.
 "#;
 
         let changeset = parse_changeset(content).expect("should parse");
-        assert_eq!(changeset.consumed_for_prerelease, None);
+        assert_eq!(changeset.consumed_for_prerelease(), None);
     }
 
     #[test]
@@ -455,8 +453,8 @@ Some summary.
 
         let changeset = parse_changeset(content).expect("should parse");
         assert_eq!(
-            changeset.consumed_for_prerelease,
-            Some("1.0.1-alpha.1".to_string())
+            changeset.consumed_for_prerelease(),
+            Some(&"1.0.1-alpha.1".to_string())
         );
     }
 
@@ -471,10 +469,10 @@ Fixed a bug.
 "#;
 
         let changeset = parse_changeset(content).expect("should parse");
-        assert_eq!(changeset.category, ChangeCategory::Fixed);
+        assert_eq!(changeset.category(), ChangeCategory::Fixed);
         assert_eq!(
-            changeset.consumed_for_prerelease,
-            Some("2.0.0-beta.3".to_string())
+            changeset.consumed_for_prerelease(),
+            Some(&"2.0.0-beta.3".to_string())
         );
     }
 
@@ -489,8 +487,8 @@ Release candidate.
 
         let changeset = parse_changeset(content).expect("should parse");
         assert_eq!(
-            changeset.consumed_for_prerelease,
-            Some("1.2.3-rc.1".to_string())
+            changeset.consumed_for_prerelease(),
+            Some(&"1.2.3-rc.1".to_string())
         );
     }
 
@@ -503,7 +501,7 @@ Some summary.
 "#;
 
         let changeset = parse_changeset(content).expect("should parse");
-        assert!(!changeset.graduate);
+        assert!(!changeset.graduate());
     }
 
     #[test]
@@ -516,7 +514,7 @@ Graduate to 1.0.0.
 "#;
 
         let changeset = parse_changeset(content).expect("should parse");
-        assert!(changeset.graduate);
+        assert!(changeset.graduate());
     }
 
     #[test]
@@ -529,7 +527,7 @@ Major bump.
 "#;
 
         let changeset = parse_changeset(content).expect("should parse");
-        assert!(!changeset.graduate);
+        assert!(!changeset.graduate());
     }
 
     #[test]
@@ -541,10 +539,10 @@ Internal refactoring only.
 "#;
 
         let changeset = parse_changeset(content).expect("should parse");
-        assert_eq!(changeset.releases.len(), 1);
-        assert_eq!(changeset.releases[0].name, "my-crate");
-        assert_eq!(changeset.releases[0].bump_type, BumpType::None);
-        assert_eq!(changeset.summary, "Internal refactoring only.");
+        assert_eq!(changeset.releases().len(), 1);
+        assert_eq!(changeset.releases()[0].name(), "my-crate");
+        assert_eq!(changeset.releases()[0].bump_type(), BumpType::None);
+        assert_eq!(changeset.summary(), "Internal refactoring only.");
     }
 
     #[test]
@@ -555,8 +553,8 @@ Internal refactoring only.
 "#;
 
         let changeset = parse_changeset(content).expect("should parse");
-        assert_eq!(changeset.releases[0].bump_type, BumpType::None);
-        assert!(changeset.summary.is_empty());
+        assert_eq!(changeset.releases()[0].bump_type(), BumpType::None);
+        assert!(changeset.summary().is_empty());
     }
 
     #[test]
@@ -569,9 +567,9 @@ Mixed bump types.
 "#;
 
         let changeset = parse_changeset(content).expect("should parse");
-        assert_eq!(changeset.releases.len(), 2);
-        assert_eq!(changeset.releases[0].bump_type, BumpType::None);
-        assert_eq!(changeset.releases[1].bump_type, BumpType::Patch);
+        assert_eq!(changeset.releases().len(), 2);
+        assert_eq!(changeset.releases()[0].bump_type(), BumpType::None);
+        assert_eq!(changeset.releases()[1].bump_type(), BumpType::Patch);
     }
 
     #[test]
@@ -611,7 +609,7 @@ New major release.
 "#;
 
         let changeset = parse_changeset(content).expect("should parse");
-        assert!(changeset.graduate);
-        assert_eq!(changeset.category, ChangeCategory::Added);
+        assert!(changeset.graduate());
+        assert_eq!(changeset.category(), ChangeCategory::Added);
     }
 }

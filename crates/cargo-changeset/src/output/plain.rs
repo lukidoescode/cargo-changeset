@@ -11,17 +11,17 @@ impl PlainTextFormatter {
         let (direct, transitive): (Vec<_>, Vec<_>) = result
             .affected_packages
             .iter()
-            .partition(|pkg| !result.transitive_dependents.contains(&pkg.name));
+            .partition(|pkg| !result.transitive_dependents.contains(pkg.name().as_str()));
 
         if !direct.is_empty() {
             output.push_str("Changed packages:\n");
             for pkg in &direct {
-                let status = if result.covered_packages.contains(&pkg.name) {
+                let status = if result.covered_packages.contains(pkg.name().as_str()) {
                     "✓"
                 } else {
                     "✗"
                 };
-                output.push_str(&format!("  {status} {}\n", pkg.name));
+                output.push_str(&format!("  {status} {}\n", pkg.name()));
             }
         }
 
@@ -31,12 +31,12 @@ impl PlainTextFormatter {
             }
             output.push_str("Transitive dependents:\n");
             for pkg in &transitive {
-                let status = if result.covered_packages.contains(&pkg.name) {
+                let status = if result.covered_packages.contains(pkg.name().as_str()) {
                     "✓"
                 } else {
                     "✗"
                 };
-                output.push_str(&format!("  {status} {}\n", pkg.name));
+                output.push_str(&format!("  {status} {}\n", pkg.name()));
             }
         }
     }
@@ -82,7 +82,7 @@ impl OutputFormatter for PlainTextFormatter {
         if !result.uncovered_packages.is_empty() {
             output.push_str("Packages without changeset coverage:\n");
             for pkg in &result.uncovered_packages {
-                output.push_str(&format!("  {}\n", pkg.name));
+                output.push_str(&format!("  {}\n", pkg.name()));
             }
         }
 

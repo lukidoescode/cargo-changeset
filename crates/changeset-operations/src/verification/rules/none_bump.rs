@@ -39,16 +39,11 @@ mod tests {
     use crate::verification::{VerificationContext, VerificationResult};
 
     fn make_changeset(name: &str, bump: BumpType, summary: &str) -> Changeset {
-        Changeset {
-            summary: summary.to_string(),
-            releases: vec![PackageRelease {
-                name: name.to_string(),
-                bump_type: bump,
-            }],
-            category: ChangeCategory::Changed,
-            consumed_for_prerelease: None,
-            graduate: false,
-        }
+        Changeset::new(
+            summary.to_string(),
+            vec![PackageRelease::new(name.to_string(), bump)],
+            ChangeCategory::Changed,
+        )
     }
 
     fn empty_result() -> VerificationResult {

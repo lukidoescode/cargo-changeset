@@ -23,7 +23,7 @@ pub(super) fn is_prerelease_graduation(
     }
     packages
         .iter()
-        .any(|p| changeset_version::is_prerelease(&p.version))
+        .any(|p| changeset_version::is_prerelease(p.version()))
 }
 
 pub(super) fn is_zero_graduation(
@@ -38,7 +38,7 @@ pub(super) fn is_zero_graduation(
     }
     packages
         .iter()
-        .any(|p| changeset_version::is_zero_version(&p.version))
+        .any(|p| changeset_version::is_zero_version(p.version()))
 }
 
 pub(super) enum EarlyReturnDecision {
@@ -70,8 +70,8 @@ pub(super) fn collect_unchanged_packages(
 
     packages
         .iter()
-        .filter(|p| !released.contains(p.name.as_str()))
-        .map(|p| p.name.clone())
+        .filter(|p| !released.contains(p.name().as_str()))
+        .map(|p| p.name().clone())
         .collect()
 }
 
