@@ -64,7 +64,7 @@ fn build_changelog_update(
 fn max_planned_version(planned_releases: &[PackageVersion]) -> Option<Version> {
     planned_releases
         .iter()
-        .map(|r| r.new_version())
+        .map(PackageVersion::new_version)
         .max()
         .cloned()
 }
@@ -72,7 +72,7 @@ fn max_planned_version(planned_releases: &[PackageVersion]) -> Option<Version> {
 fn max_current_version(planned_releases: &[PackageVersion]) -> Option<Version> {
     planned_releases
         .iter()
-        .map(|r| r.current_version())
+        .map(PackageVersion::current_version)
         .max()
         .cloned()
 }

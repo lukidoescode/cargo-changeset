@@ -55,17 +55,6 @@ mod tests {
         )
     }
 
-    fn empty_context() -> VerificationContext {
-        VerificationContext::new(
-            Vec::new(),
-            std::collections::HashSet::new(),
-            Vec::new(),
-            Vec::new(),
-            Vec::new(),
-            Vec::new(),
-        )
-    }
-
     #[test]
     fn disallow_rule_detects_none_bump_packages() -> Result<()> {
         let reader = crate::mocks::MockChangesetReader::new().with_changeset(

@@ -14,6 +14,7 @@ pub struct ChangelogWriteResult {
 }
 
 impl ChangelogWriteResult {
+    #[must_use]
     pub fn new(path: PathBuf, created: bool) -> Self {
         Self { path, created }
     }

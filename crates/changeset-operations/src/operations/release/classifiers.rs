@@ -36,8 +36,10 @@ pub(super) fn is_zero_graduation(
     input: &ReleaseInput,
     per_package_config: &HashMap<String, PackageReleaseConfig>,
 ) -> bool {
-    let has_graduation =
-        input.graduate_all() || per_package_config.values().any(|c| c.graduate_zero());
+    let has_graduation = input.graduate_all()
+        || per_package_config
+            .values()
+            .any(PackageReleaseConfig::graduate_zero);
     if !has_graduation {
         return false;
     }

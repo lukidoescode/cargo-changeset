@@ -19,53 +19,25 @@ use crate::types::PackageVersion;
 #[builder(default)]
 pub struct StatusOutput {
     #[getset(get, vis = "pub")]
-    changesets: Vec<Changeset>,
+    pub(crate) changesets: Vec<Changeset>,
     #[getset(get, vis = "pub")]
-    changeset_files: Vec<PathBuf>,
+    pub(crate) changeset_files: Vec<PathBuf>,
     #[getset(get, vis = "pub")]
-    projected_releases: Vec<PackageVersion>,
+    pub(crate) projected_releases: Vec<PackageVersion>,
     #[getset(get, vis = "pub")]
-    bumps_by_package: IndexMap<String, Vec<BumpType>>,
+    pub(crate) bumps_by_package: IndexMap<String, Vec<BumpType>>,
     #[getset(get, vis = "pub")]
-    none_bump_packages: Vec<String>,
+    pub(crate) none_bump_packages: Vec<String>,
     #[getset(get, vis = "pub")]
-    unchanged_packages: Vec<PackageInfo>,
+    pub(crate) unchanged_packages: Vec<PackageInfo>,
     #[getset(get, vis = "pub")]
-    packages_with_inherited_versions: Vec<String>,
+    pub(crate) packages_with_inherited_versions: Vec<String>,
     #[getset(get, vis = "pub")]
-    unknown_packages: Vec<String>,
+    pub(crate) unknown_packages: Vec<String>,
     #[getset(get, vis = "pub")]
-    consumed_prerelease_changesets: Vec<(PathBuf, String)>,
+    pub(crate) consumed_prerelease_changesets: Vec<(PathBuf, String)>,
     #[getset(get, vis = "pub")]
-    uncovered_dependents: Vec<(String, Vec<String>)>,
-}
-
-impl StatusOutput {
-    pub fn new(
-        changesets: Vec<Changeset>,
-        changeset_files: Vec<PathBuf>,
-        projected_releases: Vec<PackageVersion>,
-        bumps_by_package: IndexMap<String, Vec<BumpType>>,
-        none_bump_packages: Vec<String>,
-        unchanged_packages: Vec<PackageInfo>,
-        packages_with_inherited_versions: Vec<String>,
-        unknown_packages: Vec<String>,
-        consumed_prerelease_changesets: Vec<(PathBuf, String)>,
-        uncovered_dependents: Vec<(String, Vec<String>)>,
-    ) -> Self {
-        Self {
-            changesets,
-            changeset_files,
-            projected_releases,
-            bumps_by_package,
-            none_bump_packages,
-            unchanged_packages,
-            packages_with_inherited_versions,
-            unknown_packages,
-            consumed_prerelease_changesets,
-            uncovered_dependents,
-        }
-    }
+    pub(crate) uncovered_dependents: Vec<(String, Vec<String>)>,
 }
 
 pub struct StatusOperation<P, R, I> {
@@ -152,7 +124,7 @@ where
         let uncovered_dependents =
             Self::compute_uncovered_dependents(&graph, &projected_releases, &none_bump_packages);
 
-        Ok(StatusOutput::new(
+        Ok(StatusOutput {
             changesets,
             changeset_files,
             projected_releases,
@@ -160,10 +132,10 @@ where
             none_bump_packages,
             unchanged_packages,
             packages_with_inherited_versions,
-            plan.unknown_packages().clone(),
+            unknown_packages: plan.unknown_packages().clone(),
             consumed_prerelease_changesets,
             uncovered_dependents,
-        ))
+        })
     }
 
     fn compute_uncovered_dependents(

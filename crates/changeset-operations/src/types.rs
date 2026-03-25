@@ -18,6 +18,7 @@ pub struct PackageVersion {
 }
 
 impl PackageVersion {
+    #[must_use]
     pub fn new(
         name: String,
         current_version: Version,

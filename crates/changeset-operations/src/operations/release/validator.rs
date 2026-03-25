@@ -485,6 +485,7 @@ impl ReleaseValidator {
 mod tests {
     use super::*;
     use crate::operations::ReleaseInputBuilder;
+    use crate::types::PackageReleaseConfig;
     use std::path::PathBuf;
 
     fn make_package(name: &str, version: &str) -> PackageInfo {
@@ -1047,13 +1048,14 @@ mod tests {
 
             let zero_config = config.per_package().get("zero-crate");
             assert!(
-                zero_config.is_some_and(|c| c.graduate_zero()),
+                zero_config.is_some_and(PackageReleaseConfig::graduate_zero),
                 "zero version should graduate"
             );
 
             let stable_config = config.per_package().get("stable-crate");
             assert!(
-                stable_config.is_none() || !stable_config.is_some_and(|c| c.graduate_zero()),
+                stable_config.is_none()
+                    || !stable_config.is_some_and(PackageReleaseConfig::graduate_zero),
                 "stable version should not graduate"
             );
         }

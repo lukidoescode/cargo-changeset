@@ -16,7 +16,7 @@ use crate::traits::{
 use crate::verification::rules::{CoverageRule, DeletedChangesetsRule, NoneBumpDisallowedRule};
 use crate::verification::{VerificationContext, VerificationEngine, VerificationResult};
 
-#[derive(Builder, Getset)]
+#[derive(Builder, Default, Getset)]
 #[builder(default)]
 pub struct VerifyInput {
     #[getset(get, vis = "pub")]
@@ -29,18 +29,6 @@ pub struct VerifyInput {
     exclude_dependents: bool,
     #[getset(get_copy, vis = "pub")]
     ignore_dirty: bool,
-}
-
-impl Default for VerifyInput {
-    fn default() -> Self {
-        Self {
-            base: String::new(),
-            head: None,
-            allow_deleted_changesets: false,
-            exclude_dependents: false,
-            ignore_dirty: false,
-        }
-    }
 }
 
 #[derive(Debug)]
@@ -98,7 +86,7 @@ where
         let changed_files = if working_tree_dirty {
             self.git_provider.uncommitted_changes(project.root())?
         } else {
-            let head_ref = input.head().map(String::as_str).unwrap_or("HEAD");
+            let head_ref = input.head().map_or("HEAD", String::as_str);
             self.git_provider
                 .changed_files(project.root(), input.base(), head_ref)?
         };

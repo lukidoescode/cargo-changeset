@@ -227,8 +227,8 @@ impl VersionPlanner {
             let config = per_package_config.get(name);
 
             let prerelease = config.and_then(|c| c.prerelease());
-            let should_graduate =
-                config.is_some_and(|c| c.graduate_zero()) || changeset_graduates.contains(name);
+            let should_graduate = config.is_some_and(PackageReleaseConfig::graduate_zero)
+                || changeset_graduates.contains(name);
 
             if Self::should_skip_package(bump_type, prerelease, should_graduate) {
                 continue;

@@ -1948,11 +1948,11 @@ mod tests {
             "should graduate from prerelease to stable"
         );
         assert!(
-            changeset_version::is_prerelease(&output.planned_releases()[0].current_version()),
+            changeset_version::is_prerelease(output.planned_releases()[0].current_version()),
             "current version should have been a prerelease"
         );
         assert!(
-            !changeset_version::is_prerelease(&output.planned_releases()[0].new_version()),
+            !changeset_version::is_prerelease(output.planned_releases()[0].new_version()),
             "new version should be stable"
         );
 

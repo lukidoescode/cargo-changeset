@@ -43,10 +43,6 @@ impl VerificationResult {
         }
     }
 
-    pub(crate) fn set_covered_packages(&mut self, covered: HashSet<String>) {
-        self.covered_packages = covered;
-    }
-
     pub(crate) fn insert_covered_package(&mut self, name: String) {
         self.covered_packages.insert(name);
     }
