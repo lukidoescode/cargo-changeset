@@ -146,7 +146,7 @@ where
         if affected_packages.is_empty() && !has_deleted_changesets {
             let (project_file_count, ignored_file_count) = mapping
                 .as_ref()
-                .map_or((0, 0), |m| (m.project_files.len(), m.ignored_files.len()));
+                .map_or((0, 0), |m| (m.project().len(), m.ignored().len()));
             return Ok(VerifyResult {
                 is_dirty,
                 outcome: VerifyOutcome::NoPackagesAffected {
@@ -236,8 +236,8 @@ fn build_context(
             transitive_dependents,
             changeset_files,
             deleted_changesets,
-            project_files: m.project_files.clone(),
-            ignored_files: m.ignored_files.clone(),
+            project_files: m.project().clone(),
+            ignored_files: m.ignored().clone(),
         },
         None => VerificationContext {
             affected_packages,
