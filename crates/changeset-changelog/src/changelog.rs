@@ -91,9 +91,9 @@ impl Changelog {
 
         if let Some(repo) = repo_info {
             let base_tag = previous_version.map_or("HEAD".to_string(), |v| format!("v{v}"));
-            let target_tag = format!("v{}", release.version);
+            let target_tag = format!("v{}", release.version());
             if let Some(comparison_url) = repo.comparison_url(&base_tag, &target_tag) {
-                let link_line = format!("[{}]: {}", release.version, comparison_url);
+                let link_line = format!("[{}]: {}", release.version(), comparison_url);
                 if !new_content.contains(&link_line) {
                     if !new_content.ends_with('\n') {
                         new_content.push('\n');

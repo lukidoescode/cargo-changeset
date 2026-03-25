@@ -31,7 +31,7 @@ pub fn format_entries(entries: &[ChangelogEntry]) -> String {
     let mut by_category: BTreeMap<ChangeCategory, Vec<&ChangelogEntry>> = BTreeMap::new();
 
     for entry in entries {
-        by_category.entry(entry.category).or_default().push(entry);
+        by_category.entry(entry.category()).or_default().push(entry);
     }
 
     let mut output = String::new();
@@ -43,12 +43,12 @@ pub fn format_entries(entries: &[ChangelogEntry]) -> String {
 
         for entry in category_entries {
             output.push_str("\n- ");
-            if let Some(ref package) = entry.package {
+            if let Some(package) = entry.package() {
                 output.push_str("**");
                 output.push_str(package);
                 output.push_str("**: ");
             }
-            output.push_str(&entry.description);
+            output.push_str(entry.description());
         }
         output.push('\n');
     }
@@ -63,8 +63,8 @@ pub fn format_version_header(version: &Version, date: NaiveDate) -> String {
 
 #[must_use]
 pub fn format_version_release(release: &VersionRelease) -> String {
-    let mut output = format_version_header(&release.version, release.date);
-    output.push_str(&format_entries(&release.entries));
+    let mut output = format_version_header(release.version(), release.date());
+    output.push_str(&format_entries(release.entries()));
     output
 }
 

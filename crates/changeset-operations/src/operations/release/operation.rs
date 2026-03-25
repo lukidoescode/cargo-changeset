@@ -1406,7 +1406,7 @@ mod tests {
 
         let (_, release) = &written[0];
         assert_eq!(
-            release.entries.len(),
+            release.entries().len(),
             2,
             "changelog should contain entries from both consumed changesets"
         );

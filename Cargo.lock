@@ -178,6 +178,7 @@ version = "0.0.2"
 dependencies = [
  "changeset-core",
  "chrono",
+ "gset",
  "semver",
  "serde",
  "tempfile",
@@ -205,6 +206,7 @@ dependencies = [
  "anyhow",
  "dunce",
  "git2",
+ "gset",
  "tempfile",
  "thiserror",
 ]
