@@ -42,14 +42,14 @@ pub(super) fn build_release_config(
         per_package
             .entry(pkg.clone())
             .or_insert_with(PackageReleaseConfig::default)
-            .prerelease = Some(spec.clone());
+            .set_prerelease(spec.clone());
     }
 
     for (pkg, spec) in &cli_input.cli_prerelease {
         per_package
             .entry(pkg.clone())
             .or_insert_with(PackageReleaseConfig::default)
-            .prerelease = Some(spec.clone());
+            .set_prerelease(spec.clone());
     }
 
     if let Some(global) = cli_input.global_prerelease.as_ref() {
@@ -57,7 +57,7 @@ pub(super) fn build_release_config(
             per_package
                 .entry(pkg.name().clone())
                 .or_insert_with(PackageReleaseConfig::default)
-                .prerelease = Some(global.clone());
+                .set_prerelease(global.clone());
         }
     }
 
@@ -66,7 +66,7 @@ pub(super) fn build_release_config(
             per_package
                 .entry(pkg.to_string())
                 .or_insert_with(PackageReleaseConfig::default)
-                .graduate_zero = true;
+                .set_graduate_zero();
         }
     }
 
@@ -74,7 +74,7 @@ pub(super) fn build_release_config(
         per_package
             .entry(pkg.clone())
             .or_insert_with(PackageReleaseConfig::default)
-            .graduate_zero = true;
+            .set_graduate_zero();
     }
 
     if cli_input.graduate_all {
@@ -83,7 +83,7 @@ pub(super) fn build_release_config(
                 per_package
                     .entry(pkg.name().clone())
                     .or_insert_with(PackageReleaseConfig::default)
-                    .graduate_zero = true;
+                    .set_graduate_zero();
             }
         }
     }
@@ -124,8 +124,8 @@ mod tests {
         let config = build_release_config(&cli_input, &cache, None, &packages);
 
         assert_eq!(
-            config.per_package()["crate-a"].prerelease,
-            Some(PrereleaseSpec::Alpha)
+            config.per_package()["crate-a"].prerelease(),
+            Some(&PrereleaseSpec::Alpha)
         );
     }
 
@@ -144,8 +144,8 @@ mod tests {
         let config = build_release_config(&cli_input, &cache, None, &packages);
 
         assert_eq!(
-            config.per_package()["crate-a"].prerelease,
-            Some(PrereleaseSpec::Beta)
+            config.per_package()["crate-a"].prerelease(),
+            Some(&PrereleaseSpec::Beta)
         );
     }
 
@@ -162,12 +162,12 @@ mod tests {
         let config = build_release_config(&cli_input, &cache, None, &packages);
 
         assert_eq!(
-            config.per_package()["crate-a"].prerelease,
-            Some(PrereleaseSpec::Rc)
+            config.per_package()["crate-a"].prerelease(),
+            Some(&PrereleaseSpec::Rc)
         );
         assert_eq!(
-            config.per_package()["crate-b"].prerelease,
-            Some(PrereleaseSpec::Rc)
+            config.per_package()["crate-b"].prerelease(),
+            Some(&PrereleaseSpec::Rc)
         );
     }
 
@@ -181,7 +181,7 @@ mod tests {
 
         let config = build_release_config(&cli_input, &cache, Some(&state), &packages);
 
-        assert!(config.per_package()["crate-a"].graduate_zero);
+        assert!(config.per_package()["crate-a"].graduate_zero());
     }
 
     #[test]
@@ -196,7 +196,7 @@ mod tests {
 
         let config = build_release_config(&cli_input, &cache, None, &packages);
 
-        assert!(config.per_package()["crate-a"].graduate_zero);
+        assert!(config.per_package()["crate-a"].graduate_zero());
         assert!(!config.per_package().contains_key("crate-b"));
     }
 
@@ -209,6 +209,6 @@ mod tests {
 
         let config = build_release_config(&cli_input, &cache, None, &packages);
 
-        assert!(config.per_package()["crate-a"].graduate_zero);
+        assert!(config.per_package()["crate-a"].graduate_zero());
     }
 }

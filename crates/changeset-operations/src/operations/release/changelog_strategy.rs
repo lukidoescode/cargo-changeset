@@ -58,18 +58,13 @@ fn build_changelog_update(
     version: Version,
     package: Option<String>,
 ) -> ChangelogUpdate {
-    ChangelogUpdate {
-        path: result.path,
-        package,
-        version,
-        created: result.created,
-    }
+    ChangelogUpdate::new(result.path().clone(), package, version, result.created())
 }
 
 fn max_planned_version(planned_releases: &[PackageVersion]) -> Option<Version> {
     planned_releases
         .iter()
-        .map(|r| &r.new_version)
+        .map(|r| r.new_version())
         .max()
         .cloned()
 }
@@ -77,7 +72,7 @@ fn max_planned_version(planned_releases: &[PackageVersion]) -> Option<Version> {
 fn max_current_version(planned_releases: &[PackageVersion]) -> Option<Version> {
     planned_releases
         .iter()
-        .map(|r| &r.current_version)
+        .map(|r| r.current_version())
         .max()
         .cloned()
 }
@@ -113,7 +108,7 @@ impl ChangelogHandler for RootChangelogStrategy {
             let packages: Vec<_> = ctx
                 .planned_releases
                 .iter()
-                .map(|r| (r.name.clone(), r.new_version.clone()))
+                .map(|r| (r.name().clone(), r.new_version().clone()))
                 .collect();
 
             if let Some(release) = ctx
@@ -142,7 +137,7 @@ impl ChangelogHandler for PerPackageChangelogStrategy {
         let mut backups = Vec::new();
 
         for release in ctx.planned_releases {
-            if let Some(pkg) = ctx.package_lookup.get(&release.name) {
+            if let Some(pkg) = ctx.package_lookup.get(release.name()) {
                 let changelog_path = pkg.path().join("CHANGELOG.md");
                 let file_existed = ctx.changelog_writer.changelog_exists(&changelog_path);
                 let original_content = if file_existed {
@@ -166,15 +161,15 @@ impl ChangelogHandler for PerPackageChangelogStrategy {
         let mut changelog_updates = Vec::new();
 
         for release in ctx.planned_releases {
-            if let Some(pkg) = ctx.package_lookup.get(&release.name) {
+            if let Some(pkg) = ctx.package_lookup.get(release.name()) {
                 let changelog_path = pkg.path().join("CHANGELOG.md");
 
                 if let Some(version_release) = ctx.aggregator.build_package_release(
-                    &release.name,
-                    &release.new_version,
+                    release.name(),
+                    release.new_version(),
                     ctx.today,
                 ) {
-                    let previous_version = release.current_version.to_string();
+                    let previous_version = release.current_version().to_string();
 
                     let result = ctx.changelog_writer.write_release(
                         &changelog_path,
@@ -185,8 +180,8 @@ impl ChangelogHandler for PerPackageChangelogStrategy {
 
                     changelog_updates.push(build_changelog_update(
                         result,
-                        release.new_version.clone(),
-                        Some(release.name.clone()),
+                        release.new_version().clone(),
+                        Some(release.name().clone()),
                     ));
                 }
             }
@@ -203,13 +198,13 @@ mod tests {
     use changeset_core::BumpType;
 
     fn make_release(name: &str, from: &str, to: &str) -> PackageVersion {
-        PackageVersion {
-            name: name.to_string(),
-            current_version: from.parse().expect("valid"),
-            new_version: to.parse().expect("valid"),
-            bump_type: BumpType::Patch,
-            auto_bumped: false,
-        }
+        PackageVersion::new(
+            name.to_string(),
+            from.parse().expect("valid"),
+            to.parse().expect("valid"),
+            BumpType::Patch,
+            false,
+        )
     }
 
     mod root_changelog_strategy_tests {
@@ -273,7 +268,7 @@ mod tests {
             let updates = RootChangelogStrategy.generate_updates(&ctx)?;
 
             assert_eq!(updates.len(), 1);
-            assert!(updates[0].package.is_none());
+            assert!(updates[0].package().is_none());
             Ok(())
         }
     }
@@ -372,7 +367,7 @@ mod tests {
             let updates = PerPackageChangelogStrategy.generate_updates(&ctx)?;
 
             assert_eq!(updates.len(), 1);
-            assert_eq!(updates[0].package.as_deref(), Some("crate-a"));
+            assert_eq!(updates[0].package().map(String::as_str), Some("crate-a"));
             Ok(())
         }
 

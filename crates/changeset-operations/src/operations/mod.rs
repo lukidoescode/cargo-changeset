@@ -15,11 +15,11 @@ pub use manage::{
 };
 pub use release::{
     ChangelogUpdate, CommitResult, GitOperationResult, PackageVersion, ReleaseInput,
-    ReleaseOperation, ReleaseOutcome, ReleaseOutput, TagResult,
+    ReleaseInputBuilder, ReleaseOperation, ReleaseOutcome, ReleaseOutput, TagResult,
 };
 pub use release::{
-    PackageReleaseConfig, ReleaseCliInput, ReleaseValidator, ValidatedReleaseConfig,
-    ValidationError, ValidationErrors,
+    PackageReleaseConfig, PackageReleaseConfigBuilder, ReleaseCliInput, ReleaseValidator,
+    ValidatedReleaseConfig, ValidationError, ValidationErrors,
 };
-pub use status::{StatusOperation, StatusOutput};
-pub use verify::{VerifyInput, VerifyOperation, VerifyOutcome, VerifyResult};
+pub use status::{StatusOperation, StatusOutput, StatusOutputBuilder};
+pub use verify::{VerifyInput, VerifyInputBuilder, VerifyOperation, VerifyOutcome, VerifyResult};

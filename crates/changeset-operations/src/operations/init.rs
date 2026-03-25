@@ -5,6 +5,8 @@ use changeset_git::DEFAULT_BASE_BRANCH;
 use changeset_manifest::{InitConfig, MetadataSection};
 use changeset_project::{CargoProject, ProjectKind, RootChangesetConfig};
 
+use gset::Getset;
+
 use crate::Result;
 use crate::traits::{
     ChangelogSettingsInput, FilteringSettingsInput, GitSettingsInput, InitInteractionProvider,
@@ -29,14 +31,37 @@ pub struct InitPlan {
     pub config: InitConfig,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Getset)]
 #[must_use]
 pub struct InitOutput {
-    pub changeset_dir: PathBuf,
-    pub created_dir: bool,
-    pub created_gitkeep: bool,
-    pub wrote_config: bool,
-    pub config_location: Option<MetadataSection>,
+    #[getset(get, vis = "pub")]
+    changeset_dir: PathBuf,
+    #[getset(get_copy, vis = "pub")]
+    created_dir: bool,
+    #[getset(get_copy, vis = "pub")]
+    created_gitkeep: bool,
+    #[getset(get_copy, vis = "pub")]
+    wrote_config: bool,
+    #[getset(get_copy, vis = "pub")]
+    config_location: Option<MetadataSection>,
+}
+
+impl InitOutput {
+    pub(crate) fn new(
+        changeset_dir: PathBuf,
+        created_dir: bool,
+        created_gitkeep: bool,
+        wrote_config: bool,
+        config_location: Option<MetadataSection>,
+    ) -> Self {
+        Self {
+            changeset_dir,
+            created_dir,
+            created_gitkeep,
+            wrote_config,
+            config_location,
+        }
+    }
 }
 
 pub struct InitOperation<P, M = (), I = ()> {
@@ -87,13 +112,13 @@ where
             fs::write(&gitkeep_path, "")?;
         }
 
-        Ok(InitOutput {
+        Ok(InitOutput::new(
             changeset_dir,
-            created_dir: !plan.dir_exists,
-            created_gitkeep: !plan.gitkeep_exists,
-            wrote_config: false,
-            config_location: None,
-        })
+            !plan.dir_exists,
+            !plan.gitkeep_exists,
+            false,
+            None,
+        ))
     }
 
     /// # Errors
@@ -180,17 +205,17 @@ where
             false
         };
 
-        Ok(InitOutput {
+        Ok(InitOutput::new(
             changeset_dir,
-            created_dir: !plan.dir_exists,
-            created_gitkeep: !plan.gitkeep_exists,
+            !plan.dir_exists,
+            !plan.gitkeep_exists,
             wrote_config,
-            config_location: if wrote_config {
+            if wrote_config {
                 Some(plan.metadata_section)
             } else {
                 None
             },
-        })
+        ))
     }
 
     /// # Errors
@@ -354,7 +379,7 @@ mod tests {
             .execute_simple(Path::new("/any"))
             .expect("InitOperation failed for single-package project");
 
-        assert_eq!(result.changeset_dir, changeset_dir);
+        assert_eq!(result.changeset_dir(), &changeset_dir);
     }
 
     #[test]
@@ -375,7 +400,7 @@ mod tests {
 
         assert!(
             result
-                .changeset_dir
+                .changeset_dir()
                 .to_string_lossy()
                 .contains(".changeset")
         );
@@ -396,7 +421,7 @@ mod tests {
             .execute_simple(Path::new("/any"))
             .expect("InitOperation failed");
 
-        assert!(result.created_gitkeep);
+        assert!(result.created_gitkeep());
         assert!(changeset_dir.join(".gitkeep").exists());
     }
 
@@ -414,8 +439,8 @@ mod tests {
             .execute_simple(Path::new("/any"))
             .expect("InitOperation failed");
 
-        assert!(!result.created_dir);
-        assert!(result.created_gitkeep);
+        assert!(!result.created_dir());
+        assert!(result.created_gitkeep());
         assert!(changeset_dir.join(".gitkeep").exists());
     }
 
@@ -443,8 +468,8 @@ mod tests {
             .execute(Path::new("/any"), &input)
             .expect("InitOperation failed");
 
-        assert!(result.wrote_config);
-        assert_eq!(result.config_location, Some(MetadataSection::Package));
+        assert!(result.wrote_config());
+        assert_eq!(result.config_location(), Some(MetadataSection::Package));
 
         let written = manifest_writer.written_metadata();
         assert_eq!(written.len(), 1);
@@ -496,7 +521,7 @@ mod tests {
             .execute(Path::new("/any"), &input)
             .expect("InitOperation failed");
 
-        assert!(result.wrote_config);
+        assert!(result.wrote_config());
 
         let written = manifest_writer.written_metadata();
         assert_eq!(written.len(), 1);
@@ -547,7 +572,7 @@ mod tests {
             .execute(Path::new("/any"), &input)
             .expect("InitOperation failed");
 
-        assert!(result.wrote_config);
+        assert!(result.wrote_config());
 
         let written = manifest_writer.written_metadata();
         assert_eq!(written.len(), 1);
@@ -579,7 +604,7 @@ mod tests {
             .execute(Path::new("/any"), &input)
             .expect("InitOperation failed");
 
-        assert!(result.wrote_config);
+        assert!(result.wrote_config());
 
         let written = manifest_writer.written_metadata();
         assert_eq!(written.len(), 1);
@@ -616,7 +641,7 @@ mod tests {
             .execute(Path::new("/any"), &input)
             .expect("InitOperation failed");
 
-        assert!(result.wrote_config);
+        assert!(result.wrote_config());
 
         let written = manifest_writer.written_metadata();
         assert_eq!(written.len(), 1);
@@ -647,8 +672,8 @@ mod tests {
             .execute(Path::new("/any"), &input)
             .expect("InitOperation failed");
 
-        assert!(!result.wrote_config);
-        assert!(result.config_location.is_none());
+        assert!(!result.wrote_config());
+        assert!(result.config_location().is_none());
 
         let written = manifest_writer.written_metadata();
         assert!(written.is_empty());
@@ -679,8 +704,8 @@ mod tests {
             .execute(Path::new("/any"), &input)
             .expect("InitOperation failed");
 
-        assert!(result.wrote_config);
-        assert_eq!(result.config_location, Some(MetadataSection::Workspace));
+        assert!(result.wrote_config());
+        assert_eq!(result.config_location(), Some(MetadataSection::Workspace));
 
         let written = manifest_writer.written_metadata();
         assert_eq!(written.len(), 1);
@@ -712,8 +737,8 @@ mod tests {
             .execute(Path::new("/any"), &input)
             .expect("InitOperation failed");
 
-        assert!(result.wrote_config);
-        assert_eq!(result.config_location, Some(MetadataSection::Package));
+        assert!(result.wrote_config());
+        assert_eq!(result.config_location(), Some(MetadataSection::Package));
 
         let written = manifest_writer.written_metadata();
         assert_eq!(written.len(), 1);
@@ -934,7 +959,7 @@ mod tests {
             .execute(Path::new("/any"), &input)
             .expect("InitOperation failed");
 
-        assert!(result.wrote_config);
+        assert!(result.wrote_config());
 
         let written = manifest_writer.written_metadata();
         assert_eq!(written.len(), 1);

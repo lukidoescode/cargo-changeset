@@ -17,12 +17,12 @@ impl<'a, R: ChangesetReader> NoneBumpDisallowedRule<'a, R> {
 impl<R: ChangesetReader> VerificationRule for NoneBumpDisallowedRule<'_, R> {
     fn check(&self, context: &VerificationContext, result: &mut VerificationResult) -> Result<()> {
         let changesets: Vec<Changeset> = context
-            .changeset_files
+            .changeset_files()
             .iter()
             .map(|path| self.reader.read_changeset(path))
             .collect::<Result<Vec<_>>>()?;
 
-        result.none_bump_violations = crate::none_bump::find_none_only_packages(&changesets);
+        result.set_none_bump_violations(crate::none_bump::find_none_only_packages(&changesets));
 
         Ok(())
     }
@@ -47,27 +47,23 @@ mod tests {
     }
 
     fn empty_result() -> VerificationResult {
-        VerificationResult {
-            affected_packages: Vec::new(),
-            transitive_dependents: std::collections::HashSet::new(),
-            covered_packages: std::collections::HashSet::new(),
-            uncovered_packages: Vec::new(),
-            deleted_changesets: Vec::new(),
-            none_bump_violations: Vec::new(),
-            project_files: Vec::new(),
-            ignored_files: Vec::new(),
-        }
+        VerificationResult::new(
+            Vec::new(),
+            std::collections::HashSet::new(),
+            Vec::new(),
+            Vec::new(),
+        )
     }
 
     fn empty_context() -> VerificationContext {
-        VerificationContext {
-            affected_packages: Vec::new(),
-            transitive_dependents: std::collections::HashSet::new(),
-            changeset_files: Vec::new(),
-            deleted_changesets: Vec::new(),
-            project_files: Vec::new(),
-            ignored_files: Vec::new(),
-        }
+        VerificationContext::new(
+            Vec::new(),
+            std::collections::HashSet::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+        )
     }
 
     #[test]
@@ -79,13 +75,19 @@ mod tests {
 
         let rule = NoneBumpDisallowedRule::new(&reader);
 
-        let mut context = empty_context();
-        context.changeset_files = vec![PathBuf::from("a.md")];
+        let context = VerificationContext::new(
+            Vec::new(),
+            std::collections::HashSet::new(),
+            vec![PathBuf::from("a.md")],
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+        );
 
         let mut result = empty_result();
         rule.check(&context, &mut result)?;
 
-        assert_eq!(result.none_bump_violations, vec!["my-crate".to_string()]);
+        assert_eq!(result.none_bump_violations(), &vec!["my-crate".to_string()]);
         assert!(!result.is_success());
         Ok(())
     }
@@ -99,13 +101,19 @@ mod tests {
 
         let rule = NoneBumpDisallowedRule::new(&reader);
 
-        let mut context = empty_context();
-        context.changeset_files = vec![PathBuf::from("a.md")];
+        let context = VerificationContext::new(
+            Vec::new(),
+            std::collections::HashSet::new(),
+            vec![PathBuf::from("a.md")],
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+        );
 
         let mut result = empty_result();
         rule.check(&context, &mut result)?;
 
-        assert!(result.none_bump_violations.is_empty());
+        assert!(result.none_bump_violations().is_empty());
         Ok(())
     }
 
@@ -123,13 +131,19 @@ mod tests {
 
         let rule = NoneBumpDisallowedRule::new(&reader);
 
-        let mut context = empty_context();
-        context.changeset_files = vec![PathBuf::from("a.md"), PathBuf::from("b.md")];
+        let context = VerificationContext::new(
+            Vec::new(),
+            std::collections::HashSet::new(),
+            vec![PathBuf::from("a.md"), PathBuf::from("b.md")],
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+        );
 
         let mut result = empty_result();
         rule.check(&context, &mut result)?;
 
-        assert!(result.none_bump_violations.is_empty());
+        assert!(result.none_bump_violations().is_empty());
         Ok(())
     }
 }

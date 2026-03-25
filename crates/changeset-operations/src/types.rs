@@ -1,21 +1,55 @@
 use changeset_core::{BumpType, PrereleaseSpec};
+use derive_builder::Builder;
+use gset::Getset;
 use semver::Version;
 
-/// Represents a planned version change for a package.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Getset)]
 pub struct PackageVersion {
-    pub name: String,
-    pub current_version: Version,
-    pub new_version: Version,
-    pub bump_type: BumpType,
-    pub auto_bumped: bool,
+    #[getset(get, vis = "pub")]
+    name: String,
+    #[getset(get, vis = "pub")]
+    current_version: Version,
+    #[getset(get, vis = "pub")]
+    new_version: Version,
+    #[getset(get_copy, vis = "pub")]
+    bump_type: BumpType,
+    #[getset(get_copy, vis = "pub")]
+    auto_bumped: bool,
 }
 
-/// Per-package release configuration from merged CLI + TOML sources.
-#[derive(Debug, Clone, Default)]
+impl PackageVersion {
+    pub fn new(
+        name: String,
+        current_version: Version,
+        new_version: Version,
+        bump_type: BumpType,
+        auto_bumped: bool,
+    ) -> Self {
+        Self {
+            name,
+            current_version,
+            new_version,
+            bump_type,
+            auto_bumped,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default, Builder, Getset)]
+#[builder(default)]
 pub struct PackageReleaseConfig {
-    /// Prerelease tag for this package (e.g., "alpha", "beta")
-    pub prerelease: Option<PrereleaseSpec>,
-    /// Whether to graduate this 0.x package to 1.0.0
-    pub graduate_zero: bool,
+    #[getset(get_as_ref, vis = "pub", ty = "Option<&PrereleaseSpec>")]
+    prerelease: Option<PrereleaseSpec>,
+    #[getset(get_copy, vis = "pub")]
+    graduate_zero: bool,
+}
+
+impl PackageReleaseConfig {
+    pub fn set_prerelease(&mut self, spec: PrereleaseSpec) {
+        self.prerelease = Some(spec);
+    }
+
+    pub fn set_graduate_zero(&mut self) {
+        self.graduate_zero = true;
+    }
 }

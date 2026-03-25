@@ -1159,10 +1159,10 @@ impl ChangelogWriter for MockChangelogWriter {
             .expect("lock poisoned")
             .push((changelog_path.to_path_buf(), release.clone()));
 
-        Ok(ChangelogWriteResult {
-            path: changelog_path.to_path_buf(),
+        Ok(ChangelogWriteResult::new(
+            changelog_path.to_path_buf(),
             created,
-        })
+        ))
     }
 
     fn changelog_exists(&self, path: &Path) -> bool {

@@ -5,6 +5,9 @@ use changeset_core::{NoneBumpBehavior, PackageInfo};
 use changeset_git::{FileChange, FileStatus};
 use changeset_project::map_files_to_packages;
 
+use derive_builder::Builder;
+use gset::Getset;
+
 use crate::Result;
 use crate::traits::{
     ChangesetReader, DependencyGraphProvider, GitDiffProvider, GitStatusProvider,
@@ -13,12 +16,31 @@ use crate::traits::{
 use crate::verification::rules::{CoverageRule, DeletedChangesetsRule, NoneBumpDisallowedRule};
 use crate::verification::{VerificationContext, VerificationEngine, VerificationResult};
 
+#[derive(Builder, Getset)]
+#[builder(default)]
 pub struct VerifyInput {
-    pub base: String,
-    pub head: Option<String>,
-    pub allow_deleted_changesets: bool,
-    pub exclude_dependents: bool,
-    pub ignore_dirty: bool,
+    #[getset(get, vis = "pub")]
+    base: String,
+    #[getset(get_as_ref, vis = "pub", ty = "Option<&String>")]
+    head: Option<String>,
+    #[getset(get_copy, vis = "pub")]
+    allow_deleted_changesets: bool,
+    #[getset(get_copy, vis = "pub")]
+    exclude_dependents: bool,
+    #[getset(get_copy, vis = "pub")]
+    ignore_dirty: bool,
+}
+
+impl Default for VerifyInput {
+    fn default() -> Self {
+        Self {
+            base: String::new(),
+            head: None,
+            allow_deleted_changesets: false,
+            exclude_dependents: false,
+            ignore_dirty: false,
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -67,7 +89,7 @@ where
         let (root_config, package_configs) = self.project_provider.load_configs(&project)?;
         let changeset_dir = root_config.changeset_dir();
 
-        let working_tree_dirty = if input.ignore_dirty {
+        let working_tree_dirty = if input.ignore_dirty() {
             false
         } else {
             !self.git_provider.is_working_tree_clean(project.root())?
@@ -76,9 +98,9 @@ where
         let changed_files = if working_tree_dirty {
             self.git_provider.uncommitted_changes(project.root())?
         } else {
-            let head_ref = input.head.as_deref().unwrap_or("HEAD");
+            let head_ref = input.head().map(String::as_str).unwrap_or("HEAD");
             self.git_provider
-                .changed_files(project.root(), &input.base, head_ref)?
+                .changed_files(project.root(), input.base(), head_ref)?
         };
 
         let is_dirty = working_tree_dirty && !changed_files.is_empty();
@@ -122,7 +144,7 @@ where
 
         let mut transitive_dependents = HashSet::new();
 
-        if !input.exclude_dependents
+        if !input.exclude_dependents()
             && project.packages().len() > 1
             && !affected_packages.is_empty()
         {
@@ -164,7 +186,7 @@ where
             deleted_changesets,
         );
 
-        let deleted_rule = DeletedChangesetsRule::new(input.allow_deleted_changesets);
+        let deleted_rule = DeletedChangesetsRule::new(input.allow_deleted_changesets());
         let coverage_rule = CoverageRule::new(&self.changeset_reader);
         let none_bump_rule = NoneBumpDisallowedRule::new(&self.changeset_reader);
 
@@ -230,24 +252,17 @@ fn build_context(
     changeset_files: Vec<PathBuf>,
     deleted_changesets: Vec<PathBuf>,
 ) -> VerificationContext {
-    match mapping {
-        Some(m) => VerificationContext {
-            affected_packages,
-            transitive_dependents,
-            changeset_files,
-            deleted_changesets,
-            project_files: m.project().clone(),
-            ignored_files: m.ignored().clone(),
-        },
-        None => VerificationContext {
-            affected_packages,
-            transitive_dependents,
-            changeset_files,
-            deleted_changesets,
-            project_files: Vec::new(),
-            ignored_files: Vec::new(),
-        },
-    }
+    let (project_files, ignored_files) = mapping.map_or((Vec::new(), Vec::new()), |m| {
+        (m.project().clone(), m.ignored().clone())
+    });
+    VerificationContext::new(
+        affected_packages,
+        transitive_dependents,
+        changeset_files,
+        deleted_changesets,
+        project_files,
+        ignored_files,
+    )
 }
 
 #[cfg(test)]
@@ -269,13 +284,10 @@ mod tests {
 
         let operation = VerifyOperation::new(project_provider, git_provider, changeset_reader);
 
-        let input = VerifyInput {
-            base: "main".to_string(),
-            head: None,
-            allow_deleted_changesets: false,
-            exclude_dependents: false,
-            ignore_dirty: false,
-        };
+        let input = VerifyInputBuilder::default()
+            .base("main".to_string())
+            .build()
+            .expect("all fields have defaults");
 
         let result = operation
             .execute(Path::new("/any"), &input)
@@ -302,13 +314,10 @@ mod tests {
 
         let operation = VerifyOperation::new(project_provider, git_provider, changeset_reader);
 
-        let input = VerifyInput {
-            base: "main".to_string(),
-            head: None,
-            allow_deleted_changesets: false,
-            exclude_dependents: false,
-            ignore_dirty: false,
-        };
+        let input = VerifyInputBuilder::default()
+            .base("main".to_string())
+            .build()
+            .expect("all fields have defaults");
 
         let result = operation
             .execute(Path::new("/any"), &input)
@@ -316,8 +325,8 @@ mod tests {
 
         match result.outcome {
             VerifyOutcome::Success(verification_result) => {
-                assert!(verification_result.uncovered_packages.is_empty());
-                assert!(verification_result.covered_packages.contains("my-crate"));
+                assert!(verification_result.uncovered_packages().is_empty());
+                assert!(verification_result.covered_packages().contains("my-crate"));
             }
             other => panic!("Expected VerifyOutcome::Success, got {other:?}"),
         }
@@ -336,13 +345,10 @@ mod tests {
 
         let operation = VerifyOperation::new(project_provider, git_provider, changeset_reader);
 
-        let input = VerifyInput {
-            base: "main".to_string(),
-            head: None,
-            allow_deleted_changesets: false,
-            exclude_dependents: false,
-            ignore_dirty: false,
-        };
+        let input = VerifyInputBuilder::default()
+            .base("main".to_string())
+            .build()
+            .expect("all fields have defaults");
 
         let result = operation
             .execute(Path::new("/any"), &input)
@@ -350,7 +356,7 @@ mod tests {
 
         match result.outcome {
             VerifyOutcome::Failed(verification_result) => {
-                assert!(!verification_result.uncovered_packages.is_empty());
+                assert!(!verification_result.uncovered_packages().is_empty());
             }
             other => panic!("Expected VerifyOutcome::Failed, got {other:?}"),
         }
@@ -417,13 +423,10 @@ mod tests {
 
         let operation = VerifyOperation::new(project_provider, git_provider, changeset_reader);
 
-        let input = VerifyInput {
-            base: "main".to_string(),
-            head: None,
-            allow_deleted_changesets: false,
-            exclude_dependents: false,
-            ignore_dirty: false,
-        };
+        let input = VerifyInputBuilder::default()
+            .base("main".to_string())
+            .build()
+            .expect("all fields have defaults");
 
         let result = operation
             .execute(Path::new("/any"), &input)
@@ -431,8 +434,8 @@ mod tests {
 
         match result.outcome {
             VerifyOutcome::Success(verification_result) => {
-                assert!(verification_result.uncovered_packages.is_empty());
-                assert!(verification_result.covered_packages.contains("my-crate"));
+                assert!(verification_result.uncovered_packages().is_empty());
+                assert!(verification_result.covered_packages().contains("my-crate"));
             }
             other => panic!("Expected VerifyOutcome::Success, got {other:?}"),
         }
@@ -469,13 +472,10 @@ mod tests {
 
         let operation = VerifyOperation::new(project_provider, git_provider, changeset_reader);
 
-        let input = VerifyInput {
-            base: "main".to_string(),
-            head: None,
-            allow_deleted_changesets: false,
-            exclude_dependents: false,
-            ignore_dirty: false,
-        };
+        let input = VerifyInputBuilder::default()
+            .base("main".to_string())
+            .build()
+            .expect("all fields have defaults");
 
         let result = operation
             .execute(Path::new("/any"), &input)
@@ -485,7 +485,7 @@ mod tests {
             VerifyOutcome::Failed(verification_result) => {
                 assert!(
                     verification_result
-                        .uncovered_packages
+                        .uncovered_packages()
                         .iter()
                         .any(|p| p.name() == "app"),
                     "app should be uncovered as a transitive dependent of core"
@@ -525,13 +525,10 @@ mod tests {
 
         let operation = VerifyOperation::new(project_provider, git_provider, changeset_reader);
 
-        let input = VerifyInput {
-            base: "main".to_string(),
-            head: None,
-            allow_deleted_changesets: false,
-            exclude_dependents: false,
-            ignore_dirty: false,
-        };
+        let input = VerifyInputBuilder::default()
+            .base("main".to_string())
+            .build()
+            .expect("all fields have defaults");
 
         let result = operation
             .execute(Path::new("/any"), &input)
@@ -539,9 +536,9 @@ mod tests {
 
         match result.outcome {
             VerifyOutcome::Success(verification_result) => {
-                assert!(verification_result.covered_packages.contains("core"));
-                assert!(verification_result.covered_packages.contains("app"));
-                assert!(verification_result.uncovered_packages.is_empty());
+                assert!(verification_result.covered_packages().contains("core"));
+                assert!(verification_result.covered_packages().contains("app"));
+                assert!(verification_result.uncovered_packages().is_empty());
             }
             other => panic!("Expected VerifyOutcome::Success, got {other:?}"),
         }
@@ -570,13 +567,11 @@ mod tests {
 
         let operation = VerifyOperation::new(project_provider, git_provider, changeset_reader);
 
-        let input = VerifyInput {
-            base: "main".to_string(),
-            head: None,
-            allow_deleted_changesets: false,
-            exclude_dependents: true,
-            ignore_dirty: false,
-        };
+        let input = VerifyInputBuilder::default()
+            .base("main".to_string())
+            .exclude_dependents(true)
+            .build()
+            .expect("all fields have defaults");
 
         let result = operation
             .execute(Path::new("/any"), &input)
@@ -584,8 +579,8 @@ mod tests {
 
         match result.outcome {
             VerifyOutcome::Success(verification_result) => {
-                assert!(verification_result.covered_packages.contains("core"));
-                assert!(verification_result.uncovered_packages.is_empty());
+                assert!(verification_result.covered_packages().contains("core"));
+                assert!(verification_result.uncovered_packages().is_empty());
             }
             other => panic!("Expected VerifyOutcome::Success, got {other:?}"),
         }
@@ -609,13 +604,10 @@ mod tests {
 
         let operation = VerifyOperation::new(project_provider, git_provider, changeset_reader);
 
-        let input = VerifyInput {
-            base: "main".to_string(),
-            head: None,
-            allow_deleted_changesets: false,
-            exclude_dependents: false,
-            ignore_dirty: false,
-        };
+        let input = VerifyInputBuilder::default()
+            .base("main".to_string())
+            .build()
+            .expect("all fields have defaults");
 
         let result = operation
             .execute(Path::new("/any"), &input)
@@ -623,8 +615,8 @@ mod tests {
 
         match result.outcome {
             VerifyOutcome::Success(verification_result) => {
-                assert!(verification_result.covered_packages.contains("solo"));
-                assert!(verification_result.uncovered_packages.is_empty());
+                assert!(verification_result.covered_packages().contains("solo"));
+                assert!(verification_result.uncovered_packages().is_empty());
             }
             other => panic!("Expected VerifyOutcome::Success, got {other:?}"),
         }
@@ -652,13 +644,10 @@ mod tests {
 
         let operation = VerifyOperation::new(project_provider, git_provider, changeset_reader);
 
-        let input = VerifyInput {
-            base: "main".to_string(),
-            head: None,
-            allow_deleted_changesets: false,
-            exclude_dependents: false,
-            ignore_dirty: false,
-        };
+        let input = VerifyInputBuilder::default()
+            .base("main".to_string())
+            .build()
+            .expect("all fields have defaults");
 
         let result = operation
             .execute(Path::new("/any"), &input)
@@ -667,7 +656,7 @@ mod tests {
         assert!(result.is_dirty);
         match result.outcome {
             VerifyOutcome::Success(verification_result) => {
-                assert!(verification_result.covered_packages.contains("my-crate"));
+                assert!(verification_result.covered_packages().contains("my-crate"));
             }
             other => panic!("Expected VerifyOutcome::Success, got {other:?}"),
         }
@@ -693,13 +682,10 @@ mod tests {
 
         let operation = VerifyOperation::new(project_provider, git_provider, changeset_reader);
 
-        let input = VerifyInput {
-            base: "main".to_string(),
-            head: None,
-            allow_deleted_changesets: false,
-            exclude_dependents: false,
-            ignore_dirty: false,
-        };
+        let input = VerifyInputBuilder::default()
+            .base("main".to_string())
+            .build()
+            .expect("all fields have defaults");
 
         let result = operation
             .execute(Path::new("/any"), &input)
@@ -708,7 +694,7 @@ mod tests {
         assert!(!result.is_dirty);
         match result.outcome {
             VerifyOutcome::Success(verification_result) => {
-                assert!(verification_result.covered_packages.contains("my-crate"));
+                assert!(verification_result.covered_packages().contains("my-crate"));
             }
             other => panic!("Expected VerifyOutcome::Success, got {other:?}"),
         }
@@ -726,13 +712,10 @@ mod tests {
 
         let operation = VerifyOperation::new(project_provider, git_provider, changeset_reader);
 
-        let input = VerifyInput {
-            base: "main".to_string(),
-            head: None,
-            allow_deleted_changesets: false,
-            exclude_dependents: false,
-            ignore_dirty: false,
-        };
+        let input = VerifyInputBuilder::default()
+            .base("main".to_string())
+            .build()
+            .expect("all fields have defaults");
 
         let result = operation
             .execute(Path::new("/any"), &input)
@@ -757,13 +740,10 @@ mod tests {
 
         let operation = VerifyOperation::new(project_provider, git_provider, changeset_reader);
 
-        let input = VerifyInput {
-            base: "main".to_string(),
-            head: None,
-            allow_deleted_changesets: false,
-            exclude_dependents: false,
-            ignore_dirty: false,
-        };
+        let input = VerifyInputBuilder::default()
+            .base("main".to_string())
+            .build()
+            .expect("all fields have defaults");
 
         let result = operation
             .execute(Path::new("/any"), &input)
@@ -788,13 +768,10 @@ mod tests {
             changeset_reader,
         );
 
-        let input = VerifyInput {
-            base: "main".to_string(),
-            head: None,
-            allow_deleted_changesets: false,
-            exclude_dependents: false,
-            ignore_dirty: false,
-        };
+        let input = VerifyInputBuilder::default()
+            .base("main".to_string())
+            .build()
+            .expect("all fields have defaults");
 
         let result = operation.execute(Path::new("/any"), &input);
 
@@ -816,13 +793,10 @@ mod tests {
 
         let operation = VerifyOperation::new(project_provider, git_provider, changeset_reader);
 
-        let input = VerifyInput {
-            base: "main".to_string(),
-            head: None,
-            allow_deleted_changesets: false,
-            exclude_dependents: false,
-            ignore_dirty: false,
-        };
+        let input = VerifyInputBuilder::default()
+            .base("main".to_string())
+            .build()
+            .expect("all fields have defaults");
 
         let result = operation
             .execute(Path::new("/any"), &input)
@@ -831,7 +805,7 @@ mod tests {
         assert!(result.is_dirty);
         match result.outcome {
             VerifyOutcome::Failed(verification_result) => {
-                assert!(!verification_result.uncovered_packages.is_empty());
+                assert!(!verification_result.uncovered_packages().is_empty());
             }
             other => panic!("Expected VerifyOutcome::Failed, got {other:?}"),
         }
@@ -862,13 +836,10 @@ mod tests {
 
         let operation = VerifyOperation::new(project_provider, git_provider, changeset_reader);
 
-        let input = VerifyInput {
-            base: "main".to_string(),
-            head: None,
-            allow_deleted_changesets: false,
-            exclude_dependents: false,
-            ignore_dirty: false,
-        };
+        let input = VerifyInputBuilder::default()
+            .base("main".to_string())
+            .build()
+            .expect("all fields have defaults");
 
         let result = operation
             .execute(Path::new("/any"), &input)
@@ -879,7 +850,7 @@ mod tests {
             VerifyOutcome::Failed(verification_result) => {
                 assert!(
                     verification_result
-                        .uncovered_packages
+                        .uncovered_packages()
                         .iter()
                         .any(|p| p.name() == "app"),
                     "app should be uncovered as a transitive dependent of core"
@@ -916,13 +887,11 @@ mod tests {
             changeset_reader,
         );
 
-        let input = VerifyInput {
-            base: "main".to_string(),
-            head: None,
-            allow_deleted_changesets: false,
-            exclude_dependents: false,
-            ignore_dirty: true,
-        };
+        let input = VerifyInputBuilder::default()
+            .base("main".to_string())
+            .ignore_dirty(true)
+            .build()
+            .expect("all fields have defaults");
 
         let result = operation
             .execute(Path::new("/any"), &input)
@@ -931,7 +900,7 @@ mod tests {
         assert!(!result.is_dirty);
         match result.outcome {
             VerifyOutcome::Success(verification_result) => {
-                assert!(verification_result.covered_packages.contains("my-crate"));
+                assert!(verification_result.covered_packages().contains("my-crate"));
             }
             other => panic!("Expected VerifyOutcome::Success, got {other:?}"),
         }
@@ -961,13 +930,10 @@ mod tests {
 
         let operation = VerifyOperation::new(project_provider, git_provider, changeset_reader);
 
-        let input = VerifyInput {
-            base: "main".to_string(),
-            head: None,
-            allow_deleted_changesets: false,
-            exclude_dependents: false,
-            ignore_dirty: false,
-        };
+        let input = VerifyInputBuilder::default()
+            .base("main".to_string())
+            .build()
+            .expect("all fields have defaults");
 
         let result = operation
             .execute(Path::new("/any"), &input)
@@ -977,7 +943,7 @@ mod tests {
             VerifyOutcome::Failed(verification_result) => {
                 assert!(
                     verification_result
-                        .none_bump_violations
+                        .none_bump_violations()
                         .contains(&"my-crate".to_string()),
                     "my-crate should be in none_bump_violations"
                 );
@@ -1010,13 +976,10 @@ mod tests {
 
         let operation = VerifyOperation::new(project_provider, git_provider, changeset_reader);
 
-        let input = VerifyInput {
-            base: "main".to_string(),
-            head: None,
-            allow_deleted_changesets: false,
-            exclude_dependents: false,
-            ignore_dirty: false,
-        };
+        let input = VerifyInputBuilder::default()
+            .base("main".to_string())
+            .build()
+            .expect("all fields have defaults");
 
         let result = operation
             .execute(Path::new("/any"), &input)
@@ -1024,8 +987,8 @@ mod tests {
 
         match result.outcome {
             VerifyOutcome::Success(verification_result) => {
-                assert!(verification_result.none_bump_violations.is_empty());
-                assert!(verification_result.covered_packages.contains("my-crate"));
+                assert!(verification_result.none_bump_violations().is_empty());
+                assert!(verification_result.covered_packages().contains("my-crate"));
             }
             other => panic!("Expected VerifyOutcome::Success, got {other:?}"),
         }
@@ -1055,13 +1018,10 @@ mod tests {
 
         let operation = VerifyOperation::new(project_provider, git_provider, changeset_reader);
 
-        let input = VerifyInput {
-            base: "main".to_string(),
-            head: None,
-            allow_deleted_changesets: false,
-            exclude_dependents: false,
-            ignore_dirty: false,
-        };
+        let input = VerifyInputBuilder::default()
+            .base("main".to_string())
+            .build()
+            .expect("all fields have defaults");
 
         let result = operation
             .execute(Path::new("/any"), &input)
@@ -1069,8 +1029,8 @@ mod tests {
 
         match result.outcome {
             VerifyOutcome::Success(verification_result) => {
-                assert!(verification_result.none_bump_violations.is_empty());
-                assert!(verification_result.covered_packages.contains("my-crate"));
+                assert!(verification_result.none_bump_violations().is_empty());
+                assert!(verification_result.covered_packages().contains("my-crate"));
             }
             other => panic!("Expected VerifyOutcome::Success, got {other:?}"),
         }

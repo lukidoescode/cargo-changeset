@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use changeset_operations::operations::{VerifyInput, VerifyOperation, VerifyOutcome};
+use changeset_operations::operations::{VerifyInputBuilder, VerifyOperation, VerifyOutcome};
 use changeset_operations::providers::{
     FileSystemChangesetIO, FileSystemProjectProvider, Git2Provider,
 };
@@ -24,13 +24,14 @@ pub(crate) fn run(args: VerifyArgs, start_path: &Path) -> Result<()> {
         .base
         .unwrap_or_else(|| root_config.base_branch().to_string());
 
-    let input = VerifyInput {
-        base,
-        head: args.head,
-        allow_deleted_changesets: args.allow_deleted_changesets,
-        exclude_dependents: args.exclude_dependents,
-        ignore_dirty: args.ignore_dirty,
-    };
+    let input = VerifyInputBuilder::default()
+        .base(base)
+        .head(args.head)
+        .allow_deleted_changesets(args.allow_deleted_changesets)
+        .exclude_dependents(args.exclude_dependents)
+        .ignore_dirty(args.ignore_dirty)
+        .build()
+        .expect("all fields have defaults");
 
     let result = operation.execute(start_path, &input)?;
 
@@ -72,13 +73,13 @@ pub(crate) fn run(args: VerifyArgs, start_path: &Path) -> Result<()> {
             if !args.quiet {
                 eprint!("{}", formatter.format_failure(&verification));
             }
-            if !verification.deleted_changesets.is_empty() {
+            if !verification.deleted_changesets().is_empty() {
                 Err(CliError::ChangesetDeleted {
-                    paths: verification.deleted_changesets,
+                    paths: verification.deleted_changesets().clone(),
                 })
             } else {
                 Err(CliError::VerificationFailed {
-                    uncovered_count: verification.uncovered_packages.len(),
+                    uncovered_count: verification.uncovered_packages().len(),
                 })
             }
         }

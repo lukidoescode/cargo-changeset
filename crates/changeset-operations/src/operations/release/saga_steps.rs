@@ -66,17 +66,17 @@ where
         let mut manifest_updates = Vec::new();
 
         for release in &input.planned_releases {
-            if let Some(pkg_path) = input.package_paths.get(&release.name) {
+            if let Some(pkg_path) = input.package_paths.get(release.name()) {
                 let manifest_path = pkg_path.join("Cargo.toml");
                 ctx.manifest_writer()
-                    .write_version(&manifest_path, &release.new_version)?;
+                    .write_version(&manifest_path, release.new_version())?;
                 ctx.manifest_writer()
-                    .verify_version(&manifest_path, &release.new_version)?;
+                    .verify_version(&manifest_path, release.new_version())?;
 
                 let update = ManifestUpdate {
                     manifest_path,
-                    old_version: release.current_version.clone(),
-                    new_version: release.new_version.clone(),
+                    old_version: release.current_version().clone(),
+                    new_version: release.new_version().clone(),
                     written: true,
                 };
                 debug!(
@@ -100,10 +100,10 @@ where
             "rolling back manifest version updates"
         );
         for release in &input.planned_releases {
-            if let Some(pkg_path) = input.package_paths.get(&release.name) {
+            if let Some(pkg_path) = input.package_paths.get(release.name()) {
                 let manifest_path = pkg_path.join("Cargo.toml");
                 ctx.manifest_writer()
-                    .write_version(&manifest_path, &release.current_version)?;
+                    .write_version(&manifest_path, release.current_version())?;
             }
         }
         Ok(())
@@ -151,16 +151,16 @@ where
             for manifest_path in &manifest_paths {
                 let updated = ctx.manifest_writer().update_dependency_version(
                     manifest_path,
-                    &release.name,
-                    &release.new_version,
+                    release.name(),
+                    release.new_version(),
                 )?;
 
                 if updated {
                     let update = DependencyUpdate {
                         manifest_path: manifest_path.clone(),
-                        dependency_name: release.name.clone(),
-                        old_version: release.current_version.clone(),
-                        new_version: release.new_version.clone(),
+                        dependency_name: release.name().clone(),
+                        old_version: release.current_version().clone(),
+                        new_version: release.new_version().clone(),
                     };
                     debug!(
                         manifest = %update.manifest_path.display(),
@@ -194,8 +194,8 @@ where
             for manifest_path in &manifest_paths {
                 ctx.manifest_writer().update_dependency_version(
                     manifest_path,
-                    &release.name,
-                    &release.current_version,
+                    release.name(),
+                    release.current_version(),
                 )?;
             }
         }
@@ -248,8 +248,10 @@ where
                 ctx.manifest_writer()
                     .write_workspace_version(&input.root_manifest_path, version)?;
             } else if let Some(release) = input.planned_releases.first() {
-                ctx.manifest_writer()
-                    .write_workspace_version(&input.root_manifest_path, &release.current_version)?;
+                ctx.manifest_writer().write_workspace_version(
+                    &input.root_manifest_path,
+                    release.current_version(),
+                )?;
             }
         }
         Ok(())
@@ -345,7 +347,7 @@ where
                 ctx.changeset_rw().mark_consumed_for_prerelease(
                     &input.changeset_dir,
                     &paths_refs,
-                    &first_release.new_version,
+                    first_release.new_version(),
                 )?;
                 input.changesets_consumed = true;
             }
@@ -557,7 +559,7 @@ where
         }
 
         for update in &input.changelog_updates {
-            files.push(update.path.clone());
+            files.push(update.path().clone());
         }
 
         for update in &input.dependency_updates {
@@ -614,7 +616,7 @@ impl<G, M, RW, S, C> CreateCommitStep<G, M, RW, S, C> {
     fn build_commit_message(&self, planned_releases: &[crate::types::PackageVersion]) -> String {
         let version_list: Vec<String> = planned_releases
             .iter()
-            .map(|r| format!("{}@v{}", r.name, r.new_version))
+            .map(|r| format!("{}@v{}", r.name(), r.new_version()))
             .collect();
         let new_version = version_list.join(", ");
 
@@ -628,7 +630,14 @@ impl<G, M, RW, S, C> CreateCommitStep<G, M, RW, S, C> {
 
         let body: Vec<String> = planned_releases
             .iter()
-            .map(|r| format!("- {} {} -> {}", r.name, r.current_version, r.new_version))
+            .map(|r| {
+                format!(
+                    "- {} {} -> {}",
+                    r.name(),
+                    r.current_version(),
+                    r.new_version()
+                )
+            })
             .collect();
 
         format!("{}\n\n{}", title, body.join("\n"))
@@ -664,10 +673,10 @@ where
         let message = self.build_commit_message(&input.planned_releases);
         let commit_info = ctx.git_provider().commit(ctx.project_root(), &message)?;
 
-        input.commit_result = Some(CommitResult {
-            sha: commit_info.sha().clone(),
-            message: commit_info.message().clone(),
-        });
+        input.commit_result = Some(CommitResult::new(
+            commit_info.sha().clone(),
+            commit_info.message().clone(),
+        ));
 
         Ok(input)
     }
@@ -740,9 +749,9 @@ where
         let mut created_tag_names: Vec<String> = Vec::new();
 
         for release in &input.planned_releases {
-            let tag_name = self.format_tag_name(&release.name, &release.new_version);
+            let tag_name = self.format_tag_name(release.name(), release.new_version());
 
-            let tag_message = format!("Release {} v{}", release.name, release.new_version);
+            let tag_message = format!("Release {} v{}", release.name(), release.new_version());
 
             match ctx
                 .git_provider()
@@ -750,10 +759,10 @@ where
             {
                 Ok(tag_info) => {
                     created_tag_names.push(tag_name);
-                    tags.push(TagResult {
-                        name: tag_info.name().clone(),
-                        target_sha: tag_info.target_sha().clone(),
-                    });
+                    tags.push(TagResult::new(
+                        tag_info.name().clone(),
+                        tag_info.target_sha().clone(),
+                    ));
                 }
                 Err(e) => {
                     for created_tag in &created_tag_names {
@@ -777,7 +786,7 @@ where
 
         let mut failed_tags = Vec::new();
         for release in &input.planned_releases {
-            let tag_name = self.format_tag_name(&release.name, &release.new_version);
+            let tag_name = self.format_tag_name(release.name(), release.new_version());
             if ctx
                 .git_provider()
                 .delete_tag(ctx.project_root(), &tag_name)
@@ -947,13 +956,13 @@ mod tests {
     }
 
     fn make_test_release(name: &str, current: &str, new: &str) -> PackageVersion {
-        PackageVersion {
-            name: name.to_string(),
-            current_version: current.parse().expect("valid version"),
-            new_version: new.parse().expect("valid version"),
-            bump_type: BumpType::Patch,
-            auto_bumped: false,
-        }
+        PackageVersion::new(
+            name.to_string(),
+            current.parse().expect("valid version"),
+            new.parse().expect("valid version"),
+            BumpType::Patch,
+            false,
+        )
     }
 
     fn make_test_data() -> ReleaseSagaData {
@@ -1457,10 +1466,10 @@ mod tests {
             MockChangelogWriter,
         > = CreateCommitStep::new("Release {new-version}".to_string(), false);
         let mut input = make_test_data();
-        input.commit_result = Some(CommitResult {
-            sha: "abc123".to_string(),
-            message: "Release".to_string(),
-        });
+        input.commit_result = Some(CommitResult::new(
+            "abc123".to_string(),
+            "Release".to_string(),
+        ));
 
         SagaStep::compensate(&step, &ctx, input)?;
 
@@ -1487,10 +1496,10 @@ mod tests {
             MockChangelogWriter,
         > = CreateTagsStep::new(TagFormat::VersionOnly, false);
         let mut input = make_test_data();
-        input.commit_result = Some(CommitResult {
-            sha: "abc123".to_string(),
-            message: "Release".to_string(),
-        });
+        input.commit_result = Some(CommitResult::new(
+            "abc123".to_string(),
+            "Release".to_string(),
+        ));
 
         let result = SagaStep::execute(&step, &ctx, input)?;
 
@@ -1518,10 +1527,7 @@ mod tests {
             MockChangelogWriter,
         > = CreateTagsStep::new(TagFormat::VersionOnly, false);
         let mut input = make_test_data();
-        input.tags_created = vec![TagResult {
-            name: "v1.0.1".to_string(),
-            target_sha: "abc123".to_string(),
-        }];
+        input.tags_created = vec![TagResult::new("v1.0.1".to_string(), "abc123".to_string())];
 
         SagaStep::compensate(&step, &ctx, input)?;
 
@@ -1580,10 +1586,10 @@ mod tests {
             should_create_tags: true,
             should_delete_changesets: true,
         });
-        input.commit_result = Some(CommitResult {
-            sha: "abc123".to_string(),
-            message: "Release".to_string(),
-        });
+        input.commit_result = Some(CommitResult::new(
+            "abc123".to_string(),
+            "Release".to_string(),
+        ));
 
         let result = SagaStep::execute(&step, &ctx, input);
         assert!(result.is_err(), "should fail on second tag creation");
@@ -1659,10 +1665,10 @@ mod tests {
             should_create_tags: true,
             should_delete_changesets: true,
         });
-        input.commit_result = Some(CommitResult {
-            sha: "abc123".to_string(),
-            message: "Release".to_string(),
-        });
+        input.commit_result = Some(CommitResult::new(
+            "abc123".to_string(),
+            "Release".to_string(),
+        ));
 
         let result = SagaStep::execute(&step, &ctx, input);
         assert!(result.is_err(), "should fail on third tag creation");

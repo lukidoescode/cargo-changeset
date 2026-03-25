@@ -3,198 +3,153 @@ use std::path::PathBuf;
 
 use changeset_core::{Changeset, PackageInfo, PrereleaseSpec};
 use changeset_project::GraduationState;
+use derive_builder::Builder;
+use gset::Getset;
 use indexmap::IndexMap;
 use semver::Version;
 
 use crate::types::{PackageReleaseConfig, PackageVersion};
 
+#[derive(Builder, Getset, Default)]
+#[builder(default)]
 pub struct ReleaseInput {
+    #[getset(get_copy, vis = "pub")]
     dry_run: bool,
+    #[getset(get_copy, vis = "pub")]
     convert_inherited: bool,
+    #[getset(get_copy, vis = "pub")]
     no_commit: bool,
+    #[getset(get_copy, vis = "pub")]
     no_tags: bool,
+    #[getset(get_copy, vis = "pub")]
     keep_changesets: bool,
+    #[getset(get_copy, vis = "pub")]
     force: bool,
+    #[getset(get, vis = "pub")]
     per_package_config: HashMap<String, PackageReleaseConfig>,
+    #[getset(get_as_ref, vis = "pub", ty = "Option<&PrereleaseSpec>")]
     global_prerelease: Option<PrereleaseSpec>,
+    #[getset(get_copy, vis = "pub")]
     graduate_all: bool,
 }
 
-impl ReleaseInput {
-    #[must_use]
-    pub fn builder() -> ReleaseInputBuilder {
-        ReleaseInputBuilder::new()
-    }
-
-    #[must_use]
-    pub fn dry_run(&self) -> bool {
-        self.dry_run
-    }
-
-    #[must_use]
-    pub fn convert_inherited(&self) -> bool {
-        self.convert_inherited
-    }
-
-    #[must_use]
-    pub fn no_commit(&self) -> bool {
-        self.no_commit
-    }
-
-    #[must_use]
-    pub fn no_tags(&self) -> bool {
-        self.no_tags
-    }
-
-    #[must_use]
-    pub fn keep_changesets(&self) -> bool {
-        self.keep_changesets
-    }
-
-    #[must_use]
-    pub fn force(&self) -> bool {
-        self.force
-    }
-
-    #[must_use]
-    pub fn per_package_config(&self) -> &HashMap<String, PackageReleaseConfig> {
-        &self.per_package_config
-    }
-
-    #[must_use]
-    pub fn global_prerelease(&self) -> Option<&PrereleaseSpec> {
-        self.global_prerelease.as_ref()
-    }
-
-    #[must_use]
-    pub fn graduate_all(&self) -> bool {
-        self.graduate_all
-    }
+#[derive(Debug, Clone, Getset)]
+pub struct ChangelogUpdate {
+    #[getset(get, vis = "pub")]
+    path: PathBuf,
+    #[getset(get_as_ref, vis = "pub", ty = "Option<&String>")]
+    package: Option<String>,
+    #[getset(get, vis = "pub")]
+    version: Version,
+    #[getset(get_copy, vis = "pub")]
+    created: bool,
 }
 
-#[derive(Default)]
-pub struct ReleaseInputBuilder {
-    dry_run: bool,
-    convert_inherited: bool,
-    no_commit: bool,
-    no_tags: bool,
-    keep_changesets: bool,
-    force: bool,
-    per_package_config: HashMap<String, PackageReleaseConfig>,
-    global_prerelease: Option<PrereleaseSpec>,
-    graduate_all: bool,
-}
-
-impl ReleaseInputBuilder {
-    #[must_use]
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    #[must_use]
-    pub fn dry_run(mut self, v: bool) -> Self {
-        self.dry_run = v;
-        self
-    }
-
-    #[must_use]
-    pub fn convert_inherited(mut self, v: bool) -> Self {
-        self.convert_inherited = v;
-        self
-    }
-
-    #[must_use]
-    pub fn no_commit(mut self, v: bool) -> Self {
-        self.no_commit = v;
-        self
-    }
-
-    #[must_use]
-    pub fn no_tags(mut self, v: bool) -> Self {
-        self.no_tags = v;
-        self
-    }
-
-    #[must_use]
-    pub fn keep_changesets(mut self, v: bool) -> Self {
-        self.keep_changesets = v;
-        self
-    }
-
-    #[must_use]
-    pub fn force(mut self, v: bool) -> Self {
-        self.force = v;
-        self
-    }
-
-    #[must_use]
-    pub fn per_package_config(mut self, v: HashMap<String, PackageReleaseConfig>) -> Self {
-        self.per_package_config = v;
-        self
-    }
-
-    #[must_use]
-    pub fn global_prerelease(mut self, v: Option<PrereleaseSpec>) -> Self {
-        self.global_prerelease = v;
-        self
-    }
-
-    #[must_use]
-    pub fn graduate_all(mut self, v: bool) -> Self {
-        self.graduate_all = v;
-        self
-    }
-
-    #[must_use]
-    pub fn build(self) -> ReleaseInput {
-        ReleaseInput {
-            dry_run: self.dry_run,
-            convert_inherited: self.convert_inherited,
-            no_commit: self.no_commit,
-            no_tags: self.no_tags,
-            keep_changesets: self.keep_changesets,
-            force: self.force,
-            per_package_config: self.per_package_config,
-            global_prerelease: self.global_prerelease,
-            graduate_all: self.graduate_all,
+impl ChangelogUpdate {
+    pub(crate) fn new(
+        path: PathBuf,
+        package: Option<String>,
+        version: Version,
+        created: bool,
+    ) -> Self {
+        Self {
+            path,
+            package,
+            version,
+            created,
         }
     }
 }
 
-#[derive(Debug, Clone)]
-pub struct ChangelogUpdate {
-    pub path: PathBuf,
-    pub package: Option<String>,
-    pub version: Version,
-    pub created: bool,
-}
-
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Getset)]
 pub struct CommitResult {
-    pub sha: String,
-    pub message: String,
+    #[getset(get, vis = "pub")]
+    sha: String,
+    #[getset(get, vis = "pub")]
+    message: String,
 }
 
-#[derive(Debug, Clone)]
+impl CommitResult {
+    pub(crate) fn new(sha: String, message: String) -> Self {
+        Self { sha, message }
+    }
+}
+
+#[derive(Debug, Clone, Getset)]
 pub struct TagResult {
-    pub name: String,
-    pub target_sha: String,
+    #[getset(get, vis = "pub")]
+    name: String,
+    #[getset(get, vis = "pub")]
+    target_sha: String,
 }
 
-#[derive(Debug, Clone, Default)]
+impl TagResult {
+    pub(crate) fn new(name: String, target_sha: String) -> Self {
+        Self { name, target_sha }
+    }
+}
+
+#[derive(Debug, Clone, Default, Getset)]
 pub struct GitOperationResult {
-    pub commit: Option<CommitResult>,
-    pub tags_created: Vec<TagResult>,
-    pub changesets_deleted: Vec<PathBuf>,
+    #[getset(get_as_ref, vis = "pub", ty = "Option<&CommitResult>")]
+    commit: Option<CommitResult>,
+    #[getset(get, vis = "pub")]
+    tags_created: Vec<TagResult>,
+    #[getset(get, vis = "pub")]
+    changesets_deleted: Vec<PathBuf>,
 }
 
-#[derive(Debug, Clone)]
+impl GitOperationResult {
+    pub(crate) fn new(
+        commit: Option<CommitResult>,
+        tags_created: Vec<TagResult>,
+        changesets_deleted: Vec<PathBuf>,
+    ) -> Self {
+        Self {
+            commit,
+            tags_created,
+            changesets_deleted,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Getset)]
 pub struct ReleaseOutput {
-    pub planned_releases: Vec<PackageVersion>,
-    pub unchanged_packages: Vec<String>,
-    pub changesets_consumed: Vec<PathBuf>,
-    pub changelog_updates: Vec<ChangelogUpdate>,
-    pub git_result: Option<GitOperationResult>,
+    #[getset(get, vis = "pub")]
+    planned_releases: Vec<PackageVersion>,
+    #[getset(get, vis = "pub")]
+    unchanged_packages: Vec<String>,
+    #[getset(get, vis = "pub")]
+    changesets_consumed: Vec<PathBuf>,
+    #[getset(get, vis = "pub")]
+    changelog_updates: Vec<ChangelogUpdate>,
+    #[getset(get_as_ref, vis = "pub", ty = "Option<&GitOperationResult>")]
+    git_result: Option<GitOperationResult>,
+}
+
+impl ReleaseOutput {
+    pub(crate) fn new(
+        planned_releases: Vec<PackageVersion>,
+        unchanged_packages: Vec<String>,
+        changesets_consumed: Vec<PathBuf>,
+        changelog_updates: Vec<ChangelogUpdate>,
+        git_result: Option<GitOperationResult>,
+    ) -> Self {
+        Self {
+            planned_releases,
+            unchanged_packages,
+            changesets_consumed,
+            changelog_updates,
+            git_result,
+        }
+    }
+
+    pub(super) fn with_git_result(self, git_result: GitOperationResult) -> Self {
+        Self {
+            git_result: Some(git_result),
+            ..self
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -258,13 +213,15 @@ pub(super) struct ReleasePlan {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::PackageReleaseConfig;
+    use crate::types::PackageReleaseConfigBuilder;
     use changeset_core::PrereleaseSpec;
     use std::collections::HashMap;
 
     #[test]
     fn builder_defaults_all_false() {
-        let input = ReleaseInput::builder().build();
+        let input = ReleaseInputBuilder::default()
+            .build()
+            .expect("all fields have defaults");
 
         assert!(!input.dry_run());
         assert!(!input.convert_inherited());
@@ -279,16 +236,20 @@ mod tests {
 
     #[test]
     fn builder_sets_dry_run() {
-        let input = ReleaseInput::builder().dry_run(true).build();
+        let input = ReleaseInputBuilder::default()
+            .dry_run(true)
+            .build()
+            .expect("all fields have defaults");
 
         assert!(input.dry_run());
     }
 
     #[test]
     fn builder_sets_global_prerelease() {
-        let input = ReleaseInput::builder()
+        let input = ReleaseInputBuilder::default()
             .global_prerelease(Some(PrereleaseSpec::Alpha))
-            .build();
+            .build()
+            .expect("all fields have defaults");
 
         let prerelease = input.global_prerelease();
         assert!(prerelease.is_some());
@@ -303,13 +264,15 @@ mod tests {
         let mut map = HashMap::new();
         map.insert(
             "crate-a".to_string(),
-            PackageReleaseConfig {
-                prerelease: None,
-                graduate_zero: false,
-            },
+            PackageReleaseConfigBuilder::default()
+                .build()
+                .expect("all fields have defaults"),
         );
 
-        let input = ReleaseInput::builder().per_package_config(map).build();
+        let input = ReleaseInputBuilder::default()
+            .per_package_config(map)
+            .build()
+            .expect("all fields have defaults");
 
         assert!(input.per_package_config().contains_key("crate-a"));
     }

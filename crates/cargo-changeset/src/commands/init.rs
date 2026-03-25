@@ -76,24 +76,24 @@ pub(crate) fn run(args: InitArgs, start_path: &Path) -> Result<()> {
     let output = operation.execute_plan(start_path, &plan)?;
 
     println!();
-    if output.created_dir {
+    if output.created_dir() {
         println!(
             "Created changeset directory at '{}'",
-            output.changeset_dir.display()
+            output.changeset_dir().display()
         );
     } else {
         println!(
             "Changeset directory already exists at '{}'",
-            output.changeset_dir.display()
+            output.changeset_dir().display()
         );
     }
 
-    if output.created_gitkeep {
+    if output.created_gitkeep() {
         println!("Created .gitkeep file");
     }
 
-    if output.wrote_config {
-        if let Some(section) = output.config_location {
+    if output.wrote_config() {
+        if let Some(section) = output.config_location() {
             println!("Wrote configuration to {section} in Cargo.toml");
         }
     }
