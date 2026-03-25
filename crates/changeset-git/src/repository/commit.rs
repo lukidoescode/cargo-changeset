@@ -42,10 +42,7 @@ impl Repository {
 
         let sha = commit_oid.to_string();
 
-        Ok(CommitInfo {
-            sha,
-            message: message.to_string(),
-        })
+        Ok(CommitInfo::new(sha, message.to_string()))
     }
 }
 
@@ -65,11 +62,11 @@ mod tests {
 
         let commit_info = repo.commit("Test commit message")?;
 
-        assert!(!commit_info.sha.is_empty());
-        assert_eq!(commit_info.message, "Test commit message");
+        assert!(!commit_info.sha().is_empty());
+        assert_eq!(commit_info.message(), "Test commit message");
 
         let head = repo.inner.head()?.peel_to_commit()?;
-        assert_eq!(head.id().to_string(), commit_info.sha);
+        assert_eq!(commit_info.sha(), &head.id().to_string());
 
         Ok(())
     }
@@ -86,7 +83,7 @@ mod tests {
 
         let head = repo.inner.head()?.peel_to_commit()?;
         assert_eq!(head.message(), Some(message));
-        assert_eq!(commit_info.message, message);
+        assert_eq!(commit_info.message(), message);
 
         Ok(())
     }

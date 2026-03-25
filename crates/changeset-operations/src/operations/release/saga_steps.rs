@@ -665,8 +665,8 @@ where
         let commit_info = ctx.git_provider().commit(ctx.project_root(), &message)?;
 
         input.commit_result = Some(CommitResult {
-            sha: commit_info.sha,
-            message: commit_info.message,
+            sha: commit_info.sha().clone(),
+            message: commit_info.message().clone(),
         });
 
         Ok(input)
@@ -751,8 +751,8 @@ where
                 Ok(tag_info) => {
                     created_tag_names.push(tag_name);
                     tags.push(TagResult {
-                        name: tag_info.name,
-                        target_sha: tag_info.target_sha,
+                        name: tag_info.name().clone(),
+                        target_sha: tag_info.target_sha().clone(),
                     });
                 }
                 Err(e) => {

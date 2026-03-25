@@ -15,6 +15,7 @@ categories = ["development-tools::cargo-plugins"]
 [dependencies]
 dunce = "1.0.5"
 git2 = { workspace = true }
+gset = { workspace = true }
 thiserror = { workspace = true }
 
 [dev-dependencies]

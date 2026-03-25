@@ -85,13 +85,15 @@ where
 
         let (changeset_changes, code_changes): (Vec<_>, Vec<_>) = changed_files
             .into_iter()
-            .partition(|change| change.path.starts_with(changeset_dir));
+            .partition(|change| change.path().starts_with(changeset_dir));
 
         let deleted_changesets = extract_deleted_changesets(&changeset_changes, changeset_dir);
         let changeset_files = extract_active_changesets(&changeset_changes);
 
-        let changed_paths: Vec<PathBuf> =
-            code_changes.into_iter().map(|change| change.path).collect();
+        let changed_paths: Vec<PathBuf> = code_changes
+            .into_iter()
+            .map(|change| change.path().clone())
+            .collect();
 
         let has_deleted_changesets = !deleted_changesets.is_empty();
         let has_code_changes = !changed_paths.is_empty();
@@ -193,11 +195,10 @@ fn is_markdown_file(path: &Path) -> bool {
 fn extract_deleted_changesets(changes: &[FileChange], changeset_dir: &Path) -> Vec<PathBuf> {
     changes
         .iter()
-        .filter_map(|change| match change.status {
-            FileStatus::Deleted if is_markdown_file(&change.path) => Some(change.path.clone()),
+        .filter_map(|change| match change.status() {
+            FileStatus::Deleted if is_markdown_file(change.path()) => Some(change.path().clone()),
             FileStatus::Renamed => change
-                .old_path
-                .as_ref()
+                .old_path()
                 .filter(|old| old.starts_with(changeset_dir) && is_markdown_file(old))
                 .cloned(),
             _ => None,
@@ -209,16 +210,16 @@ fn extract_active_changesets(changes: &[FileChange]) -> Vec<PathBuf> {
     changes
         .iter()
         .filter(|change| {
-            is_markdown_file(&change.path)
+            is_markdown_file(change.path())
                 && matches!(
-                    change.status,
+                    change.status(),
                     FileStatus::Added
                         | FileStatus::Modified
                         | FileStatus::Renamed
                         | FileStatus::Typechange
                 )
         })
-        .map(|change| change.path.clone())
+        .map(|change| change.path().clone())
         .collect()
 }
 
@@ -288,16 +289,11 @@ mod tests {
         let project_provider = MockProjectProvider::single_package("my-crate", "1.0.0");
 
         let git_provider = MockGitProvider::new().with_changed_files(vec![
-            FileChange {
-                path: PathBuf::from(".changeset/changesets/test.md"),
-                status: FileStatus::Added,
-                old_path: None,
-            },
-            FileChange {
-                path: PathBuf::from("src/lib.rs"),
-                status: FileStatus::Modified,
-                old_path: None,
-            },
+            FileChange::new(
+                PathBuf::from(".changeset/changesets/test.md"),
+                FileStatus::Added,
+            ),
+            FileChange::new(PathBuf::from("src/lib.rs"), FileStatus::Modified),
         ]);
 
         let changeset = crate::mocks::make_changeset("my-crate", BumpType::Patch, "Fix bug");
@@ -331,11 +327,10 @@ mod tests {
     fn returns_failed_when_package_not_covered() {
         let project_provider = MockProjectProvider::single_package("my-crate", "1.0.0");
 
-        let git_provider = MockGitProvider::new().with_changed_files(vec![FileChange {
-            path: PathBuf::from("src/lib.rs"),
-            status: FileStatus::Modified,
-            old_path: None,
-        }]);
+        let git_provider = MockGitProvider::new().with_changed_files(vec![FileChange::new(
+            PathBuf::from("src/lib.rs"),
+            FileStatus::Modified,
+        )]);
 
         let changeset_reader = MockChangesetReader::new();
 
@@ -364,16 +359,11 @@ mod tests {
     #[test]
     fn extract_deleted_changesets_identifies_deleted_md_files() {
         let changes = vec![
-            FileChange {
-                path: PathBuf::from(".changeset/changesets/old.md"),
-                status: FileStatus::Deleted,
-                old_path: None,
-            },
-            FileChange {
-                path: PathBuf::from("src/main.rs"),
-                status: FileStatus::Deleted,
-                old_path: None,
-            },
+            FileChange::new(
+                PathBuf::from(".changeset/changesets/old.md"),
+                FileStatus::Deleted,
+            ),
+            FileChange::new(PathBuf::from("src/main.rs"), FileStatus::Deleted),
         ];
 
         let deleted = extract_deleted_changesets(&changes, Path::new(".changeset"));
@@ -385,21 +375,18 @@ mod tests {
     #[test]
     fn extract_active_changesets_identifies_added_and_modified() {
         let changes = vec![
-            FileChange {
-                path: PathBuf::from(".changeset/changesets/new.md"),
-                status: FileStatus::Added,
-                old_path: None,
-            },
-            FileChange {
-                path: PathBuf::from(".changeset/changesets/updated.md"),
-                status: FileStatus::Modified,
-                old_path: None,
-            },
-            FileChange {
-                path: PathBuf::from(".changeset/changesets/deleted.md"),
-                status: FileStatus::Deleted,
-                old_path: None,
-            },
+            FileChange::new(
+                PathBuf::from(".changeset/changesets/new.md"),
+                FileStatus::Added,
+            ),
+            FileChange::new(
+                PathBuf::from(".changeset/changesets/updated.md"),
+                FileStatus::Modified,
+            ),
+            FileChange::new(
+                PathBuf::from(".changeset/changesets/deleted.md"),
+                FileStatus::Deleted,
+            ),
         ];
 
         let active = extract_active_changesets(&changes);
@@ -414,16 +401,11 @@ mod tests {
         let project_provider = MockProjectProvider::single_package("my-crate", "1.0.0");
 
         let git_provider = MockGitProvider::new().with_changed_files(vec![
-            FileChange {
-                path: PathBuf::from(".changeset/changesets/internal.md"),
-                status: FileStatus::Added,
-                old_path: None,
-            },
-            FileChange {
-                path: PathBuf::from("src/lib.rs"),
-                status: FileStatus::Modified,
-                old_path: None,
-            },
+            FileChange::new(
+                PathBuf::from(".changeset/changesets/internal.md"),
+                FileStatus::Added,
+            ),
+            FileChange::new(PathBuf::from("src/lib.rs"), FileStatus::Modified),
         ]);
 
         let changeset =
@@ -471,16 +453,14 @@ mod tests {
                 .with_dependency_edges(vec![("app", "core")]);
 
         let git_provider = MockGitProvider::new().with_changed_files(vec![
-            FileChange {
-                path: PathBuf::from(".changeset/changesets/fix.md"),
-                status: FileStatus::Added,
-                old_path: None,
-            },
-            FileChange {
-                path: PathBuf::from("crates/core/src/lib.rs"),
-                status: FileStatus::Modified,
-                old_path: None,
-            },
+            FileChange::new(
+                PathBuf::from(".changeset/changesets/fix.md"),
+                FileStatus::Added,
+            ),
+            FileChange::new(
+                PathBuf::from("crates/core/src/lib.rs"),
+                FileStatus::Modified,
+            ),
         ]);
 
         let changeset = crate::mocks::make_changeset("core", BumpType::Patch, "Fix core bug");
@@ -522,16 +502,14 @@ mod tests {
                 .with_dependency_edges(vec![("app", "core")]);
 
         let git_provider = MockGitProvider::new().with_changed_files(vec![
-            FileChange {
-                path: PathBuf::from(".changeset/changesets/fix.md"),
-                status: FileStatus::Added,
-                old_path: None,
-            },
-            FileChange {
-                path: PathBuf::from("crates/core/src/lib.rs"),
-                status: FileStatus::Modified,
-                old_path: None,
-            },
+            FileChange::new(
+                PathBuf::from(".changeset/changesets/fix.md"),
+                FileStatus::Added,
+            ),
+            FileChange::new(
+                PathBuf::from("crates/core/src/lib.rs"),
+                FileStatus::Modified,
+            ),
         ]);
 
         let changeset = changeset_core::Changeset::new(
@@ -576,16 +554,14 @@ mod tests {
                 .with_dependency_edges(vec![("app", "core")]);
 
         let git_provider = MockGitProvider::new().with_changed_files(vec![
-            FileChange {
-                path: PathBuf::from(".changeset/changesets/fix.md"),
-                status: FileStatus::Added,
-                old_path: None,
-            },
-            FileChange {
-                path: PathBuf::from("crates/core/src/lib.rs"),
-                status: FileStatus::Modified,
-                old_path: None,
-            },
+            FileChange::new(
+                PathBuf::from(".changeset/changesets/fix.md"),
+                FileStatus::Added,
+            ),
+            FileChange::new(
+                PathBuf::from("crates/core/src/lib.rs"),
+                FileStatus::Modified,
+            ),
         ]);
 
         let changeset = crate::mocks::make_changeset("core", BumpType::Patch, "Fix core bug");
@@ -620,16 +596,11 @@ mod tests {
         let project_provider = MockProjectProvider::single_package("solo", "1.0.0");
 
         let git_provider = MockGitProvider::new().with_changed_files(vec![
-            FileChange {
-                path: PathBuf::from(".changeset/changesets/fix.md"),
-                status: FileStatus::Added,
-                old_path: None,
-            },
-            FileChange {
-                path: PathBuf::from("src/lib.rs"),
-                status: FileStatus::Modified,
-                old_path: None,
-            },
+            FileChange::new(
+                PathBuf::from(".changeset/changesets/fix.md"),
+                FileStatus::Added,
+            ),
+            FileChange::new(PathBuf::from("src/lib.rs"), FileStatus::Modified),
         ]);
 
         let changeset = crate::mocks::make_changeset("solo", BumpType::Patch, "Fix bug");
@@ -664,16 +635,11 @@ mod tests {
         let project_provider = MockProjectProvider::single_package("my-crate", "1.0.0");
 
         let uncommitted = vec![
-            FileChange {
-                path: PathBuf::from(".changeset/changesets/local.md"),
-                status: FileStatus::Added,
-                old_path: None,
-            },
-            FileChange {
-                path: PathBuf::from("src/lib.rs"),
-                status: FileStatus::Modified,
-                old_path: None,
-            },
+            FileChange::new(
+                PathBuf::from(".changeset/changesets/local.md"),
+                FileStatus::Added,
+            ),
+            FileChange::new(PathBuf::from("src/lib.rs"), FileStatus::Modified),
         ];
 
         let git_provider = MockGitProvider::new()
@@ -714,16 +680,11 @@ mod tests {
         let git_provider = MockGitProvider::new()
             .is_clean(true)
             .with_changed_files(vec![
-                FileChange {
-                    path: PathBuf::from(".changeset/changesets/test.md"),
-                    status: FileStatus::Added,
-                    old_path: None,
-                },
-                FileChange {
-                    path: PathBuf::from("src/lib.rs"),
-                    status: FileStatus::Modified,
-                    old_path: None,
-                },
+                FileChange::new(
+                    PathBuf::from(".changeset/changesets/test.md"),
+                    FileStatus::Added,
+                ),
+                FileChange::new(PathBuf::from("src/lib.rs"), FileStatus::Modified),
             ]);
 
         let changeset = crate::mocks::make_changeset("my-crate", BumpType::Patch, "Fix bug");
@@ -787,11 +748,10 @@ mod tests {
 
         let git_provider = MockGitProvider::new()
             .is_clean(false)
-            .with_uncommitted_changes(vec![FileChange {
-                path: PathBuf::from(".changeset/changesets/local.md"),
-                status: FileStatus::Added,
-                old_path: None,
-            }]);
+            .with_uncommitted_changes(vec![FileChange::new(
+                PathBuf::from(".changeset/changesets/local.md"),
+                FileStatus::Added,
+            )]);
 
         let changeset_reader = MockChangesetReader::new();
 
@@ -847,11 +807,10 @@ mod tests {
 
         let git_provider = MockGitProvider::new()
             .is_clean(false)
-            .with_uncommitted_changes(vec![FileChange {
-                path: PathBuf::from("src/lib.rs"),
-                status: FileStatus::Modified,
-                old_path: None,
-            }]);
+            .with_uncommitted_changes(vec![FileChange::new(
+                PathBuf::from("src/lib.rs"),
+                FileStatus::Modified,
+            )]);
 
         let changeset_reader = MockChangesetReader::new();
 
@@ -887,16 +846,14 @@ mod tests {
         let git_provider = MockGitProvider::new()
             .is_clean(false)
             .with_uncommitted_changes(vec![
-                FileChange {
-                    path: PathBuf::from(".changeset/changesets/fix.md"),
-                    status: FileStatus::Added,
-                    old_path: None,
-                },
-                FileChange {
-                    path: PathBuf::from("crates/core/src/lib.rs"),
-                    status: FileStatus::Modified,
-                    old_path: None,
-                },
+                FileChange::new(
+                    PathBuf::from(".changeset/changesets/fix.md"),
+                    FileStatus::Added,
+                ),
+                FileChange::new(
+                    PathBuf::from("crates/core/src/lib.rs"),
+                    FileStatus::Modified,
+                ),
             ]);
 
         let changeset = crate::mocks::make_changeset("core", BumpType::Patch, "Fix core bug");
@@ -939,16 +896,11 @@ mod tests {
         let git_provider = Arc::new(
             MockGitProvider::new()
                 .with_changed_files(vec![
-                    FileChange {
-                        path: PathBuf::from(".changeset/changesets/test.md"),
-                        status: FileStatus::Added,
-                        old_path: None,
-                    },
-                    FileChange {
-                        path: PathBuf::from("src/lib.rs"),
-                        status: FileStatus::Modified,
-                        old_path: None,
-                    },
+                    FileChange::new(
+                        PathBuf::from(".changeset/changesets/test.md"),
+                        FileStatus::Added,
+                    ),
+                    FileChange::new(PathBuf::from("src/lib.rs"), FileStatus::Modified),
                 ])
                 .with_uncommitted_changes(vec![]),
         );
@@ -993,16 +945,11 @@ mod tests {
             MockProjectProvider::single_package("my-crate", "1.0.0").with_root_config(root_config);
 
         let git_provider = MockGitProvider::new().with_changed_files(vec![
-            FileChange {
-                path: PathBuf::from(".changeset/changesets/internal.md"),
-                status: FileStatus::Added,
-                old_path: None,
-            },
-            FileChange {
-                path: PathBuf::from("src/lib.rs"),
-                status: FileStatus::Modified,
-                old_path: None,
-            },
+            FileChange::new(
+                PathBuf::from(".changeset/changesets/internal.md"),
+                FileStatus::Added,
+            ),
+            FileChange::new(PathBuf::from("src/lib.rs"), FileStatus::Modified),
         ]);
 
         let changeset =
@@ -1047,16 +994,11 @@ mod tests {
             MockProjectProvider::single_package("my-crate", "1.0.0").with_root_config(root_config);
 
         let git_provider = MockGitProvider::new().with_changed_files(vec![
-            FileChange {
-                path: PathBuf::from(".changeset/changesets/internal.md"),
-                status: FileStatus::Added,
-                old_path: None,
-            },
-            FileChange {
-                path: PathBuf::from("src/lib.rs"),
-                status: FileStatus::Modified,
-                old_path: None,
-            },
+            FileChange::new(
+                PathBuf::from(".changeset/changesets/internal.md"),
+                FileStatus::Added,
+            ),
+            FileChange::new(PathBuf::from("src/lib.rs"), FileStatus::Modified),
         ]);
 
         let changeset =
@@ -1097,16 +1039,11 @@ mod tests {
             MockProjectProvider::single_package("my-crate", "1.0.0").with_root_config(root_config);
 
         let git_provider = MockGitProvider::new().with_changed_files(vec![
-            FileChange {
-                path: PathBuf::from(".changeset/changesets/internal.md"),
-                status: FileStatus::Added,
-                old_path: None,
-            },
-            FileChange {
-                path: PathBuf::from("src/lib.rs"),
-                status: FileStatus::Modified,
-                old_path: None,
-            },
+            FileChange::new(
+                PathBuf::from(".changeset/changesets/internal.md"),
+                FileStatus::Added,
+            ),
+            FileChange::new(PathBuf::from("src/lib.rs"), FileStatus::Modified),
         ]);
 
         let changeset =

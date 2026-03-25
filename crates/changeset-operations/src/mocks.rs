@@ -640,10 +640,10 @@ impl GitCommitProvider for MockGitProvider {
             )));
         }
         state.commits.push(message.to_string());
-        Ok(CommitInfo {
-            sha: "abc123def456".to_string(),
-            message: message.to_string(),
-        })
+        Ok(CommitInfo::new(
+            "abc123def456".to_string(),
+            message.to_string(),
+        ))
     }
 
     fn reset_to_parent(&self, _project_root: &Path) -> Result<()> {
@@ -673,10 +673,10 @@ impl GitTagProvider for MockGitProvider {
         state
             .tags_created
             .push((tag_name.to_string(), message.to_string()));
-        Ok(TagInfo {
-            name: tag_name.to_string(),
-            target_sha: "abc123def456".to_string(),
-        })
+        Ok(TagInfo::new(
+            tag_name.to_string(),
+            "abc123def456".to_string(),
+        ))
     }
 
     fn delete_tag(&self, _project_root: &Path, tag_name: &str) -> Result<bool> {

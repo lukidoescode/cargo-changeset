@@ -32,10 +32,7 @@ impl Repository {
         self.inner
             .tag(name, head.as_object(), &sig, message, false)?;
 
-        Ok(TagInfo {
-            name: name.to_string(),
-            target_sha: head.id().to_string(),
-        })
+        Ok(TagInfo::new(name.to_string(), head.id().to_string()))
     }
 }
 
@@ -49,10 +46,10 @@ mod tests {
 
         let tag_info = repo.create_tag("v1.0.0", "Release version 1.0.0")?;
 
-        assert_eq!(tag_info.name, "v1.0.0");
+        assert_eq!(tag_info.name(), "v1.0.0");
 
         let head = repo.inner.head()?.peel_to_commit()?;
-        assert_eq!(tag_info.target_sha, head.id().to_string());
+        assert_eq!(tag_info.target_sha(), &head.id().to_string());
 
         let tag = repo.inner.find_reference("refs/tags/v1.0.0")?;
         assert!(tag.peel_to_tag().is_ok());
@@ -66,7 +63,7 @@ mod tests {
 
         let tag_info = repo.create_tag("my-crate@v0.1.0", "Release my-crate version 0.1.0")?;
 
-        assert_eq!(tag_info.name, "my-crate@v0.1.0");
+        assert_eq!(tag_info.name(), "my-crate@v0.1.0");
 
         let tag = repo.inner.find_reference("refs/tags/my-crate@v0.1.0")?;
         assert!(tag.peel_to_tag().is_ok());
