@@ -29,6 +29,8 @@ thiserror = { workspace = true }
 petname = { workspace = true }
 toml = { workspace = true }
 tracing = { workspace = true }
+gset = { workspace = true }
+derive_builder = { workspace = true }
 
 [dev-dependencies]
 anyhow = "1.0.101"

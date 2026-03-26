@@ -129,10 +129,10 @@ impl ReleaseSagaData {
         if let Some(state) = current_state {
             let mut new_state = state.clone();
             for release in &self.planned_releases {
-                let was_prerelease = changeset_version::is_prerelease(&release.current_version);
-                let is_now_stable = !changeset_version::is_prerelease(&release.new_version);
+                let was_prerelease = changeset_version::is_prerelease(release.current_version());
+                let is_now_stable = !changeset_version::is_prerelease(release.new_version());
                 if was_prerelease && is_now_stable {
-                    let _ = new_state.remove(&release.name);
+                    let _ = new_state.remove(release.name());
                 }
             }
             self.prerelease_state_update = Some(PrereleaseStateUpdate {
@@ -147,8 +147,8 @@ impl ReleaseSagaData {
         if let Some(state) = current_state {
             let mut new_state = state.clone();
             for release in &self.planned_releases {
-                if release.current_version.major == 0 && release.new_version.major >= 1 {
-                    let _ = new_state.remove(&release.name);
+                if release.current_version().major == 0 && release.new_version().major >= 1 {
+                    let _ = new_state.remove(release.name());
                 }
             }
             self.graduation_state_update = Some(GraduationStateUpdate {
@@ -166,10 +166,10 @@ impl ReleaseSagaData {
     }
 
     pub fn into_git_result(self) -> GitOperationResult {
-        GitOperationResult {
-            commit: self.commit_result,
-            tags_created: self.tags_created,
-            changesets_deleted: self.changesets_deleted,
-        }
+        GitOperationResult::new(
+            self.commit_result,
+            self.tags_created,
+            self.changesets_deleted,
+        )
     }
 }

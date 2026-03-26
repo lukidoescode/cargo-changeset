@@ -5,7 +5,8 @@ use std::process::Command;
 
 use changeset_operations::OperationError;
 use changeset_operations::operations::{
-    ReleaseInput, ReleaseOperation, ReleaseOutcome, StatusOperation,
+    PackageReleaseConfigBuilder, ReleaseInputBuilder, ReleaseOperation, ReleaseOutcome,
+    StatusOperation,
 };
 use changeset_operations::providers::{
     FileSystemChangelogWriter, FileSystemChangesetIO, FileSystemManifestWriter,
@@ -176,13 +177,14 @@ fn run_release(
         git_provider,
         release_state_io,
     );
-    let input = ReleaseInput::builder()
+    let input = ReleaseInputBuilder::default()
         .dry_run(dry_run)
         .convert_inherited(convert_inherited)
         .no_commit(true)
         .no_tags(true)
         .keep_changesets(true)
-        .build();
+        .build()
+        .expect("all fields have defaults");
 
     operation.execute(dir.path(), &input)
 }
@@ -198,9 +200,12 @@ fn single_package_version_update() {
         panic!("expected Executed outcome");
     };
 
-    assert_eq!(output.planned_releases.len(), 1);
-    assert_eq!(output.planned_releases[0].name, "my-crate");
-    assert_eq!(output.planned_releases[0].new_version.to_string(), "1.0.1");
+    assert_eq!(output.planned_releases().len(), 1);
+    assert_eq!(output.planned_releases()[0].name(), "my-crate");
+    assert_eq!(
+        output.planned_releases()[0].new_version().to_string(),
+        "1.0.1"
+    );
 
     let version = read_version(&dir.path().join("Cargo.toml"));
     assert_eq!(version, "1.0.1");
@@ -224,7 +229,7 @@ fn workspace_with_multiple_packages() {
         panic!("expected Executed outcome");
     };
 
-    assert_eq!(output.planned_releases.len(), 2);
+    assert_eq!(output.planned_releases().len(), 2);
 
     let version_a = read_version(&dir.path().join("crates/crate-a/Cargo.toml"));
     assert_eq!(version_a, "1.1.0");
@@ -257,9 +262,12 @@ fn inherited_version_conversion_with_convert_flag() {
         panic!("expected Executed outcome");
     };
 
-    assert_eq!(output.planned_releases.len(), 1);
-    assert_eq!(output.planned_releases[0].name, "crate-a");
-    assert_eq!(output.planned_releases[0].new_version.to_string(), "1.0.1");
+    assert_eq!(output.planned_releases().len(), 1);
+    assert_eq!(output.planned_releases()[0].name(), "crate-a");
+    assert_eq!(
+        output.planned_releases()[0].new_version().to_string(),
+        "1.0.1"
+    );
 
     let crate_a_content =
         fs::read_to_string(dir.path().join("crates/crate-a/Cargo.toml")).expect("read crate-a");
@@ -291,8 +299,11 @@ fn dry_run_skips_file_modifications() {
         panic!("expected DryRun outcome");
     };
 
-    assert_eq!(output.planned_releases.len(), 1);
-    assert_eq!(output.planned_releases[0].new_version.to_string(), "1.0.1");
+    assert_eq!(output.planned_releases().len(), 1);
+    assert_eq!(
+        output.planned_releases()[0].new_version().to_string(),
+        "1.0.1"
+    );
 
     let version = read_version(&dir.path().join("Cargo.toml"));
     assert_eq!(
@@ -356,9 +367,9 @@ fn multiple_changesets_aggregate_correctly() {
         panic!("expected Executed outcome");
     };
 
-    assert_eq!(output.changesets_consumed.len(), 3);
+    assert_eq!(output.changesets_consumed().len(), 3);
     assert_eq!(
-        output.planned_releases[0].new_version.to_string(),
+        output.planned_releases()[0].new_version().to_string(),
         "1.1.0",
         "minor should win over patches"
     );
@@ -375,8 +386,8 @@ fn creates_changelog_on_release() {
         panic!("expected Executed outcome");
     };
 
-    assert_eq!(output.changelog_updates.len(), 1);
-    assert!(output.changelog_updates[0].created);
+    assert_eq!(output.changelog_updates().len(), 1);
+    assert!(output.changelog_updates()[0].created());
 
     let changelog_path = dir.path().join("CHANGELOG.md");
     assert!(changelog_path.exists(), "CHANGELOG.md should be created");
@@ -399,7 +410,7 @@ fn dry_run_skips_changelog_creation() {
     };
 
     assert!(
-        output.changelog_updates.is_empty(),
+        output.changelog_updates().is_empty(),
         "dry run should not create changelog updates"
     );
 
@@ -462,32 +473,35 @@ fn status_and_release_calculate_identical_versions() {
     };
 
     assert_eq!(
-        status_output.projected_releases.len(),
-        release_output.planned_releases.len(),
+        status_output.projected_releases().len(),
+        release_output.planned_releases().len(),
         "status and release should have same number of releases"
     );
 
-    for status_release in &status_output.projected_releases {
+    for status_release in status_output.projected_releases() {
         let matching_release = release_output
-            .planned_releases
+            .planned_releases()
             .iter()
-            .find(|r| r.name == status_release.name)
+            .find(|r| r.name() == status_release.name())
             .expect("release should have matching package");
 
         assert_eq!(
-            status_release.current_version, matching_release.current_version,
+            status_release.current_version(),
+            matching_release.current_version(),
             "current versions should match for {}",
-            status_release.name
+            status_release.name()
         );
         assert_eq!(
-            status_release.new_version, matching_release.new_version,
+            status_release.new_version(),
+            matching_release.new_version(),
             "new versions should match for {}",
-            status_release.name
+            status_release.name()
         );
         assert_eq!(
-            status_release.bump_type, matching_release.bump_type,
+            status_release.bump_type(),
+            matching_release.bump_type(),
             "bump types should match for {}",
-            status_release.name
+            status_release.name()
         );
     }
 }
@@ -577,11 +591,12 @@ fn run_release_with_git(
         git_provider,
         release_state_io,
     );
-    let input = ReleaseInput::builder()
+    let input = ReleaseInputBuilder::default()
         .no_commit(no_commit)
         .no_tags(no_tags)
         .keep_changesets(keep_changesets)
-        .build();
+        .build()
+        .expect("all fields have defaults");
 
     operation.execute(dir.path(), &input)
 }
@@ -604,22 +619,22 @@ fn release_creates_commit_and_tags() {
     };
 
     assert!(
-        output.git_result.is_some(),
+        output.git_result().is_some(),
         "git operations should have been performed"
     );
-    let git_result = output.git_result.as_ref().expect("git_result");
+    let git_result = output.git_result().expect("git_result");
 
     assert!(
-        git_result.commit.is_some(),
+        git_result.commit().is_some(),
         "a commit should have been created"
     );
 
     assert_eq!(
-        git_result.tags_created.len(),
+        git_result.tags_created().len(),
         1,
         "one tag should have been created"
     );
-    assert_eq!(git_result.tags_created[0].name, "v1.0.1");
+    assert_eq!(git_result.tags_created()[0].name(), "v1.0.1");
 
     let tags = git_tags(&dir);
     assert!(
@@ -634,7 +649,7 @@ fn release_creates_commit_and_tags() {
     );
 
     assert_eq!(
-        git_result.changesets_deleted.len(),
+        git_result.changesets_deleted().len(),
         1,
         "one changeset should have been deleted"
     );
@@ -658,16 +673,21 @@ fn release_workspace_creates_prefixed_tags() {
         panic!("expected Executed outcome");
     };
 
-    let git_result = output.git_result.as_ref().expect("git result");
-    assert_eq!(git_result.tags_created.len(), 2);
+    let git_result = output.git_result().expect("git result");
+    assert_eq!(git_result.tags_created().len(), 2);
 
-    let tag_names: Vec<_> = git_result.tags_created.iter().map(|t| &t.name).collect();
     assert!(
-        tag_names.contains(&&"crate-a@v1.1.0".to_string()),
+        git_result
+            .tags_created()
+            .iter()
+            .any(|t| t.name() == "crate-a@v1.1.0"),
         "should have crate-a tag"
     );
     assert!(
-        tag_names.contains(&&"crate-b@v2.0.1".to_string()),
+        git_result
+            .tags_created()
+            .iter()
+            .any(|t| t.name() == "crate-b@v2.0.1"),
         "should have crate-b tag"
     );
 
@@ -691,20 +711,17 @@ fn release_no_commit_skips_git_operations() {
         panic!("expected Executed outcome");
     };
 
-    let git_result = output
-        .git_result
-        .as_ref()
-        .expect("git_result is always present");
+    let git_result = output.git_result().expect("git_result is always present");
     assert!(
-        git_result.commit.is_none(),
+        git_result.commit().is_none(),
         "no commit should be created when --no-commit"
     );
     assert!(
-        git_result.tags_created.is_empty(),
+        git_result.tags_created().is_empty(),
         "no tags should be created when --no-commit"
     );
     assert!(
-        git_result.changesets_deleted.is_empty(),
+        git_result.changesets_deleted().is_empty(),
         "no changesets should be deleted when --keep-changesets"
     );
 
@@ -738,9 +755,12 @@ fn release_no_tags_creates_commit_without_tags() {
         panic!("expected Executed outcome");
     };
 
-    let git_result = output.git_result.as_ref().expect("git result");
-    assert!(git_result.commit.is_some(), "commit should be created");
-    assert!(git_result.tags_created.is_empty(), "no tags when --no-tags");
+    let git_result = output.git_result().expect("git result");
+    assert!(git_result.commit().is_some(), "commit should be created");
+    assert!(
+        git_result.tags_created().is_empty(),
+        "no tags when --no-tags"
+    );
 
     let tags = git_tags(&dir);
     assert!(tags.is_empty(), "no tags should exist in git");
@@ -769,9 +789,9 @@ fn release_keep_changesets_preserves_files() {
         panic!("expected Executed outcome");
     };
 
-    let git_result = output.git_result.as_ref().expect("git result");
+    let git_result = output.git_result().expect("git result");
     assert!(
-        git_result.changesets_deleted.is_empty(),
+        git_result.changesets_deleted().is_empty(),
         "no changesets should be deleted"
     );
 
@@ -862,12 +882,13 @@ fn run_release_with_prerelease(
         git_provider,
         release_state_io,
     );
-    let input = ReleaseInput::builder()
+    let input = ReleaseInputBuilder::default()
         .no_commit(true)
         .no_tags(true)
         .keep_changesets(true)
         .global_prerelease(prerelease)
-        .build();
+        .build()
+        .expect("all fields have defaults");
 
     operation.execute(dir.path(), &input)
 }
@@ -921,25 +942,25 @@ fn workspace_with_mixed_prerelease_and_stable_packages_graduates_prereleases_onl
     };
 
     assert_eq!(
-        output.planned_releases.len(),
+        output.planned_releases().len(),
         1,
         "only prerelease packages should graduate when any prerelease exists"
     );
 
     let prerelease_pkg = output
-        .planned_releases
+        .planned_releases()
         .iter()
-        .find(|r| r.name == "prerelease-crate")
+        .find(|r| r.name() == "prerelease-crate")
         .expect("prerelease-crate should be in releases");
     assert_eq!(
-        prerelease_pkg.new_version.to_string(),
+        prerelease_pkg.new_version().to_string(),
         "1.0.0",
         "prerelease should graduate to stable when no --prerelease flag"
     );
 
     assert!(
         output
-            .unchanged_packages
+            .unchanged_packages()
             .contains(&"stable-crate".to_string()),
         "stable packages are skipped during graduation; run a second release for them"
     );
@@ -1001,26 +1022,26 @@ edition = "2021"
         panic!("expected Executed outcome");
     };
 
-    assert_eq!(output.planned_releases.len(), 2);
+    assert_eq!(output.planned_releases().len(), 2);
 
     let alpha_pkg = output
-        .planned_releases
+        .planned_releases()
         .iter()
-        .find(|r| r.name == "crate-alpha")
+        .find(|r| r.name() == "crate-alpha")
         .expect("crate-alpha should be in releases");
     assert_eq!(
-        alpha_pkg.new_version.to_string(),
+        alpha_pkg.new_version().to_string(),
         "1.0.0-beta.1",
         "alpha package should switch to beta.1 (tag change resets number)"
     );
 
     let beta_pkg = output
-        .planned_releases
+        .planned_releases()
         .iter()
-        .find(|r| r.name == "crate-beta")
+        .find(|r| r.name() == "crate-beta")
         .expect("crate-beta should be in releases");
     assert_eq!(
-        beta_pkg.new_version.to_string(),
+        beta_pkg.new_version().to_string(),
         "2.0.0-beta.2",
         "beta package already at beta.1 should increment to beta.2"
     );
@@ -1049,9 +1070,9 @@ edition = "2021"
         panic!("expected Executed outcome");
     };
 
-    assert_eq!(output.planned_releases.len(), 1);
+    assert_eq!(output.planned_releases().len(), 1);
     assert_eq!(
-        output.planned_releases[0].new_version.to_string(),
+        output.planned_releases()[0].new_version().to_string(),
         "1.0.0-beta.1",
         "switching from alpha to beta should reset prerelease number to 1"
     );
@@ -1086,9 +1107,9 @@ edition = "2021"
         panic!("expected Executed outcome");
     };
 
-    assert_eq!(output.planned_releases.len(), 1);
+    assert_eq!(output.planned_releases().len(), 1);
     assert_eq!(
-        output.planned_releases[0].new_version.to_string(),
+        output.planned_releases()[0].new_version().to_string(),
         "2.0.0-rc.1",
         "switching from beta to rc should reset prerelease number to 1"
     );
@@ -1111,9 +1132,9 @@ fn custom_prerelease_tag_works() {
         panic!("expected Executed outcome");
     };
 
-    assert_eq!(output.planned_releases.len(), 1);
+    assert_eq!(output.planned_releases().len(), 1);
     assert_eq!(
-        output.planned_releases[0].new_version.to_string(),
+        output.planned_releases()[0].new_version().to_string(),
         "1.1.0-nightly.1",
         "custom prerelease tag should be applied"
     );
@@ -1156,9 +1177,9 @@ edition = "2021"
         panic!("expected Executed outcome");
     };
 
-    assert_eq!(output.planned_releases.len(), 1);
+    assert_eq!(output.planned_releases().len(), 1);
     assert_eq!(
-        output.planned_releases[0].new_version.to_string(),
+        output.planned_releases()[0].new_version().to_string(),
         "1.0.1",
         "graduation should produce stable version"
     );
@@ -1228,7 +1249,7 @@ edition = "2021"
     };
 
     assert_eq!(
-        output.planned_releases[0].new_version.to_string(),
+        output.planned_releases()[0].new_version().to_string(),
         "2.0.0",
         "graduation should produce stable version"
     );
@@ -1345,14 +1366,15 @@ fn run_release_with_config(
         git_provider,
         release_state_io,
     );
-    let input = ReleaseInput::builder()
+    let input = ReleaseInputBuilder::default()
         .no_commit(true)
         .no_tags(true)
         .keep_changesets(true)
         .per_package_config(per_package_config)
         .global_prerelease(global_prerelease)
         .graduate_all(graduate_all)
-        .build();
+        .build()
+        .expect("all fields have defaults");
 
     operation.execute(dir.path(), &input)
 }
@@ -1375,14 +1397,14 @@ fn release_respects_prerelease_toml() {
     };
 
     let release_a = output
-        .planned_releases
+        .planned_releases()
         .iter()
-        .find(|r| r.name == "crate-a")
+        .find(|r| r.name() == "crate-a")
         .expect("crate-a should be in releases");
     assert!(
-        release_a.new_version.to_string().contains("alpha"),
+        release_a.new_version().to_string().contains("alpha"),
         "crate-a should have alpha prerelease tag, got: {}",
-        release_a.new_version
+        release_a.new_version()
     );
 }
 
@@ -1400,12 +1422,12 @@ fn release_respects_graduation_toml() {
     };
 
     let release_a = output
-        .planned_releases
+        .planned_releases()
         .iter()
-        .find(|r| r.name == "crate-a")
+        .find(|r| r.name() == "crate-a")
         .expect("crate-a should be in releases");
     assert_eq!(
-        release_a.new_version.to_string(),
+        release_a.new_version().to_string(),
         "1.0.0",
         "crate-a should graduate to 1.0.0"
     );
@@ -1420,10 +1442,10 @@ fn release_fails_on_cli_toml_prerelease_conflict() {
     let mut per_package_config = HashMap::new();
     per_package_config.insert(
         "crate-a".to_string(),
-        changeset_operations::operations::PackageReleaseConfig {
-            prerelease: Some(changeset_core::PrereleaseSpec::Beta),
-            graduate_zero: false,
-        },
+        PackageReleaseConfigBuilder::default()
+            .prerelease(Some(changeset_core::PrereleaseSpec::Beta))
+            .build()
+            .expect("all fields have defaults"),
     );
 
     let result = run_release_with_config(&dir, per_package_config, None, false);
@@ -1464,7 +1486,7 @@ fn release_updates_toml_after_graduation() {
     };
 
     assert_eq!(
-        output.planned_releases[0].new_version.to_string(),
+        output.planned_releases()[0].new_version().to_string(),
         "1.0.0",
         "crate-a should graduate to 1.0.0"
     );
@@ -1507,12 +1529,12 @@ edition = "2021"
     };
 
     assert!(
-        output.planned_releases[0]
-            .new_version
+        output.planned_releases()[0]
+            .new_version()
             .to_string()
             .contains("alpha.2"),
         "should bump prerelease: {}",
-        output.planned_releases[0].new_version
+        output.planned_releases()[0].new_version()
     );
 
     let after_toml = read_prerelease_toml(&dir);
@@ -1570,7 +1592,7 @@ edition = "2021"
     };
 
     assert_eq!(
-        output.planned_releases[0].new_version.to_string(),
+        output.planned_releases()[0].new_version().to_string(),
         "1.0.0",
         "single package should graduate to 1.0.0 without specifying name"
     );
@@ -1600,10 +1622,10 @@ edition = "2021"
     let mut per_package_config = HashMap::new();
     per_package_config.insert(
         "my-crate".to_string(),
-        changeset_operations::operations::PackageReleaseConfig {
-            prerelease: None,
-            graduate_zero: true,
-        },
+        PackageReleaseConfigBuilder::default()
+            .graduate_zero(true)
+            .build()
+            .expect("all fields have defaults"),
     );
 
     let result = run_release_with_config(&dir, per_package_config, None, false);
@@ -1628,10 +1650,10 @@ fn cannot_graduate_stable_version() {
     let mut per_package_config = HashMap::new();
     per_package_config.insert(
         "crate-a".to_string(),
-        changeset_operations::operations::PackageReleaseConfig {
-            prerelease: None,
-            graduate_zero: true,
-        },
+        PackageReleaseConfigBuilder::default()
+            .graduate_zero(true)
+            .build()
+            .expect("all fields have defaults"),
     );
 
     let result = run_release_with_config(&dir, per_package_config, None, false);
@@ -1668,13 +1690,13 @@ fn graduation_plus_prerelease_together() {
     };
 
     let release_a = output
-        .planned_releases
+        .planned_releases()
         .iter()
-        .find(|r| r.name == "crate-a")
+        .find(|r| r.name() == "crate-a")
         .expect("crate-a should be released");
 
     assert_eq!(
-        release_a.new_version.to_string(),
+        release_a.new_version().to_string(),
         "1.0.0-rc.1",
         "graduation + prerelease should produce 1.0.0-rc.1"
     );
@@ -1727,8 +1749,14 @@ edition = "2021"
         panic!("expected Executed outcome");
     };
 
-    let release_a = output.planned_releases.iter().find(|r| r.name == "crate-a");
-    let release_b = output.planned_releases.iter().find(|r| r.name == "crate-b");
+    let release_a = output
+        .planned_releases()
+        .iter()
+        .find(|r| r.name() == "crate-a");
+    let release_b = output
+        .planned_releases()
+        .iter()
+        .find(|r| r.name() == "crate-b");
 
     assert!(release_a.is_some(), "crate-a should be released");
     assert!(release_b.is_some(), "crate-b should be released");
@@ -1753,19 +1781,21 @@ fn release_preserves_unrelated_graduation_state() {
         panic!("expected Executed outcome");
     };
 
-    let released_names: Vec<_> = output.planned_releases.iter().map(|r| &r.name).collect();
     assert!(
-        released_names.contains(&&"crate-a".to_string()),
+        output
+            .planned_releases()
+            .iter()
+            .any(|r| r.name() == "crate-a"),
         "crate-a should be released"
     );
 
     let release_a = output
-        .planned_releases
+        .planned_releases()
         .iter()
-        .find(|r| r.name == "crate-a")
+        .find(|r| r.name() == "crate-a")
         .expect("crate-a should be in releases");
     assert_eq!(
-        release_a.new_version.to_string(),
+        release_a.new_version().to_string(),
         "1.0.0",
         "crate-a should graduate"
     );
@@ -1795,10 +1825,10 @@ fn validator_detects_unknown_package_in_prerelease() {
     let mut per_package_config = HashMap::new();
     per_package_config.insert(
         "nonexistent-crate".to_string(),
-        changeset_operations::operations::PackageReleaseConfig {
-            prerelease: Some(changeset_core::PrereleaseSpec::Alpha),
-            graduate_zero: false,
-        },
+        PackageReleaseConfigBuilder::default()
+            .prerelease(Some(changeset_core::PrereleaseSpec::Alpha))
+            .build()
+            .expect("all fields have defaults"),
     );
 
     let result = run_release_with_config(&dir, per_package_config, None, false);
@@ -1820,10 +1850,10 @@ fn validator_detects_unknown_package_in_graduate() {
     let mut per_package_config = HashMap::new();
     per_package_config.insert(
         "nonexistent-crate".to_string(),
-        changeset_operations::operations::PackageReleaseConfig {
-            prerelease: None,
-            graduate_zero: true,
-        },
+        PackageReleaseConfigBuilder::default()
+            .graduate_zero(true)
+            .build()
+            .expect("all fields have defaults"),
     );
 
     let result = run_release_with_config(&dir, per_package_config, None, false);
@@ -1850,10 +1880,10 @@ fn cli_prerelease_matching_toml_succeeds() {
     let mut per_package_config = HashMap::new();
     per_package_config.insert(
         "crate-a".to_string(),
-        changeset_operations::operations::PackageReleaseConfig {
-            prerelease: Some(changeset_core::PrereleaseSpec::Alpha),
-            graduate_zero: false,
-        },
+        PackageReleaseConfigBuilder::default()
+            .prerelease(Some(changeset_core::PrereleaseSpec::Alpha))
+            .build()
+            .expect("all fields have defaults"),
     );
 
     let result = run_release_with_config(&dir, per_package_config, None, false)
@@ -1864,14 +1894,14 @@ fn cli_prerelease_matching_toml_succeeds() {
     };
 
     let release_a = output
-        .planned_releases
+        .planned_releases()
         .iter()
-        .find(|r| r.name == "crate-a")
+        .find(|r| r.name() == "crate-a")
         .expect("crate-a should be in releases");
     assert!(
-        release_a.new_version.to_string().contains("alpha"),
+        release_a.new_version().to_string().contains("alpha"),
         "should have alpha tag: {}",
-        release_a.new_version
+        release_a.new_version()
     );
 }
 
@@ -1890,25 +1920,25 @@ fn toml_prerelease_only_affects_specified_packages() {
     };
 
     let release_a = output
-        .planned_releases
+        .planned_releases()
         .iter()
-        .find(|r| r.name == "crate-a")
+        .find(|r| r.name() == "crate-a")
         .expect("crate-a should be in releases");
     let release_b = output
-        .planned_releases
+        .planned_releases()
         .iter()
-        .find(|r| r.name == "crate-b")
+        .find(|r| r.name() == "crate-b")
         .expect("crate-b should be in releases");
 
     assert!(
-        release_a.new_version.to_string().contains("alpha"),
+        release_a.new_version().to_string().contains("alpha"),
         "crate-a should have alpha tag: {}",
-        release_a.new_version
+        release_a.new_version()
     );
     assert!(
-        !release_b.new_version.to_string().contains("alpha"),
+        !release_b.new_version().to_string().contains("alpha"),
         "crate-b should NOT have alpha tag: {}",
-        release_b.new_version
+        release_b.new_version()
     );
 }
 
@@ -1930,12 +1960,12 @@ fn global_prerelease_applies_to_all_packages() {
         panic!("expected Executed outcome");
     };
 
-    for release in &output.planned_releases {
+    for release in output.planned_releases() {
         assert!(
-            release.new_version.to_string().contains("beta"),
+            release.new_version().to_string().contains("beta"),
             "{} should have beta tag: {}",
-            release.name,
-            release.new_version
+            release.name(),
+            release.new_version()
         );
     }
 }
@@ -1959,25 +1989,25 @@ fn per_package_prerelease_different_tags() {
     };
 
     let release_a = output
-        .planned_releases
+        .planned_releases()
         .iter()
-        .find(|r| r.name == "crate-a")
+        .find(|r| r.name() == "crate-a")
         .expect("crate-a should be in releases");
     let release_b = output
-        .planned_releases
+        .planned_releases()
         .iter()
-        .find(|r| r.name == "crate-b")
+        .find(|r| r.name() == "crate-b")
         .expect("crate-b should be in releases");
 
     assert!(
-        release_a.new_version.to_string().contains("alpha"),
+        release_a.new_version().to_string().contains("alpha"),
         "crate-a should have alpha tag: {}",
-        release_a.new_version
+        release_a.new_version()
     );
     assert!(
-        release_b.new_version.to_string().contains("beta"),
+        release_b.new_version().to_string().contains("beta"),
         "crate-b should have beta tag: {}",
-        release_b.new_version
+        release_b.new_version()
     );
 }
 
@@ -2000,25 +2030,25 @@ fn graduation_toml_only_affects_specified_packages() {
     };
 
     let release_a = output
-        .planned_releases
+        .planned_releases()
         .iter()
-        .find(|r| r.name == "crate-a")
+        .find(|r| r.name() == "crate-a")
         .expect("crate-a should be in releases");
     let release_b = output
-        .planned_releases
+        .planned_releases()
         .iter()
-        .find(|r| r.name == "crate-b")
+        .find(|r| r.name() == "crate-b")
         .expect("crate-b should be in releases");
 
     assert_eq!(
-        release_a.new_version.to_string(),
+        release_a.new_version().to_string(),
         "1.0.0",
         "crate-a should graduate to 1.0.0"
     );
     assert!(
-        release_b.new_version.major == 0,
+        release_b.new_version().major == 0,
         "crate-b should NOT graduate, got: {}",
-        release_b.new_version
+        release_b.new_version()
     );
 }
 
@@ -2042,15 +2072,15 @@ fn manage_state_then_release_workflow() {
     };
 
     let release_a = output
-        .planned_releases
+        .planned_releases()
         .iter()
-        .find(|r| r.name == "crate-a")
+        .find(|r| r.name() == "crate-a")
         .expect("crate-a should be released");
 
     assert!(
-        release_a.new_version.to_string().contains("alpha"),
+        release_a.new_version().to_string().contains("alpha"),
         "crate-a should have alpha tag from TOML: {}",
-        release_a.new_version
+        release_a.new_version()
     );
 }
 
@@ -2079,13 +2109,13 @@ fn complete_release_cycle_with_state_cleanup() {
     };
 
     let release_a = output
-        .planned_releases
+        .planned_releases()
         .iter()
-        .find(|r| r.name == "crate-a")
+        .find(|r| r.name() == "crate-a")
         .expect("crate-a should be released");
 
     assert_eq!(
-        release_a.new_version.to_string(),
+        release_a.new_version().to_string(),
         "1.0.0",
         "crate-a should graduate to 1.0.0"
     );
@@ -2132,17 +2162,17 @@ fn release_fails_with_multiple_conflicting_configs() {
     let mut per_package_config = HashMap::new();
     per_package_config.insert(
         "crate-a".to_string(),
-        changeset_operations::operations::PackageReleaseConfig {
-            prerelease: Some(changeset_core::PrereleaseSpec::Beta),
-            graduate_zero: false,
-        },
+        PackageReleaseConfigBuilder::default()
+            .prerelease(Some(changeset_core::PrereleaseSpec::Beta))
+            .build()
+            .expect("all fields have defaults"),
     );
     per_package_config.insert(
         "crate-b".to_string(),
-        changeset_operations::operations::PackageReleaseConfig {
-            prerelease: Some(changeset_core::PrereleaseSpec::Alpha),
-            graduate_zero: false,
-        },
+        PackageReleaseConfigBuilder::default()
+            .prerelease(Some(changeset_core::PrereleaseSpec::Alpha))
+            .build()
+            .expect("all fields have defaults"),
     );
 
     let result = run_release_with_config(&dir, per_package_config, None, false);
@@ -2227,25 +2257,25 @@ fn release_with_partial_prerelease_config() {
     };
 
     let release_a = output
-        .planned_releases
+        .planned_releases()
         .iter()
-        .find(|r| r.name == "crate-a")
+        .find(|r| r.name() == "crate-a")
         .expect("crate-a should be released");
     let release_b = output
-        .planned_releases
+        .planned_releases()
         .iter()
-        .find(|r| r.name == "crate-b")
+        .find(|r| r.name() == "crate-b")
         .expect("crate-b should be released");
 
     assert!(
-        release_a.new_version.to_string().contains("alpha"),
+        release_a.new_version().to_string().contains("alpha"),
         "crate-a should have alpha prerelease: {}",
-        release_a.new_version
+        release_a.new_version()
     );
     assert!(
-        !release_b.new_version.to_string().contains('-'),
+        !release_b.new_version().to_string().contains('-'),
         "crate-b should be stable: {}",
-        release_b.new_version
+        release_b.new_version()
     );
 }
 
@@ -2263,23 +2293,23 @@ fn release_with_zero_versions_and_different_bumps() {
     };
 
     let release_a = output
-        .planned_releases
+        .planned_releases()
         .iter()
-        .find(|r| r.name == "crate-a")
+        .find(|r| r.name() == "crate-a")
         .expect("crate-a should be released");
     let release_b = output
-        .planned_releases
+        .planned_releases()
         .iter()
-        .find(|r| r.name == "crate-b")
+        .find(|r| r.name() == "crate-b")
         .expect("crate-b should be released");
 
     assert_eq!(
-        release_a.new_version.to_string(),
+        release_a.new_version().to_string(),
         "0.6.0",
         "major bump on 0.x should become minor bump (EffectiveMinor)"
     );
     assert_eq!(
-        release_b.new_version.to_string(),
+        release_b.new_version().to_string(),
         "0.3.1",
         "minor bump on 0.x should become patch bump (EffectiveMinor)"
     );
@@ -2322,13 +2352,13 @@ fn graduation_with_prerelease_toml_produces_prerelease_stable() {
     };
 
     let release_a = output
-        .planned_releases
+        .planned_releases()
         .iter()
-        .find(|r| r.name == "crate-a")
+        .find(|r| r.name() == "crate-a")
         .expect("crate-a should be in releases");
 
     assert_eq!(
-        release_a.new_version.to_string(),
+        release_a.new_version().to_string(),
         "1.0.0-alpha.1",
         "graduation + prerelease should produce 1.0.0-alpha.1"
     );
@@ -2422,40 +2452,40 @@ fn release_with_mixed_config_from_all_sources() {
     };
 
     assert_eq!(
-        output.planned_releases.len(),
+        output.planned_releases().len(),
         3,
         "all three crates should be released"
     );
 
     let release_a = output
-        .planned_releases
+        .planned_releases()
         .iter()
-        .find(|r| r.name == "crate-a")
+        .find(|r| r.name() == "crate-a")
         .expect("crate-a should be in releases");
     assert!(
-        release_a.new_version.to_string().contains("alpha"),
+        release_a.new_version().to_string().contains("alpha"),
         "crate-a should have alpha prerelease: {}",
-        release_a.new_version
+        release_a.new_version()
     );
 
     let release_b = output
-        .planned_releases
+        .planned_releases()
         .iter()
-        .find(|r| r.name == "crate-b")
+        .find(|r| r.name() == "crate-b")
         .expect("crate-b should be in releases");
     assert_eq!(
-        release_b.new_version.to_string(),
+        release_b.new_version().to_string(),
         "1.0.0",
         "crate-b should graduate to 1.0.0"
     );
 
     let release_c = output
-        .planned_releases
+        .planned_releases()
         .iter()
-        .find(|r| r.name == "crate-c")
+        .find(|r| r.name() == "crate-c")
         .expect("crate-c should be in releases");
     assert_eq!(
-        release_c.new_version.to_string(),
+        release_c.new_version().to_string(),
         "2.1.0",
         "crate-c should get normal minor bump"
     );
@@ -2501,17 +2531,17 @@ fn manage_remove_then_release_produces_normal_version() {
     };
 
     let release_a = output
-        .planned_releases
+        .planned_releases()
         .iter()
-        .find(|r| r.name == "crate-a")
+        .find(|r| r.name() == "crate-a")
         .expect("crate-a should be in releases");
     assert!(
-        !release_a.new_version.to_string().contains('-'),
+        !release_a.new_version().to_string().contains('-'),
         "crate-a should get normal release (no prerelease tag): {}",
-        release_a.new_version
+        release_a.new_version()
     );
     assert_eq!(
-        release_a.new_version.to_string(),
+        release_a.new_version().to_string(),
         "1.1.0",
         "crate-a should get normal minor bump"
     );

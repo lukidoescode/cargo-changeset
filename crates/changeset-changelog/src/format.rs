@@ -1,5 +1,4 @@
 use std::collections::BTreeMap;
-use std::fmt::Write;
 
 use chrono::NaiveDate;
 use semver::Version;
@@ -7,7 +6,6 @@ use semver::Version;
 use changeset_core::ChangeCategory;
 
 use crate::entry::{ChangelogEntry, VersionRelease};
-use crate::forge::RepositoryInfo;
 
 const CHANGELOG_HEADER: &str = r"# Changelog
 
@@ -18,12 +16,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ";
 
 #[must_use]
-pub fn new_changelog() -> String {
+pub(crate) fn new_changelog() -> String {
     CHANGELOG_HEADER.to_string()
 }
 
 #[must_use]
-pub fn format_entries(entries: &[ChangelogEntry]) -> String {
+pub(crate) fn format_entries(entries: &[ChangelogEntry]) -> String {
     if entries.is_empty() {
         return String::new();
     }
@@ -31,7 +29,7 @@ pub fn format_entries(entries: &[ChangelogEntry]) -> String {
     let mut by_category: BTreeMap<ChangeCategory, Vec<&ChangelogEntry>> = BTreeMap::new();
 
     for entry in entries {
-        by_category.entry(entry.category).or_default().push(entry);
+        by_category.entry(entry.category()).or_default().push(entry);
     }
 
     let mut output = String::new();
@@ -43,12 +41,12 @@ pub fn format_entries(entries: &[ChangelogEntry]) -> String {
 
         for entry in category_entries {
             output.push_str("\n- ");
-            if let Some(ref package) = entry.package {
+            if let Some(package) = entry.package() {
                 output.push_str("**");
                 output.push_str(package);
                 output.push_str("**: ");
             }
-            output.push_str(&entry.description);
+            output.push_str(entry.description());
         }
         output.push('\n');
     }
@@ -57,32 +55,14 @@ pub fn format_entries(entries: &[ChangelogEntry]) -> String {
 }
 
 #[must_use]
-pub fn format_version_header(version: &Version, date: NaiveDate) -> String {
+pub(crate) fn format_version_header(version: &Version, date: NaiveDate) -> String {
     format!("## [{version}] - {date}")
 }
 
 #[must_use]
-pub fn format_version_release(release: &VersionRelease) -> String {
-    let mut output = format_version_header(&release.version, release.date);
-    output.push_str(&format_entries(&release.entries));
-    output
-}
-
-#[must_use]
-pub fn format_comparison_links(
-    versions: &[(Version, Option<&str>)],
-    repo_info: &RepositoryInfo,
-) -> String {
-    let mut output = String::new();
-
-    for (version, previous) in versions {
-        let target_tag = format!("v{version}");
-        let base_tag = previous.map_or_else(|| "HEAD".to_string(), ToString::to_string);
-        if let Some(url) = repo_info.comparison_url(&base_tag, &target_tag) {
-            let _ = writeln!(output, "[{version}]: {url}");
-        }
-    }
-
+pub(crate) fn format_version_release(release: &VersionRelease) -> String {
+    let mut output = format_version_header(release.version(), release.date());
+    output.push_str(&format_entries(release.entries()));
     output
 }
 

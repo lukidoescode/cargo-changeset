@@ -13,7 +13,7 @@ pub(crate) mod steps;
 mod types;
 mod validator;
 
-pub use crate::types::{PackageReleaseConfig, PackageVersion};
+pub use crate::types::{PackageReleaseConfig, PackageReleaseConfigBuilder, PackageVersion};
 pub use config_builder::ValidatedReleaseConfig;
 pub use operation::ReleaseOperation;
 pub use types::{

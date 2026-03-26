@@ -350,7 +350,7 @@ pub(crate) struct ManageGraduationArgs {
 }
 
 pub(crate) struct ExecuteResult {
-    pub quiet: bool,
+    pub(crate) quiet: bool,
 }
 
 impl Commands {

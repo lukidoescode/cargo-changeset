@@ -11,19 +11,24 @@ pub(super) fn is_any_prerelease_configured(
     per_package_config: &HashMap<String, PackageReleaseConfig>,
 ) -> bool {
     input.global_prerelease().is_some()
-        || per_package_config.values().any(|c| c.prerelease.is_some())
+        || per_package_config
+            .values()
+            .any(|c| c.prerelease().is_some())
 }
 
 pub(super) fn is_prerelease_graduation(
     packages: &[PackageInfo],
     per_package_config: &HashMap<String, PackageReleaseConfig>,
 ) -> bool {
-    if per_package_config.values().any(|c| c.prerelease.is_some()) {
+    if per_package_config
+        .values()
+        .any(|c| c.prerelease().is_some())
+    {
         return false;
     }
     packages
         .iter()
-        .any(|p| changeset_version::is_prerelease(&p.version))
+        .any(|p| changeset_version::is_prerelease(p.version()))
 }
 
 pub(super) fn is_zero_graduation(
@@ -31,14 +36,16 @@ pub(super) fn is_zero_graduation(
     input: &ReleaseInput,
     per_package_config: &HashMap<String, PackageReleaseConfig>,
 ) -> bool {
-    let has_graduation =
-        input.graduate_all() || per_package_config.values().any(|c| c.graduate_zero);
+    let has_graduation = input.graduate_all()
+        || per_package_config
+            .values()
+            .any(PackageReleaseConfig::graduate_zero);
     if !has_graduation {
         return false;
     }
     packages
         .iter()
-        .any(|p| changeset_version::is_zero_version(&p.version))
+        .any(|p| changeset_version::is_zero_version(p.version()))
 }
 
 pub(super) enum EarlyReturnDecision {
@@ -66,12 +73,12 @@ pub(super) fn collect_unchanged_packages(
     packages: &[PackageInfo],
     planned_releases: &[PackageVersion],
 ) -> Vec<String> {
-    let released: HashSet<&str> = planned_releases.iter().map(|r| r.name.as_str()).collect();
+    let released: HashSet<&str> = planned_releases.iter().map(|r| r.name().as_str()).collect();
 
     packages
         .iter()
-        .filter(|p| !released.contains(p.name.as_str()))
-        .map(|p| p.name.clone())
+        .filter(|p| !released.contains(p.name().as_str()))
+        .map(|p| p.name().clone())
         .collect()
 }
 
@@ -79,14 +86,17 @@ pub(super) fn collect_unchanged_packages(
 mod tests {
     use super::*;
     use crate::mocks::make_package;
+    use crate::operations::ReleaseInputBuilder;
+    use crate::types::PackageReleaseConfigBuilder;
     use changeset_core::{BumpType, PrereleaseSpec};
 
     fn default_input() -> ReleaseInput {
-        ReleaseInput::builder()
+        ReleaseInputBuilder::default()
             .no_commit(true)
             .no_tags(true)
             .keep_changesets(true)
             .build()
+            .expect("all fields have defaults")
     }
 
     mod is_prerelease_graduation_tests {
@@ -106,10 +116,10 @@ mod tests {
             let mut config = HashMap::new();
             config.insert(
                 "crate-a".to_string(),
-                PackageReleaseConfig {
-                    prerelease: Some(PrereleaseSpec::Alpha),
-                    graduate_zero: false,
-                },
+                PackageReleaseConfigBuilder::default()
+                    .prerelease(Some(PrereleaseSpec::Alpha))
+                    .build()
+                    .expect("all fields have defaults"),
             );
 
             assert!(!is_prerelease_graduation(&packages, &config));
@@ -135,12 +145,13 @@ mod tests {
         #[test]
         fn returns_true_when_graduate_all_and_zero_package() {
             let packages = vec![make_package("crate-a", "0.5.0")];
-            let input = ReleaseInput::builder()
+            let input = ReleaseInputBuilder::default()
                 .no_commit(true)
                 .no_tags(true)
                 .keep_changesets(true)
                 .graduate_all(true)
-                .build();
+                .build()
+                .expect("all fields have defaults");
 
             assert!(is_zero_graduation(&packages, &input, &HashMap::new()));
         }
@@ -156,12 +167,13 @@ mod tests {
         #[test]
         fn returns_false_when_no_zero_version_packages() {
             let packages = vec![make_package("crate-a", "1.0.0")];
-            let input = ReleaseInput::builder()
+            let input = ReleaseInputBuilder::default()
                 .no_commit(true)
                 .no_tags(true)
                 .keep_changesets(true)
                 .graduate_all(true)
-                .build();
+                .build()
+                .expect("all fields have defaults");
 
             assert!(!is_zero_graduation(&packages, &input, &HashMap::new()));
         }
@@ -173,10 +185,10 @@ mod tests {
             let mut config = HashMap::new();
             config.insert(
                 "crate-a".to_string(),
-                PackageReleaseConfig {
-                    prerelease: None,
-                    graduate_zero: true,
-                },
+                PackageReleaseConfigBuilder::default()
+                    .graduate_zero(true)
+                    .build()
+                    .expect("all fields have defaults"),
             );
 
             assert!(is_zero_graduation(&packages, &input, &config));
@@ -188,12 +200,13 @@ mod tests {
 
         #[test]
         fn returns_true_when_global_prerelease_set() {
-            let input = ReleaseInput::builder()
+            let input = ReleaseInputBuilder::default()
                 .no_commit(true)
                 .no_tags(true)
                 .keep_changesets(true)
                 .global_prerelease(Some(PrereleaseSpec::Alpha))
-                .build();
+                .build()
+                .expect("all fields have defaults");
 
             assert!(is_any_prerelease_configured(&input, &HashMap::new()));
         }
@@ -204,10 +217,10 @@ mod tests {
             let mut config = HashMap::new();
             config.insert(
                 "crate-a".to_string(),
-                PackageReleaseConfig {
-                    prerelease: Some(PrereleaseSpec::Beta),
-                    graduate_zero: false,
-                },
+                PackageReleaseConfigBuilder::default()
+                    .prerelease(Some(PrereleaseSpec::Beta))
+                    .build()
+                    .expect("all fields have defaults"),
             );
 
             assert!(is_any_prerelease_configured(&input, &config));
@@ -257,12 +270,13 @@ mod tests {
 
         #[test]
         fn returns_force_required_when_prerelease_without_force() {
-            let input = ReleaseInput::builder()
+            let input = ReleaseInputBuilder::default()
                 .no_commit(true)
                 .no_tags(true)
                 .keep_changesets(true)
                 .global_prerelease(Some(PrereleaseSpec::Alpha))
-                .build();
+                .build()
+                .expect("all fields have defaults");
 
             assert!(matches!(
                 check_early_return(&[], false, &input, &HashMap::new()),
@@ -272,13 +286,14 @@ mod tests {
 
         #[test]
         fn returns_no_changesets_when_prerelease_with_force() {
-            let input = ReleaseInput::builder()
+            let input = ReleaseInputBuilder::default()
                 .no_commit(true)
                 .no_tags(true)
                 .keep_changesets(true)
                 .force(true)
                 .global_prerelease(Some(PrereleaseSpec::Alpha))
-                .build();
+                .build()
+                .expect("all fields have defaults");
 
             assert!(matches!(
                 check_early_return(&[], false, &input, &HashMap::new()),
@@ -297,13 +312,13 @@ mod tests {
                 make_package("crate-b", "2.0.0"),
                 make_package("crate-c", "3.0.0"),
             ];
-            let releases = vec![PackageVersion {
-                name: "crate-a".to_string(),
-                current_version: "1.0.0".parse().expect("valid"),
-                new_version: "1.0.1".parse().expect("valid"),
-                bump_type: BumpType::Patch,
-                auto_bumped: false,
-            }];
+            let releases = vec![PackageVersion::new(
+                "crate-a".to_string(),
+                "1.0.0".parse().expect("valid"),
+                "1.0.1".parse().expect("valid"),
+                BumpType::Patch,
+                false,
+            )];
 
             let unchanged = collect_unchanged_packages(&packages, &releases);
 
@@ -313,13 +328,13 @@ mod tests {
         #[test]
         fn returns_empty_when_all_released() {
             let packages = vec![make_package("crate-a", "1.0.0")];
-            let releases = vec![PackageVersion {
-                name: "crate-a".to_string(),
-                current_version: "1.0.0".parse().expect("valid"),
-                new_version: "1.0.1".parse().expect("valid"),
-                bump_type: BumpType::Patch,
-                auto_bumped: false,
-            }];
+            let releases = vec![PackageVersion::new(
+                "crate-a".to_string(),
+                "1.0.0".parse().expect("valid"),
+                "1.0.1".parse().expect("valid"),
+                BumpType::Patch,
+                false,
+            )];
 
             let unchanged = collect_unchanged_packages(&packages, &releases);
 

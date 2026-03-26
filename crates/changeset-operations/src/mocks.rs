@@ -109,11 +109,11 @@ impl MockProjectProvider {
         let project = CargoProject::new(
             root.clone(),
             ProjectKind::SinglePackage,
-            vec![PackageInfo {
-                name: name.to_string(),
-                version: version.parse().expect("valid version"),
-                path: root.clone(),
-            }],
+            vec![PackageInfo::new(
+                name.to_string(),
+                version.parse().expect("valid version"),
+                root.clone(),
+            )],
         );
         Self::new(project)
     }
@@ -126,10 +126,12 @@ impl MockProjectProvider {
         let root = PathBuf::from("/mock/workspace");
         let pkg_infos: Vec<PackageInfo> = packages
             .into_iter()
-            .map(|(name, version)| PackageInfo {
-                name: name.to_string(),
-                version: version.parse().expect("valid version"),
-                path: root.join("crates").join(name),
+            .map(|(name, version)| {
+                PackageInfo::new(
+                    name.to_string(),
+                    version.parse().expect("valid version"),
+                    root.join("crates").join(name),
+                )
             })
             .collect();
 
@@ -165,7 +167,7 @@ impl DependencyGraphProvider for MockProjectProvider {
             .project
             .packages()
             .iter()
-            .map(|p| p.name.clone())
+            .map(|p| p.name().clone())
             .collect();
         Ok(WorkspaceDependencyGraph::from_edges(
             member_names,
@@ -217,7 +219,7 @@ impl MockChangesetReader {
         mut changeset: Changeset,
         version: String,
     ) -> Self {
-        changeset.consumed_for_prerelease = Some(version);
+        changeset.set_consumed_for_prerelease(Some(version));
         self.listed_files.push(path.clone());
         self.changesets
             .lock()
@@ -232,7 +234,7 @@ impl MockChangesetReader {
             .lock()
             .expect("lock poisoned")
             .get(path)
-            .and_then(|c| c.consumed_for_prerelease.clone())
+            .and_then(|c| c.consumed_for_prerelease().cloned())
     }
 }
 
@@ -263,7 +265,7 @@ impl ChangesetReader for MockChangesetReader {
             .filter(|p| {
                 changesets
                     .get(*p)
-                    .is_some_and(|c| c.consumed_for_prerelease.is_none())
+                    .is_some_and(|c| c.consumed_for_prerelease().is_none())
             })
             .cloned()
             .collect())
@@ -277,7 +279,7 @@ impl ChangesetReader for MockChangesetReader {
             .filter(|p| {
                 changesets
                     .get(*p)
-                    .is_some_and(|c| c.consumed_for_prerelease.is_some())
+                    .is_some_and(|c| c.consumed_for_prerelease().is_some())
             })
             .cloned()
             .collect())
@@ -310,7 +312,7 @@ impl ChangesetWriter for MockChangesetReader {
         let mut changesets = self.changesets.lock().expect("lock poisoned");
         for path in paths {
             if let Some(changeset) = changesets.get_mut(*path) {
-                changeset.consumed_for_prerelease = Some(version.to_string());
+                changeset.set_consumed_for_prerelease(Some(version.to_string()));
             }
         }
         Ok(())
@@ -320,7 +322,7 @@ impl ChangesetWriter for MockChangesetReader {
         let mut changesets = self.changesets.lock().expect("lock poisoned");
         for path in paths {
             if let Some(changeset) = changesets.get_mut(*path) {
-                changeset.consumed_for_prerelease = None;
+                changeset.set_consumed_for_prerelease(None);
             }
         }
         Ok(())
@@ -638,10 +640,10 @@ impl GitCommitProvider for MockGitProvider {
             )));
         }
         state.commits.push(message.to_string());
-        Ok(CommitInfo {
-            sha: "abc123def456".to_string(),
-            message: message.to_string(),
-        })
+        Ok(CommitInfo::new(
+            "abc123def456".to_string(),
+            message.to_string(),
+        ))
     }
 
     fn reset_to_parent(&self, _project_root: &Path) -> Result<()> {
@@ -671,10 +673,10 @@ impl GitTagProvider for MockGitProvider {
         state
             .tags_created
             .push((tag_name.to_string(), message.to_string()));
-        Ok(TagInfo {
-            name: tag_name.to_string(),
-            target_sha: "abc123def456".to_string(),
-        })
+        Ok(TagInfo::new(
+            tag_name.to_string(),
+            "abc123def456".to_string(),
+        ))
     }
 
     fn delete_tag(&self, _project_root: &Path, tag_name: &str) -> Result<bool> {
@@ -805,25 +807,23 @@ impl InteractionProvider for MockInteractionProvider {
 /// Panics if the version string is not valid semver.
 #[must_use]
 pub fn make_package(name: &str, version: &str) -> PackageInfo {
-    PackageInfo {
-        name: name.to_string(),
-        version: version.parse().expect("valid version"),
-        path: PathBuf::from(format!("/mock/crates/{name}")),
-    }
+    PackageInfo::new(
+        name.to_string(),
+        version.parse().expect("valid version"),
+        PathBuf::from(format!("/mock/crates/{name}")),
+    )
 }
 
 #[must_use]
 pub fn make_changeset(package_name: &str, bump: BumpType, summary: &str) -> Changeset {
-    Changeset {
-        summary: summary.to_string(),
-        releases: vec![changeset_core::PackageRelease {
-            name: package_name.to_string(),
-            bump_type: bump,
-        }],
-        category: ChangeCategory::Changed,
-        consumed_for_prerelease: None,
-        graduate: false,
-    }
+    Changeset::new(
+        summary.to_string(),
+        vec![changeset_core::PackageRelease::new(
+            package_name.to_string(),
+            bump,
+        )],
+        ChangeCategory::Changed,
+    )
 }
 
 struct MockManifestState {
@@ -1159,10 +1159,10 @@ impl ChangelogWriter for MockChangelogWriter {
             .expect("lock poisoned")
             .push((changelog_path.to_path_buf(), release.clone()));
 
-        Ok(ChangelogWriteResult {
-            path: changelog_path.to_path_buf(),
+        Ok(ChangelogWriteResult::new(
+            changelog_path.to_path_buf(),
             created,
-        })
+        ))
     }
 
     fn changelog_exists(&self, path: &Path) -> bool {

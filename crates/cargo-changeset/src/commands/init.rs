@@ -3,7 +3,7 @@ use std::path::Path;
 use changeset_git::DEFAULT_BASE_BRANCH;
 use changeset_manifest::InitConfig;
 use changeset_operations::operations::{
-    InitInput, InitOperation, InitPlan, build_config_from_input,
+    InitInput, InitInputBuilder, InitOperation, InitPlan, build_config_from_input,
 };
 use changeset_operations::providers::{FileSystemManifestWriter, FileSystemProjectProvider};
 use changeset_operations::traits::{
@@ -13,10 +13,9 @@ use changeset_operations::traits::{
 use changeset_project::ProjectKind;
 
 use crate::commands::InitArgs;
+use crate::environment::is_interactive;
 use crate::error::Result;
-use crate::interaction::{
-    TerminalInitInteractionProvider, confirm_proceed, is_terminal_interactive,
-};
+use crate::interaction::{TerminalInitInteractionProvider, confirm_proceed};
 
 pub(crate) fn run(args: InitArgs, start_path: &Path) -> Result<()> {
     let project_provider = FileSystemProjectProvider::new();
@@ -30,9 +29,9 @@ pub(crate) fn run(args: InitArgs, start_path: &Path) -> Result<()> {
         is_single_package: *project.kind() == ProjectKind::SinglePackage,
     };
 
-    let is_interactive = !args.no_interactive && is_terminal_interactive();
+    let interactive_mode = !args.no_interactive && is_interactive();
 
-    let provider = if is_interactive && !args.defaults {
+    let provider = if interactive_mode && !args.defaults {
         Some(&interaction_provider)
     } else {
         None
@@ -53,17 +52,17 @@ pub(crate) fn run(args: InitArgs, start_path: &Path) -> Result<()> {
         ProjectKind::SinglePackage => changeset_manifest::MetadataSection::Package,
     };
 
-    let plan = InitPlan {
-        changeset_dir: full_changeset_dir,
+    let plan = InitPlan::new(
+        full_changeset_dir,
         dir_exists,
         gitkeep_exists,
         metadata_section,
         config,
-    };
+    );
 
     print_summary(&plan);
 
-    let skip_confirmation = args.defaults || args.no_interactive || !is_terminal_interactive();
+    let skip_confirmation = args.defaults || args.no_interactive || !interactive_mode;
     if !skip_confirmation && !confirm_proceed("Proceed with initialization?")? {
         println!("Aborted.");
         return Ok(());
@@ -76,24 +75,24 @@ pub(crate) fn run(args: InitArgs, start_path: &Path) -> Result<()> {
     let output = operation.execute_plan(start_path, &plan)?;
 
     println!();
-    if output.created_dir {
+    if output.created_dir() {
         println!(
             "Created changeset directory at '{}'",
-            output.changeset_dir.display()
+            output.changeset_dir().display()
         );
     } else {
         println!(
             "Changeset directory already exists at '{}'",
-            output.changeset_dir.display()
+            output.changeset_dir().display()
         );
     }
 
-    if output.created_gitkeep {
+    if output.created_gitkeep() {
         println!("Created .gitkeep file");
     }
 
-    if output.wrote_config {
-        if let Some(section) = output.config_location {
+    if output.wrote_config() {
+        if let Some(section) = output.config_location() {
             println!("Wrote configuration to {section} in Cargo.toml");
         }
     }
@@ -133,26 +132,29 @@ fn print_summary(plan: &InitPlan) {
     println!("=== Initialization Summary ===");
     println!();
 
-    if plan.dir_exists {
+    if plan.dir_exists() {
         println!(
             "Directory: {} (already exists)",
-            plan.changeset_dir.display()
+            plan.changeset_dir().display()
         );
     } else {
         println!(
             "Directory: {} (will be created)",
-            plan.changeset_dir.display()
+            plan.changeset_dir().display()
         );
     }
 
-    if !plan.gitkeep_exists {
+    if !plan.gitkeep_exists() {
         println!("  - .gitkeep file will be created");
     }
 
-    if !plan.config.is_empty() {
+    if !plan.config().is_empty() {
         println!();
-        println!("Configuration to be written to {}:", plan.metadata_section);
-        print_config_summary(&plan.config);
+        println!(
+            "Configuration to be written to {}:",
+            plan.metadata_section()
+        );
+        print_config_summary(plan.config());
     } else {
         println!();
         println!("No configuration will be written (using defaults).");
@@ -281,13 +283,14 @@ fn build_init_input(
         None
     };
 
-    Ok(InitInput {
-        defaults: args.defaults,
-        git_config,
-        changelog_config,
-        version_config,
-        filtering_config,
-    })
+    Ok(InitInputBuilder::default()
+        .defaults(args.defaults)
+        .git_config(git_config)
+        .changelog_config(changelog_config)
+        .version_config(version_config)
+        .filtering_config(filtering_config)
+        .build()
+        .expect("all fields have defaults"))
 }
 
 #[cfg(test)]
@@ -367,7 +370,9 @@ mod tests {
         let input = build_init_input(&args, None::<&TerminalInitInteractionProvider>, context)
             .expect("build_init_input should succeed");
 
-        let version = input.version_config.expect("version_config should be Some");
+        let version = input
+            .version_config()
+            .expect("version_config should be Some");
         assert_eq!(
             version.none_bump_behavior,
             Some(changeset_manifest::NoneBumpBehavior::Disallow)
@@ -385,7 +390,9 @@ mod tests {
         let input = build_init_input(&args, None::<&TerminalInitInteractionProvider>, context)
             .expect("build_init_input should succeed");
 
-        let version = input.version_config.expect("version_config should be Some");
+        let version = input
+            .version_config()
+            .expect("version_config should be Some");
         assert_eq!(
             version.none_bump_promote_message_template,
             Some("Custom message".to_string())
@@ -402,7 +409,7 @@ mod tests {
         let input = build_init_input(&args, None::<&TerminalInitInteractionProvider>, context)
             .expect("build_init_input should succeed");
 
-        assert!(input.version_config.is_none());
+        assert!(input.version_config().is_none());
     }
 
     #[test]
@@ -472,7 +479,7 @@ mod tests {
         let input = build_init_input(&args, None::<&TerminalInitInteractionProvider>, context)
             .expect("build_init_input should succeed");
 
-        let git = input.git_config.expect("git_config should be Some");
+        let git = input.git_config().expect("git_config should be Some");
         assert_eq!(
             git.commit_title_template,
             Some("Release {new-version}".to_string())
@@ -491,7 +498,7 @@ mod tests {
         let input = build_init_input(&args, None::<&TerminalInitInteractionProvider>, context)
             .expect("build_init_input should succeed");
 
-        let git = input.git_config.expect("git_config should be Some");
+        let git = input.git_config().expect("git_config should be Some");
         assert_eq!(git.changes_in_body, Some(false));
     }
 
@@ -509,7 +516,7 @@ mod tests {
             .expect("build_init_input should succeed");
 
         let changelog = input
-            .changelog_config
+            .changelog_config()
             .expect("changelog_config should be Some");
         assert_eq!(
             changelog.comparison_links_template,
@@ -531,7 +538,7 @@ mod tests {
             .expect("build_init_input should succeed");
 
         let changelog = input
-            .changelog_config
+            .changelog_config()
             .expect("changelog_config should be Some");
         assert_eq!(
             changelog.dependency_bump_changelog_template,
@@ -551,7 +558,7 @@ mod tests {
             .expect("build_init_input should succeed");
 
         let filtering = input
-            .filtering_config
+            .filtering_config()
             .expect("filtering_config should be Some");
         assert_eq!(
             filtering.ignored_files,

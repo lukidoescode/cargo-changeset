@@ -3,33 +3,51 @@ use std::hash::BuildHasher;
 use std::path::{Path, PathBuf};
 
 use changeset_core::PackageInfo;
+use gset::Getset;
 
 use crate::config::{PackageChangesetConfig, RootChangesetConfig};
 use crate::project::CargoProject;
 
-/// Mapping of files to a single package.
-///
-/// This is a data transfer object with intentionally public fields for direct access.
-#[derive(Debug)]
+#[derive(Debug, Getset)]
 pub struct PackageFiles {
-    pub package: PackageInfo,
-    pub files: Vec<PathBuf>,
+    #[getset(get, vis = "pub")]
+    package: PackageInfo,
+    #[getset(get, vis = "pub")]
+    files: Vec<PathBuf>,
 }
 
-/// Result of mapping changed files to packages.
-///
-/// This is a data transfer object with intentionally public fields for direct access.
-#[derive(Debug, Default)]
+impl PackageFiles {
+    pub(crate) fn new(package: PackageInfo, files: Vec<PathBuf>) -> Self {
+        Self { package, files }
+    }
+}
+
+#[derive(Debug, Default, Getset)]
 pub struct FileMapping {
-    pub package_files: Vec<PackageFiles>,
-    pub project_files: Vec<PathBuf>,
-    pub ignored_files: Vec<PathBuf>,
+    #[getset(get, vis = "pub")]
+    packages: Vec<PackageFiles>,
+    #[getset(get, vis = "pub")]
+    project: Vec<PathBuf>,
+    #[getset(get, vis = "pub")]
+    ignored: Vec<PathBuf>,
 }
 
 impl FileMapping {
+    pub(crate) fn new(
+        packages: Vec<PackageFiles>,
+        project: Vec<PathBuf>,
+        ignored: Vec<PathBuf>,
+    ) -> Self {
+        Self {
+            packages,
+            project,
+            ignored,
+        }
+    }
+
     #[must_use]
     pub fn affected_packages(&self) -> Vec<&PackageInfo> {
-        self.package_files
+        self.packages
             .iter()
             .filter(|pf| !pf.files.is_empty())
             .map(|pf| &pf.package)
@@ -57,8 +75,7 @@ pub fn map_files_to_packages<S: BuildHasher>(
         .packages()
         .iter()
         .map(|p| {
-            // Fallback to full path if strip_prefix fails (shouldn't happen in practice)
-            let relative_path = p.path.strip_prefix(project.root()).unwrap_or(&p.path);
+            let relative_path = p.path().strip_prefix(project.root()).unwrap_or(p.path());
             PackageWithDepth {
                 package: p.clone(),
                 depth: calculate_path_depth(relative_path),
@@ -86,11 +103,10 @@ pub fn map_files_to_packages<S: BuildHasher>(
 
         let mut matched = false;
         for pwd in &packages_with_depth {
-            if abs_file.starts_with(&pwd.package.path) {
-                if let Some(pkg_config) = package_configs.get(&pwd.package.name) {
-                    // Fallback to full path if strip_prefix fails (shouldn't happen in practice)
+            if abs_file.starts_with(pwd.package.path()) {
+                if let Some(pkg_config) = package_configs.get(pwd.package.name()) {
                     let relative_to_pkg = abs_file
-                        .strip_prefix(&pwd.package.path)
+                        .strip_prefix(pwd.package.path())
                         .unwrap_or(&abs_file);
                     if pkg_config.is_ignored(relative_to_pkg) {
                         ignored_files.push(file.clone());
@@ -100,7 +116,7 @@ pub fn map_files_to_packages<S: BuildHasher>(
                 }
 
                 package_files_map
-                    .entry(pwd.package.name.clone())
+                    .entry(pwd.package.name().clone())
                     .or_default()
                     .push(file.clone());
                 matched = true;
@@ -116,17 +132,15 @@ pub fn map_files_to_packages<S: BuildHasher>(
     let package_files: Vec<PackageFiles> = project
         .packages()
         .iter()
-        .map(|p| PackageFiles {
-            package: p.clone(),
-            files: package_files_map.remove(&p.name).unwrap_or_default(),
+        .map(|p| {
+            PackageFiles::new(
+                p.clone(),
+                package_files_map.remove(p.name()).unwrap_or_default(),
+            )
         })
         .collect();
 
-    FileMapping {
-        package_files,
-        project_files,
-        ignored_files,
-    }
+    FileMapping::new(package_files, project_files, ignored_files)
 }
 
 #[cfg(test)]
@@ -136,11 +150,7 @@ mod tests {
     use semver::Version;
 
     fn make_package(name: &str, path: PathBuf) -> PackageInfo {
-        PackageInfo {
-            name: name.to_string(),
-            version: Version::new(0, 1, 0),
-            path,
-        }
+        PackageInfo::new(name.to_string(), Version::new(0, 1, 0), path)
     }
 
     fn make_project(root: PathBuf, packages: Vec<PackageInfo>) -> CargoProject {
@@ -162,18 +172,18 @@ mod tests {
             map_files_to_packages(&project, &changed_files, &root_config, &package_configs);
 
         let files_a = mapping
-            .package_files
+            .packages()
             .iter()
-            .find(|pf| pf.package.name == "crate-a");
+            .find(|pf| pf.package().name() == "crate-a");
         assert!(files_a.is_some());
-        assert_eq!(files_a.expect("crate-a should exist").files.len(), 1);
+        assert_eq!(files_a.expect("crate-a should exist").files().len(), 1);
 
         let files_b = mapping
-            .package_files
+            .packages()
             .iter()
-            .find(|pf| pf.package.name == "crate-b");
+            .find(|pf| pf.package().name() == "crate-b");
         assert!(files_b.is_some());
-        assert!(files_b.expect("crate-b should exist").files.is_empty());
+        assert!(files_b.expect("crate-b should exist").files().is_empty());
     }
 
     #[test]
@@ -191,21 +201,24 @@ mod tests {
             map_files_to_packages(&project, &changed_files, &root_config, &package_configs);
 
         let nested = mapping
-            .package_files
+            .packages()
             .iter()
-            .find(|pf| pf.package.name == "nested");
+            .find(|pf| pf.package().name() == "nested");
         assert!(nested.is_some());
-        assert_eq!(nested.expect("nested package should exist").files.len(), 1);
+        assert_eq!(
+            nested.expect("nested package should exist").files().len(),
+            1
+        );
 
         let parent = mapping
-            .package_files
+            .packages()
             .iter()
-            .find(|pf| pf.package.name == "parent");
+            .find(|pf| pf.package().name() == "parent");
         assert!(parent.is_some());
         assert!(
             parent
                 .expect("parent package should exist")
-                .files
+                .files()
                 .is_empty()
         );
     }
@@ -226,8 +239,8 @@ mod tests {
         let mapping =
             map_files_to_packages(&project, &changed_files, &root_config, &package_configs);
 
-        assert_eq!(mapping.project_files.len(), 2);
-        assert!(mapping.project_files.contains(&PathBuf::from("Cargo.toml")));
+        assert_eq!(mapping.project().len(), 2);
+        assert!(mapping.project().contains(&PathBuf::from("Cargo.toml")));
     }
 
     #[test]
@@ -246,7 +259,7 @@ mod tests {
         let affected = mapping.affected_packages();
 
         assert_eq!(affected.len(), 1);
-        assert_eq!(affected[0].name, "crate-a");
+        assert_eq!(affected[0].name(), "crate-a");
     }
 
     #[test]
@@ -261,7 +274,7 @@ mod tests {
         let mapping =
             map_files_to_packages(&project, &changed_files, &root_config, &package_configs);
 
-        assert!(mapping.package_files.is_empty());
-        assert_eq!(mapping.project_files.len(), 1);
+        assert!(mapping.packages().is_empty());
+        assert_eq!(mapping.project().len(), 1);
     }
 }

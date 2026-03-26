@@ -12,7 +12,8 @@ pub(crate) fn expand_with_reverse_dependencies(
     packages: &[PackageInfo],
     zero_behavior: ZeroVersionBehavior,
 ) -> Result<Vec<PackageVersion>, VersionError> {
-    let initial_names: HashSet<String> = initial_releases.iter().map(|r| r.name.clone()).collect();
+    let initial_names: HashSet<String> =
+        initial_releases.iter().map(|r| r.name().clone()).collect();
 
     let initial_refs: Vec<&str> = initial_names.iter().map(String::as_str).collect();
     let dependents = graph.transitive_dependents_of_set(&initial_refs);
@@ -24,21 +25,21 @@ pub(crate) fn expand_with_reverse_dependencies(
             continue;
         }
 
-        if let Some(pkg) = packages.iter().find(|p| p.name == dep_name) {
+        if let Some(pkg) = packages.iter().find(|p| p.name() == dep_name) {
             let new_version = calculate_new_version_with_zero_behavior(
-                &pkg.version,
+                pkg.version(),
                 Some(BumpType::Patch),
                 None,
                 zero_behavior,
                 false,
             )?;
-            result.push(PackageVersion {
-                name: pkg.name.clone(),
-                current_version: pkg.version.clone(),
+            result.push(PackageVersion::new(
+                pkg.name().clone(),
+                pkg.version().clone(),
                 new_version,
-                bump_type: BumpType::Patch,
-                auto_bumped: true,
-            });
+                BumpType::Patch,
+                true,
+            ));
         }
     }
 
@@ -56,21 +57,21 @@ mod tests {
     use super::*;
 
     fn make_package(name: &str, version: &str) -> PackageInfo {
-        PackageInfo {
-            name: name.to_string(),
-            version: version.parse().expect("valid version"),
-            path: std::path::PathBuf::from(format!("crates/{name}")),
-        }
+        PackageInfo::new(
+            name.to_string(),
+            version.parse().expect("valid version"),
+            std::path::PathBuf::from(format!("crates/{name}")),
+        )
     }
 
     fn make_release(name: &str, current: &str, new: &str, bump: BumpType) -> PackageVersion {
-        PackageVersion {
-            name: name.to_string(),
-            current_version: current.parse().expect("valid version"),
-            new_version: new.parse().expect("valid version"),
-            bump_type: bump,
-            auto_bumped: false,
-        }
+        PackageVersion::new(
+            name.to_string(),
+            current.parse().expect("valid version"),
+            new.parse().expect("valid version"),
+            bump,
+            false,
+        )
     }
 
     fn make_graph(members: &[&str], edges: &[(&str, &str)]) -> WorkspaceDependencyGraph {
@@ -97,7 +98,7 @@ mod tests {
         .expect("should succeed");
 
         assert_eq!(result.len(), 1);
-        assert_eq!(result[0].name, "a");
+        assert_eq!(result[0].name(), "a");
     }
 
     #[test]
@@ -115,10 +116,10 @@ mod tests {
         .expect("should succeed");
 
         assert_eq!(result.len(), 2);
-        assert_eq!(result[1].name, "app");
-        assert_eq!(result[1].new_version, Version::new(2, 0, 1));
-        assert_eq!(result[1].bump_type, BumpType::Patch);
-        assert!(result[1].auto_bumped);
+        assert_eq!(result[1].name(), "app");
+        assert_eq!(*result[1].new_version(), Version::new(2, 0, 1));
+        assert_eq!(result[1].bump_type(), BumpType::Patch);
+        assert!(result[1].auto_bumped());
     }
 
     #[test]
@@ -140,12 +141,12 @@ mod tests {
         .expect("should succeed");
 
         assert_eq!(result.len(), 3);
-        assert!(!result[0].auto_bumped);
+        assert!(!result[0].auto_bumped());
 
         let auto_names: HashSet<&str> = result
             .iter()
-            .filter(|r| r.auto_bumped)
-            .map(|r| r.name.as_str())
+            .filter(|r| r.auto_bumped())
+            .map(|r| r.name().as_str())
             .collect();
         assert!(auto_names.contains("b"));
         assert!(auto_names.contains("c"));
@@ -178,7 +179,7 @@ mod tests {
         )
         .expect("should succeed");
 
-        let names: Vec<&str> = result.iter().map(|r| r.name.as_str()).collect();
+        let names: Vec<&str> = result.iter().map(|r| r.name().as_str()).collect();
         let unique_names: HashSet<&str> = names.iter().copied().collect();
         assert_eq!(names.len(), unique_names.len());
         assert_eq!(result.len(), 4);
@@ -202,9 +203,12 @@ mod tests {
         .expect("should succeed");
 
         assert_eq!(result.len(), 2);
-        let app_release = result.iter().find(|r| r.name == "app").expect("app exists");
-        assert_eq!(app_release.new_version, Version::new(2, 1, 0));
-        assert!(!app_release.auto_bumped);
+        let app_release = result
+            .iter()
+            .find(|r| r.name() == "app")
+            .expect("app exists");
+        assert_eq!(*app_release.new_version(), Version::new(2, 1, 0));
+        assert!(!app_release.auto_bumped());
     }
 
     #[test]
@@ -238,10 +242,16 @@ mod tests {
         )
         .expect("should succeed");
 
-        let lib_release = result.iter().find(|r| r.name == "lib").expect("lib exists");
-        let dep_release = result.iter().find(|r| r.name == "dep").expect("dep exists");
+        let lib_release = result
+            .iter()
+            .find(|r| r.name() == "lib")
+            .expect("lib exists");
+        let dep_release = result
+            .iter()
+            .find(|r| r.name() == "dep")
+            .expect("dep exists");
 
-        assert!(!lib_release.auto_bumped);
-        assert!(dep_release.auto_bumped);
+        assert!(!lib_release.auto_bumped());
+        assert!(dep_release.auto_bumped());
     }
 }

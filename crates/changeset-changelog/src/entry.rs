@@ -1,13 +1,17 @@
 use chrono::NaiveDate;
+use gset::Getset;
 use semver::Version;
 
 use changeset_core::ChangeCategory;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Getset)]
 pub struct ChangelogEntry {
-    pub category: ChangeCategory,
-    pub description: String,
-    pub package: Option<String>,
+    #[getset(get_copy, vis = "pub")]
+    category: ChangeCategory,
+    #[getset(get, vis = "pub")]
+    description: String,
+    #[getset(get_as_ref, vis = "pub", ty = "Option<&String>")]
+    package: Option<String>,
 }
 
 impl ChangelogEntry {
@@ -27,11 +31,14 @@ impl ChangelogEntry {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Getset)]
 pub struct VersionRelease {
-    pub version: Version,
-    pub date: NaiveDate,
-    pub entries: Vec<ChangelogEntry>,
+    #[getset(get, vis = "pub")]
+    version: Version,
+    #[getset(get_copy, vis = "pub")]
+    date: NaiveDate,
+    #[getset(get, vis = "pub")]
+    entries: Vec<ChangelogEntry>,
 }
 
 impl VersionRelease {
@@ -52,18 +59,18 @@ mod tests {
     #[test]
     fn create_entry() {
         let entry = ChangelogEntry::new(ChangeCategory::Fixed, "Fixed a bug");
-        assert_eq!(entry.category, ChangeCategory::Fixed);
-        assert_eq!(entry.description, "Fixed a bug");
-        assert!(entry.package.is_none());
+        assert_eq!(entry.category(), ChangeCategory::Fixed);
+        assert_eq!(entry.description(), "Fixed a bug");
+        assert!(entry.package().is_none());
     }
 
     #[test]
     fn create_entry_with_package() {
         let entry =
             ChangelogEntry::new(ChangeCategory::Added, "Added feature").with_package("my-crate");
-        assert_eq!(entry.category, ChangeCategory::Added);
-        assert_eq!(entry.description, "Added feature");
-        assert_eq!(entry.package.as_deref(), Some("my-crate"));
+        assert_eq!(entry.category(), ChangeCategory::Added);
+        assert_eq!(entry.description(), "Added feature");
+        assert_eq!(entry.package().map(String::as_str), Some("my-crate"));
     }
 
     #[test]
@@ -76,8 +83,8 @@ mod tests {
         )];
 
         let release = VersionRelease::new(version.clone(), date, entries.clone());
-        assert_eq!(release.version, version);
-        assert_eq!(release.date, date);
-        assert_eq!(release.entries, entries);
+        assert_eq!(release.version(), &version);
+        assert_eq!(release.date(), date);
+        assert_eq!(release.entries(), &entries);
     }
 }

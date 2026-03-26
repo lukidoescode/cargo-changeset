@@ -5,38 +5,94 @@ use changeset_git::DEFAULT_BASE_BRANCH;
 use changeset_manifest::{InitConfig, MetadataSection};
 use changeset_project::{CargoProject, ProjectKind, RootChangesetConfig};
 
+use derive_builder::Builder;
+use gset::Getset;
+
 use crate::Result;
 use crate::traits::{
     ChangelogSettingsInput, FilteringSettingsInput, GitSettingsInput, InitInteractionProvider,
     ManifestMetadataWriter, ProjectContext, ProjectProvider, VersionSettingsInput,
 };
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Builder, Getset)]
+#[builder(default)]
 pub struct InitInput {
-    pub defaults: bool,
-    pub git_config: Option<GitSettingsInput>,
-    pub changelog_config: Option<ChangelogSettingsInput>,
-    pub version_config: Option<VersionSettingsInput>,
-    pub filtering_config: Option<FilteringSettingsInput>,
+    #[getset(get_copy, vis = "pub")]
+    defaults: bool,
+    #[getset(get_as_ref, vis = "pub", ty = "Option<&GitSettingsInput>")]
+    git_config: Option<GitSettingsInput>,
+    #[getset(get_as_ref, vis = "pub", ty = "Option<&ChangelogSettingsInput>")]
+    changelog_config: Option<ChangelogSettingsInput>,
+    #[getset(get_as_ref, vis = "pub", ty = "Option<&VersionSettingsInput>")]
+    version_config: Option<VersionSettingsInput>,
+    #[getset(get_as_ref, vis = "pub", ty = "Option<&FilteringSettingsInput>")]
+    filtering_config: Option<FilteringSettingsInput>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Getset)]
 pub struct InitPlan {
-    pub changeset_dir: PathBuf,
-    pub dir_exists: bool,
-    pub gitkeep_exists: bool,
-    pub metadata_section: MetadataSection,
-    pub config: InitConfig,
+    #[getset(get, vis = "pub")]
+    changeset_dir: PathBuf,
+    #[getset(get_copy, vis = "pub")]
+    dir_exists: bool,
+    #[getset(get_copy, vis = "pub")]
+    gitkeep_exists: bool,
+    #[getset(get_copy, vis = "pub")]
+    metadata_section: MetadataSection,
+    #[getset(get, vis = "pub")]
+    config: InitConfig,
 }
 
-#[derive(Debug)]
+impl InitPlan {
+    #[must_use]
+    pub fn new(
+        changeset_dir: PathBuf,
+        dir_exists: bool,
+        gitkeep_exists: bool,
+        metadata_section: MetadataSection,
+        config: InitConfig,
+    ) -> Self {
+        Self {
+            changeset_dir,
+            dir_exists,
+            gitkeep_exists,
+            metadata_section,
+            config,
+        }
+    }
+}
+
+#[derive(Debug, Getset)]
 #[must_use]
 pub struct InitOutput {
-    pub changeset_dir: PathBuf,
-    pub created_dir: bool,
-    pub created_gitkeep: bool,
-    pub wrote_config: bool,
-    pub config_location: Option<MetadataSection>,
+    #[getset(get, vis = "pub")]
+    changeset_dir: PathBuf,
+    #[getset(get_copy, vis = "pub")]
+    created_dir: bool,
+    #[getset(get_copy, vis = "pub")]
+    created_gitkeep: bool,
+    #[getset(get_copy, vis = "pub")]
+    wrote_config: bool,
+    #[getset(get_copy, vis = "pub")]
+    config_location: Option<MetadataSection>,
+}
+
+impl InitOutput {
+    pub(crate) fn new(
+        changeset_dir: PathBuf,
+        created_dir: bool,
+        created_gitkeep: bool,
+        wrote_config: bool,
+        config_location: Option<MetadataSection>,
+    ) -> Self {
+        Self {
+            changeset_dir,
+            created_dir,
+            created_gitkeep,
+            wrote_config,
+            config_location,
+        }
+    }
 }
 
 pub struct InitOperation<P, M = (), I = ()> {
@@ -83,17 +139,17 @@ where
             .ensure_changeset_dir(&project, &root_config)?;
 
         let gitkeep_path = changeset_dir.join(".gitkeep");
-        if !plan.gitkeep_exists {
+        if !plan.gitkeep_exists() {
             fs::write(&gitkeep_path, "")?;
         }
 
-        Ok(InitOutput {
+        Ok(InitOutput::new(
             changeset_dir,
-            created_dir: !plan.dir_exists,
-            created_gitkeep: !plan.gitkeep_exists,
-            wrote_config: false,
-            config_location: None,
-        })
+            !plan.dir_exists(),
+            !plan.gitkeep_exists(),
+            false,
+            None,
+        ))
     }
 
     /// # Errors
@@ -164,33 +220,33 @@ where
             .ensure_changeset_dir(&project, &root_config)?;
 
         let gitkeep_path = changeset_dir.join(".gitkeep");
-        if !plan.gitkeep_exists {
+        if !plan.gitkeep_exists() {
             fs::write(&gitkeep_path, "")?;
         }
 
         let wrote_config = if let Some(ref writer) = self.manifest_writer {
-            if plan.config.is_empty() {
+            if plan.config().is_empty() {
                 false
             } else {
                 let manifest_path = project.root().join("Cargo.toml");
-                writer.write_metadata(&manifest_path, plan.metadata_section, &plan.config)?;
+                writer.write_metadata(&manifest_path, plan.metadata_section(), plan.config())?;
                 true
             }
         } else {
             false
         };
 
-        Ok(InitOutput {
+        Ok(InitOutput::new(
             changeset_dir,
-            created_dir: !plan.dir_exists,
-            created_gitkeep: !plan.gitkeep_exists,
+            !plan.dir_exists(),
+            !plan.gitkeep_exists(),
             wrote_config,
-            config_location: if wrote_config {
-                Some(plan.metadata_section)
+            if wrote_config {
+                Some(plan.metadata_section())
             } else {
                 None
             },
-        })
+        ))
     }
 
     /// # Errors
@@ -207,13 +263,13 @@ where
 
         if config.is_empty() {
             if let Some(ref provider) = self.interaction_provider {
-                let interactive_input = InitInput {
-                    git_config: provider.configure_git_settings(context)?,
-                    changelog_config: provider.configure_changelog_settings(context)?,
-                    version_config: provider.configure_version_settings()?,
-                    filtering_config: provider.configure_filtering_settings()?,
-                    ..Default::default()
-                };
+                let interactive_input = InitInputBuilder::default()
+                    .git_config(provider.configure_git_settings(context)?)
+                    .changelog_config(provider.configure_changelog_settings(context)?)
+                    .version_config(provider.configure_version_settings()?)
+                    .filtering_config(provider.configure_filtering_settings()?)
+                    .build()
+                    .expect("all fields have defaults");
                 apply_settings_to_config(&mut config, &interactive_input);
             }
         }
@@ -239,13 +295,13 @@ fn build_init_plan(
         ProjectKind::SinglePackage => MetadataSection::Package,
     };
 
-    InitPlan {
-        changeset_dir: full_changeset_dir,
+    InitPlan::new(
+        full_changeset_dir,
         dir_exists,
         gitkeep_exists,
         metadata_section,
         config,
-    }
+    )
 }
 
 /// The tag format default varies by project type:
@@ -282,7 +338,7 @@ pub(crate) fn build_default_config(context: ProjectContext) -> InitConfig {
 
 #[must_use]
 pub fn build_config_from_input(input: &InitInput, context: ProjectContext) -> InitConfig {
-    if input.defaults {
+    if input.defaults() {
         return build_default_config(context);
     }
 
@@ -292,7 +348,7 @@ pub fn build_config_from_input(input: &InitInput, context: ProjectContext) -> In
 }
 
 fn apply_settings_to_config(config: &mut InitConfig, input: &InitInput) {
-    if let Some(ref git) = input.git_config {
+    if let Some(git) = input.git_config() {
         config.commit = Some(git.commit);
         config.tags = Some(git.tags);
         config.keep_changesets = Some(git.keep_changesets);
@@ -304,7 +360,7 @@ fn apply_settings_to_config(config: &mut InitConfig, input: &InitInput) {
         config.changes_in_body = git.changes_in_body;
     }
 
-    if let Some(ref changelog) = input.changelog_config {
+    if let Some(changelog) = input.changelog_config() {
         config.changelog = Some(changelog.changelog);
         config.comparison_links = Some(changelog.comparison_links);
         config
@@ -315,7 +371,7 @@ fn apply_settings_to_config(config: &mut InitConfig, input: &InitInput) {
             .clone_from(&changelog.dependency_bump_changelog_template);
     }
 
-    if let Some(ref version) = input.version_config {
+    if let Some(version) = input.version_config() {
         config.zero_version_behavior = version.zero_version_behavior;
         config.none_bump_behavior = version.none_bump_behavior;
         config
@@ -323,7 +379,7 @@ fn apply_settings_to_config(config: &mut InitConfig, input: &InitInput) {
             .clone_from(&version.none_bump_promote_message_template);
     }
 
-    if let Some(ref filtering) = input.filtering_config {
+    if let Some(filtering) = input.filtering_config() {
         if !filtering.ignored_files.is_empty() {
             config.ignored_files = Some(filtering.ignored_files.clone());
         }
@@ -354,7 +410,7 @@ mod tests {
             .execute_simple(Path::new("/any"))
             .expect("InitOperation failed for single-package project");
 
-        assert_eq!(result.changeset_dir, changeset_dir);
+        assert_eq!(result.changeset_dir(), &changeset_dir);
     }
 
     #[test]
@@ -375,7 +431,7 @@ mod tests {
 
         assert!(
             result
-                .changeset_dir
+                .changeset_dir()
                 .to_string_lossy()
                 .contains(".changeset")
         );
@@ -396,7 +452,7 @@ mod tests {
             .execute_simple(Path::new("/any"))
             .expect("InitOperation failed");
 
-        assert!(result.created_gitkeep);
+        assert!(result.created_gitkeep());
         assert!(changeset_dir.join(".gitkeep").exists());
     }
 
@@ -414,8 +470,8 @@ mod tests {
             .execute_simple(Path::new("/any"))
             .expect("InitOperation failed");
 
-        assert!(!result.created_dir);
-        assert!(result.created_gitkeep);
+        assert!(!result.created_dir());
+        assert!(result.created_gitkeep());
         assert!(changeset_dir.join(".gitkeep").exists());
     }
 
@@ -434,17 +490,17 @@ mod tests {
             .with_manifest_writer(Arc::clone(&manifest_writer))
             .with_interaction_provider(Arc::clone(&interaction_provider));
 
-        let input = InitInput {
-            defaults: true,
-            ..Default::default()
-        };
+        let input = InitInputBuilder::default()
+            .defaults(true)
+            .build()
+            .expect("all fields have defaults");
 
         let result = operation
             .execute(Path::new("/any"), &input)
             .expect("InitOperation failed");
 
-        assert!(result.wrote_config);
-        assert_eq!(result.config_location, Some(MetadataSection::Package));
+        assert!(result.wrote_config());
+        assert_eq!(result.config_location(), Some(MetadataSection::Package));
 
         let written = manifest_writer.written_metadata();
         assert_eq!(written.len(), 1);
@@ -470,33 +526,32 @@ mod tests {
             .with_manifest_writer(Arc::clone(&manifest_writer))
             .with_interaction_provider(Arc::clone(&interaction_provider));
 
-        let input = InitInput {
-            defaults: false,
-            git_config: Some(GitSettingsInput {
+        let input = InitInputBuilder::default()
+            .git_config(Some(GitSettingsInput {
                 commit: false,
                 tags: true,
                 keep_changesets: true,
                 tag_format: TagFormat::CratePrefixed,
                 base_branch: String::from("main"),
                 ..Default::default()
-            }),
-            changelog_config: Some(ChangelogSettingsInput {
+            }))
+            .changelog_config(Some(ChangelogSettingsInput {
                 changelog: ChangelogLocation::PerPackage,
                 comparison_links: ComparisonLinks::Enabled,
                 ..Default::default()
-            }),
-            version_config: Some(VersionSettingsInput {
+            }))
+            .version_config(Some(VersionSettingsInput {
                 zero_version_behavior: Some(ZeroVersionBehavior::AutoPromoteOnMajor),
                 ..Default::default()
-            }),
-            ..Default::default()
-        };
+            }))
+            .build()
+            .expect("all fields have defaults");
 
         let result = operation
             .execute(Path::new("/any"), &input)
             .expect("InitOperation failed");
 
-        assert!(result.wrote_config);
+        assert!(result.wrote_config());
 
         let written = manifest_writer.written_metadata();
         assert_eq!(written.len(), 1);
@@ -528,26 +583,23 @@ mod tests {
             .with_manifest_writer(Arc::clone(&manifest_writer))
             .with_interaction_provider(Arc::clone(&interaction_provider));
 
-        let input = InitInput {
-            defaults: false,
-            git_config: Some(GitSettingsInput {
+        let input = InitInputBuilder::default()
+            .git_config(Some(GitSettingsInput {
                 commit: true,
                 tags: false,
                 keep_changesets: false,
                 tag_format: TagFormat::VersionOnly,
                 base_branch: String::from("main"),
                 ..Default::default()
-            }),
-            changelog_config: None,
-            version_config: None,
-            ..Default::default()
-        };
+            }))
+            .build()
+            .expect("all fields have defaults");
 
         let result = operation
             .execute(Path::new("/any"), &input)
             .expect("InitOperation failed");
 
-        assert!(result.wrote_config);
+        assert!(result.wrote_config());
 
         let written = manifest_writer.written_metadata();
         assert_eq!(written.len(), 1);
@@ -579,7 +631,7 @@ mod tests {
             .execute(Path::new("/any"), &input)
             .expect("InitOperation failed");
 
-        assert!(result.wrote_config);
+        assert!(result.wrote_config());
 
         let written = manifest_writer.written_metadata();
         assert_eq!(written.len(), 1);
@@ -616,7 +668,7 @@ mod tests {
             .execute(Path::new("/any"), &input)
             .expect("InitOperation failed");
 
-        assert!(result.wrote_config);
+        assert!(result.wrote_config());
 
         let written = manifest_writer.written_metadata();
         assert_eq!(written.len(), 1);
@@ -647,8 +699,8 @@ mod tests {
             .execute(Path::new("/any"), &input)
             .expect("InitOperation failed");
 
-        assert!(!result.wrote_config);
-        assert!(result.config_location.is_none());
+        assert!(!result.wrote_config());
+        assert!(result.config_location().is_none());
 
         let written = manifest_writer.written_metadata();
         assert!(written.is_empty());
@@ -670,17 +722,17 @@ mod tests {
             .with_manifest_writer(Arc::clone(&manifest_writer))
             .with_interaction_provider(Arc::clone(&interaction_provider));
 
-        let input = InitInput {
-            defaults: true,
-            ..Default::default()
-        };
+        let input = InitInputBuilder::default()
+            .defaults(true)
+            .build()
+            .expect("all fields have defaults");
 
         let result = operation
             .execute(Path::new("/any"), &input)
             .expect("InitOperation failed");
 
-        assert!(result.wrote_config);
-        assert_eq!(result.config_location, Some(MetadataSection::Workspace));
+        assert!(result.wrote_config());
+        assert_eq!(result.config_location(), Some(MetadataSection::Workspace));
 
         let written = manifest_writer.written_metadata();
         assert_eq!(written.len(), 1);
@@ -703,17 +755,17 @@ mod tests {
             .with_manifest_writer(Arc::clone(&manifest_writer))
             .with_interaction_provider(Arc::clone(&interaction_provider));
 
-        let input = InitInput {
-            defaults: true,
-            ..Default::default()
-        };
+        let input = InitInputBuilder::default()
+            .defaults(true)
+            .build()
+            .expect("all fields have defaults");
 
         let result = operation
             .execute(Path::new("/any"), &input)
             .expect("InitOperation failed");
 
-        assert!(result.wrote_config);
-        assert_eq!(result.config_location, Some(MetadataSection::Package));
+        assert!(result.wrote_config());
+        assert_eq!(result.config_location(), Some(MetadataSection::Package));
 
         let written = manifest_writer.written_metadata();
         assert_eq!(written.len(), 1);
@@ -753,14 +805,14 @@ mod tests {
             is_single_package: true,
         };
 
-        let input = InitInput {
-            version_config: Some(VersionSettingsInput {
+        let input = InitInputBuilder::default()
+            .version_config(Some(VersionSettingsInput {
                 zero_version_behavior: Some(ZeroVersionBehavior::default()),
                 none_bump_behavior: Some(NoneBumpBehavior::Disallow),
                 none_bump_promote_message_template: Some("Custom message".to_string()),
-            }),
-            ..Default::default()
-        };
+            }))
+            .build()
+            .expect("all fields have defaults");
 
         let config = build_config_from_input(&input, context);
         assert_eq!(config.none_bump_behavior, Some(NoneBumpBehavior::Disallow));
@@ -789,13 +841,13 @@ mod tests {
             is_single_package: true,
         };
 
-        let input = InitInput {
-            git_config: Some(GitSettingsInput {
+        let input = InitInputBuilder::default()
+            .git_config(Some(GitSettingsInput {
                 commit_title_template: Some("Release {new-version}".to_string()),
                 ..Default::default()
-            }),
-            ..Default::default()
-        };
+            }))
+            .build()
+            .expect("all fields have defaults");
 
         let config = build_config_from_input(&input, context);
         assert_eq!(
@@ -810,13 +862,13 @@ mod tests {
             is_single_package: true,
         };
 
-        let input = InitInput {
-            git_config: Some(GitSettingsInput {
+        let input = InitInputBuilder::default()
+            .git_config(Some(GitSettingsInput {
                 changes_in_body: Some(false),
                 ..Default::default()
-            }),
-            ..Default::default()
-        };
+            }))
+            .build()
+            .expect("all fields have defaults");
 
         let config = build_config_from_input(&input, context);
         assert_eq!(config.changes_in_body, Some(false));
@@ -828,15 +880,15 @@ mod tests {
             is_single_package: true,
         };
 
-        let input = InitInput {
-            changelog_config: Some(ChangelogSettingsInput {
+        let input = InitInputBuilder::default()
+            .changelog_config(Some(ChangelogSettingsInput {
                 comparison_links_template: Some(
                     "https://github.com/org/repo/compare/{base}...{target}".to_string(),
                 ),
                 ..Default::default()
-            }),
-            ..Default::default()
-        };
+            }))
+            .build()
+            .expect("all fields have defaults");
 
         let config = build_config_from_input(&input, context);
         assert_eq!(
@@ -851,15 +903,15 @@ mod tests {
             is_single_package: true,
         };
 
-        let input = InitInput {
-            changelog_config: Some(ChangelogSettingsInput {
+        let input = InitInputBuilder::default()
+            .changelog_config(Some(ChangelogSettingsInput {
                 dependency_bump_changelog_template: Some(
                     "Updated `{dependency}` to v{version}".to_string(),
                 ),
                 ..Default::default()
-            }),
-            ..Default::default()
-        };
+            }))
+            .build()
+            .expect("all fields have defaults");
 
         let config = build_config_from_input(&input, context);
         assert_eq!(
@@ -874,12 +926,12 @@ mod tests {
             is_single_package: true,
         };
 
-        let input = InitInput {
-            filtering_config: Some(FilteringSettingsInput {
+        let input = InitInputBuilder::default()
+            .filtering_config(Some(FilteringSettingsInput {
                 ignored_files: vec!["*.lock".to_string(), "docs/**".to_string()],
-            }),
-            ..Default::default()
-        };
+            }))
+            .build()
+            .expect("all fields have defaults");
 
         let config = build_config_from_input(&input, context);
         assert_eq!(
@@ -894,12 +946,12 @@ mod tests {
             is_single_package: true,
         };
 
-        let input = InitInput {
-            filtering_config: Some(FilteringSettingsInput {
+        let input = InitInputBuilder::default()
+            .filtering_config(Some(FilteringSettingsInput {
                 ignored_files: vec![],
-            }),
-            ..Default::default()
-        };
+            }))
+            .build()
+            .expect("all fields have defaults");
 
         let config = build_config_from_input(&input, context);
         assert!(config.ignored_files.is_none());
@@ -934,7 +986,7 @@ mod tests {
             .execute(Path::new("/any"), &input)
             .expect("InitOperation failed");
 
-        assert!(result.wrote_config);
+        assert!(result.wrote_config());
 
         let written = manifest_writer.written_metadata();
         assert_eq!(written.len(), 1);
@@ -957,17 +1009,17 @@ mod tests {
             .with_manifest_writer(Arc::clone(&manifest_writer))
             .with_interaction_provider(Arc::clone(&interaction_provider));
 
-        let input = InitInput {
-            git_config: Some(GitSettingsInput {
+        let input = InitInputBuilder::default()
+            .git_config(Some(GitSettingsInput {
                 commit: true,
                 tags: true,
                 keep_changesets: false,
                 tag_format: TagFormat::VersionOnly,
                 base_branch: String::from("develop"),
                 ..Default::default()
-            }),
-            ..Default::default()
-        };
+            }))
+            .build()
+            .expect("all fields have defaults");
 
         let _ = operation
             .execute(Path::new("/any"), &input)

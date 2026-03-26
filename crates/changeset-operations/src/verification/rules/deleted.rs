@@ -15,9 +15,7 @@ impl DeletedChangesetsRule {
 impl VerificationRule for DeletedChangesetsRule {
     fn check(&self, context: &VerificationContext, result: &mut VerificationResult) -> Result<()> {
         if !self.allow_deleted {
-            result
-                .deleted_changesets
-                .clone_from(&context.deleted_changesets);
+            result.set_deleted_changesets(context.deleted_changesets().clone());
         }
         Ok(())
     }

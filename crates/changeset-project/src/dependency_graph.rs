@@ -17,21 +17,24 @@ impl WorkspaceDependencyGraph {
     ///
     /// Returns `ProjectError` if any member's manifest cannot be read or parsed.
     pub fn build(project: &CargoProject) -> Result<Self, ProjectError> {
-        let member_names: HashSet<String> =
-            project.packages().iter().map(|p| p.name.clone()).collect();
+        let member_names: HashSet<String> = project
+            .packages()
+            .iter()
+            .map(|p| p.name().clone())
+            .collect();
 
         let mut depended_on_by: HashMap<String, HashSet<String>> = member_names
             .iter()
-            .map(|name| (name.clone(), HashSet::new()))
+            .map(|name| (name.clone(), HashSet::<String>::new()))
             .collect();
 
         let mut depends_on: HashMap<String, HashSet<String>> = member_names
             .iter()
-            .map(|name| (name.clone(), HashSet::new()))
+            .map(|name| (name.clone(), HashSet::<String>::new()))
             .collect();
 
         for package in project.packages() {
-            let manifest_path = package.path.join("Cargo.toml");
+            let manifest_path = package.path().join("Cargo.toml");
             let manifest = read_manifest(&manifest_path)?;
 
             let dep_sections = [manifest.dependencies, manifest.build_dependencies];
@@ -41,11 +44,11 @@ impl WorkspaceDependencyGraph {
                     let resolved_name = resolve_package_name(key, entry);
 
                     if member_names.contains(resolved_name) {
-                        if let Some(set) = depends_on.get_mut(&package.name) {
+                        if let Some(set) = depends_on.get_mut(package.name()) {
                             set.insert(resolved_name.to_string());
                         }
                         if let Some(set) = depended_on_by.get_mut(resolved_name) {
-                            set.insert(package.name.clone());
+                            set.insert(package.name().clone());
                         }
                     }
                 }

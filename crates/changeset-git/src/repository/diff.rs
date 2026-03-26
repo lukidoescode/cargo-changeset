@@ -146,8 +146,8 @@ mod tests {
 
         let changes = repo.changed_files_from_head("HEAD~1")?;
         assert_eq!(changes.len(), 1);
-        assert_eq!(changes[0].status, FileStatus::Added);
-        assert_eq!(changes[0].path.to_string_lossy(), "new_file.txt");
+        assert_eq!(changes[0].status(), FileStatus::Added);
+        assert_eq!(changes[0].path().to_string_lossy(), "new_file.txt");
 
         Ok(())
     }
@@ -181,8 +181,8 @@ mod tests {
 
         let changes = repo.changed_files_from_head("HEAD~1")?;
         assert_eq!(changes.len(), 1);
-        assert_eq!(changes[0].status, FileStatus::Modified);
-        assert_eq!(changes[0].path, PathBuf::from("file.txt"));
+        assert_eq!(changes[0].status(), FileStatus::Modified);
+        assert_eq!(changes[0].path(), &PathBuf::from("file.txt"));
 
         Ok(())
     }
@@ -216,8 +216,8 @@ mod tests {
 
         let changes = repo.changed_files_from_head("HEAD~1")?;
         assert_eq!(changes.len(), 1);
-        assert_eq!(changes[0].status, FileStatus::Deleted);
-        assert_eq!(changes[0].path, PathBuf::from("file.txt"));
+        assert_eq!(changes[0].status(), FileStatus::Deleted);
+        assert_eq!(changes[0].path(), &PathBuf::from("file.txt"));
 
         Ok(())
     }
@@ -259,8 +259,8 @@ mod tests {
         let changes = repo.changed_files_from_head("origin/main")?;
 
         assert_eq!(changes.len(), 1);
-        assert_eq!(changes[0].status, FileStatus::Added);
-        assert_eq!(changes[0].path.to_string_lossy(), "feature.txt");
+        assert_eq!(changes[0].status(), FileStatus::Added);
+        assert_eq!(changes[0].path().to_string_lossy(), "feature.txt");
 
         Ok(())
     }
@@ -314,9 +314,9 @@ mod tests {
         assert_eq!(changes.len(), 1);
 
         let rename = &changes[0];
-        assert_eq!(rename.status, FileStatus::Renamed);
-        assert_eq!(rename.path, PathBuf::from("renamed.txt"));
-        assert_eq!(rename.old_path, Some(PathBuf::from("original.txt")));
+        assert_eq!(rename.status(), FileStatus::Renamed);
+        assert_eq!(rename.path(), &PathBuf::from("renamed.txt"));
+        assert_eq!(rename.old_path(), Some(&PathBuf::from("original.txt")));
 
         Ok(())
     }
@@ -355,11 +355,11 @@ mod tests {
 
         let change = &changes[0];
         assert!(
-            change.status == FileStatus::Added || change.status == FileStatus::Copied,
+            change.status() == FileStatus::Added || change.status() == FileStatus::Copied,
             "new file should be detected as Added or Copied, got {:?}",
-            change.status
+            change.status()
         );
-        assert_eq!(change.path, PathBuf::from("copy.txt"));
+        assert_eq!(change.path(), &PathBuf::from("copy.txt"));
 
         Ok(())
     }
@@ -387,11 +387,11 @@ mod tests {
 
         assert_eq!(changes.len(), 2);
         assert!(
-            changes.iter().all(|c| c.status == FileStatus::Added),
+            changes.iter().all(|c| c.status() == FileStatus::Added),
             "all files should be Added when diffing against empty tree"
         );
 
-        let paths: Vec<_> = changes.iter().map(|c| c.path.clone()).collect();
+        let paths: Vec<_> = changes.iter().map(|c| c.path().clone()).collect();
         assert!(paths.contains(&PathBuf::from("a.txt")));
         assert!(paths.contains(&PathBuf::from("b.txt")));
 
@@ -460,7 +460,7 @@ mod tests {
 
         let statuses: std::collections::HashMap<_, _> = changes
             .iter()
-            .map(|c| (c.path.to_string_lossy().into_owned(), c.status))
+            .map(|c| (c.path().to_string_lossy().into_owned(), c.status()))
             .collect();
 
         assert_eq!(statuses.len(), 3);
@@ -506,8 +506,8 @@ mod tests {
         let changes = repo.changed_files(Some(&base_hex), &tip_hex)?;
 
         assert_eq!(changes.len(), 1);
-        assert_eq!(changes[0].status, FileStatus::Added);
-        assert_eq!(changes[0].path, PathBuf::from("second.txt"));
+        assert_eq!(changes[0].status(), FileStatus::Added);
+        assert_eq!(changes[0].path(), &PathBuf::from("second.txt"));
 
         Ok(())
     }
@@ -517,9 +517,9 @@ mod tests {
         let change = FileChange::new(PathBuf::from("new.txt"), FileStatus::Renamed)
             .with_old_path(PathBuf::from("old.txt"));
 
-        assert_eq!(change.path, PathBuf::from("new.txt"));
-        assert_eq!(change.status, FileStatus::Renamed);
-        assert_eq!(change.old_path, Some(PathBuf::from("old.txt")));
+        assert_eq!(change.path(), &PathBuf::from("new.txt"));
+        assert_eq!(change.status(), FileStatus::Renamed);
+        assert_eq!(change.old_path(), Some(&PathBuf::from("old.txt")));
     }
 
     #[test]
@@ -542,8 +542,8 @@ mod tests {
 
         let changes = repo.uncommitted_changes()?;
         assert_eq!(changes.len(), 1);
-        assert_eq!(changes[0].status, FileStatus::Modified);
-        assert_eq!(changes[0].path, PathBuf::from("file.txt"));
+        assert_eq!(changes[0].status(), FileStatus::Modified);
+        assert_eq!(changes[0].path(), &PathBuf::from("file.txt"));
 
         Ok(())
     }
@@ -559,8 +559,8 @@ mod tests {
 
         let changes = repo.uncommitted_changes()?;
         assert_eq!(changes.len(), 1);
-        assert_eq!(changes[0].status, FileStatus::Added);
-        assert_eq!(changes[0].path, PathBuf::from("new_file.txt"));
+        assert_eq!(changes[0].status(), FileStatus::Added);
+        assert_eq!(changes[0].path(), &PathBuf::from("new_file.txt"));
 
         Ok(())
     }
@@ -573,8 +573,8 @@ mod tests {
 
         let changes = repo.uncommitted_changes()?;
         assert_eq!(changes.len(), 1);
-        assert_eq!(changes[0].status, FileStatus::Added);
-        assert_eq!(changes[0].path, PathBuf::from("untracked.txt"));
+        assert_eq!(changes[0].status(), FileStatus::Added);
+        assert_eq!(changes[0].path(), &PathBuf::from("untracked.txt"));
 
         Ok(())
     }
@@ -617,7 +617,7 @@ mod tests {
 
         let statuses: std::collections::HashMap<_, _> = changes
             .iter()
-            .map(|c| (c.path.to_string_lossy().into_owned(), c.status))
+            .map(|c| (c.path().to_string_lossy().into_owned(), c.status()))
             .collect();
 
         assert_eq!(statuses["staged.txt"], FileStatus::Added);

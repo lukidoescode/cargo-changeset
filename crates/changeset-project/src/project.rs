@@ -24,6 +24,7 @@ pub struct CargoProject {
 }
 
 impl CargoProject {
+    #[cfg(any(test, feature = "testing"))]
     #[must_use]
     pub fn new(root: PathBuf, kind: ProjectKind, packages: Vec<PackageInfo>) -> Self {
         Self {
@@ -64,7 +65,11 @@ pub fn discover_project(start_dir: &Path) -> Result<CargoProject, ProjectError> 
     let kind = determine_project_kind(&manifest);
     let packages = collect_packages(&root, &manifest, &kind)?;
 
-    Ok(CargoProject::new(root, kind, packages))
+    Ok(CargoProject {
+        root,
+        kind,
+        packages,
+    })
 }
 
 /// # Errors
@@ -145,11 +150,11 @@ fn collect_packages(
                 workspace_version,
                 &root.join("Cargo.toml"),
             )?;
-            packages.push(PackageInfo {
-                name: pkg.name.clone(),
+            packages.push(PackageInfo::new(
+                pkg.name.clone(),
                 version,
-                path: root.to_path_buf(),
-            });
+                root.to_path_buf(),
+            ));
         }
     }
 
@@ -160,11 +165,11 @@ fn collect_packages(
                 workspace_version,
                 &root.join("Cargo.toml"),
             )?;
-            return Ok(vec![PackageInfo {
-                name: pkg.name.clone(),
+            return Ok(vec![PackageInfo::new(
+                pkg.name.clone(),
                 version,
-                path: root.to_path_buf(),
-            }]);
+                root.to_path_buf(),
+            )]);
         }
     }
 
@@ -188,11 +193,7 @@ fn collect_packages(
                         workspace_version,
                         &member_manifest_path,
                     )?;
-                    packages.push(PackageInfo {
-                        name: pkg.name,
-                        version,
-                        path: member_dir,
-                    });
+                    packages.push(PackageInfo::new(pkg.name, version, member_dir));
                 }
             }
         }

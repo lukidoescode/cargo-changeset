@@ -21,6 +21,7 @@ changeset-core = { workspace = true }
 changeset-git = { workspace = true }
 glob = { workspace = true }
 globset = "0.4"
+gset = { workspace = true }
 semver = { workspace = true }
 serde = { workspace = true }
 thiserror = { workspace = true }

@@ -105,7 +105,7 @@ impl FileSystemChangesetIO {
                     source,
                 })?;
 
-            let is_consumed = changeset.consumed_for_prerelease.is_some();
+            let is_consumed = changeset.consumed_for_prerelease().is_some();
 
             if consumed_only == is_consumed {
                 changesets.push(relative);
@@ -201,7 +201,7 @@ impl ChangesetWriter for FileSystemChangesetIO {
         for path in paths {
             let full_path = self.resolve_changeset_path(changeset_dir, path)?;
             update_changeset_file(&full_path, |changeset| {
-                changeset.consumed_for_prerelease = Some(version_string.clone());
+                changeset.set_consumed_for_prerelease(Some(version_string.clone()));
             })?;
         }
         Ok(())
@@ -211,7 +211,7 @@ impl ChangesetWriter for FileSystemChangesetIO {
         for path in paths {
             let full_path = self.resolve_changeset_path(changeset_dir, path)?;
             update_changeset_file(&full_path, |changeset| {
-                changeset.consumed_for_prerelease = None;
+                changeset.set_consumed_for_prerelease(None);
             })?;
         }
         Ok(())

@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use changeset_operations::operations::{VerifyInput, VerifyOperation, VerifyOutcome};
+use changeset_operations::operations::{VerifyInputBuilder, VerifyOperation, VerifyOutcome};
 use changeset_operations::providers::{
     FileSystemChangesetIO, FileSystemProjectProvider, Git2Provider,
 };
@@ -24,23 +24,24 @@ pub(crate) fn run(args: VerifyArgs, start_path: &Path) -> Result<()> {
         .base
         .unwrap_or_else(|| root_config.base_branch().to_string());
 
-    let input = VerifyInput {
-        base,
-        head: args.head,
-        allow_deleted_changesets: args.allow_deleted_changesets,
-        exclude_dependents: args.exclude_dependents,
-        ignore_dirty: args.ignore_dirty,
-    };
+    let input = VerifyInputBuilder::default()
+        .base(base)
+        .head(args.head)
+        .allow_deleted_changesets(args.allow_deleted_changesets)
+        .exclude_dependents(args.exclude_dependents)
+        .ignore_dirty(args.ignore_dirty)
+        .build()
+        .expect("all fields have defaults");
 
     let result = operation.execute(start_path, &input)?;
 
-    if result.is_dirty && !args.quiet {
+    if result.is_dirty() && !args.quiet {
         eprintln!("Dirty working directory detected, verifying uncommitted changes against HEAD");
     }
 
     let formatter = PlainTextFormatter;
 
-    match result.outcome {
+    match result.outcome() {
         VerifyOutcome::NoChanges => {
             if !args.quiet {
                 println!("No files changed");
@@ -53,10 +54,10 @@ pub(crate) fn run(args: VerifyArgs, start_path: &Path) -> Result<()> {
         } => {
             if !args.quiet {
                 println!("No packages affected by changes");
-                if project_file_count > 0 {
+                if *project_file_count > 0 {
                     println!("  {project_file_count} project-level file(s) changed");
                 }
-                if ignored_file_count > 0 {
+                if *ignored_file_count > 0 {
                     println!("  {ignored_file_count} file(s) ignored by patterns");
                 }
             }
@@ -64,21 +65,21 @@ pub(crate) fn run(args: VerifyArgs, start_path: &Path) -> Result<()> {
         }
         VerifyOutcome::Success(verification) => {
             if !args.quiet {
-                print!("{}", formatter.format_success(&verification));
+                print!("{}", formatter.format_success(verification));
             }
             Ok(())
         }
         VerifyOutcome::Failed(verification) => {
             if !args.quiet {
-                eprint!("{}", formatter.format_failure(&verification));
+                eprint!("{}", formatter.format_failure(verification));
             }
-            if !verification.deleted_changesets.is_empty() {
+            if !verification.deleted_changesets().is_empty() {
                 Err(CliError::ChangesetDeleted {
-                    paths: verification.deleted_changesets,
+                    paths: verification.deleted_changesets().clone(),
                 })
             } else {
                 Err(CliError::VerificationFailed {
-                    uncovered_count: verification.uncovered_packages.len(),
+                    uncovered_count: verification.uncovered_packages().len(),
                 })
             }
         }

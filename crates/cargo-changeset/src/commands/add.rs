@@ -24,7 +24,7 @@ pub(super) fn run(args: AddArgs, start_path: &Path) -> Result<()> {
         *project.kind() == ProjectKind::SinglePackage && args.packages.is_empty();
     if is_single_package {
         if let Some(pkg) = project.packages().first() {
-            println!("Using package: {} ({})", pkg.name, pkg.version);
+            println!("Using package: {} ({})", pkg.name(), pkg.version());
         }
     }
 
@@ -51,12 +51,12 @@ pub(super) fn run(args: AddArgs, start_path: &Path) -> Result<()> {
             println!();
             println!("Created changeset: {}", file_path.display());
             println!();
-            println!("Summary: {}", changeset.summary);
-            println!("Category: {}", changeset.category);
+            println!("Summary: {}", changeset.summary());
+            println!("Category: {}", changeset.category());
             println!();
             println!("Releases:");
-            for release in &changeset.releases {
-                println!("  - {}: {}", release.name, release.bump_type);
+            for release in changeset.releases() {
+                println!("  - {}: {}", release.name(), release.bump_type());
             }
             if !uncovered_dependents.is_empty() {
                 println!();
