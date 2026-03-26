@@ -13,10 +13,9 @@ use changeset_operations::traits::{
 use changeset_project::ProjectKind;
 
 use crate::commands::InitArgs;
+use crate::environment::is_interactive;
 use crate::error::Result;
-use crate::interaction::{
-    TerminalInitInteractionProvider, confirm_proceed, is_terminal_interactive,
-};
+use crate::interaction::{TerminalInitInteractionProvider, confirm_proceed};
 
 pub(crate) fn run(args: InitArgs, start_path: &Path) -> Result<()> {
     let project_provider = FileSystemProjectProvider::new();
@@ -30,9 +29,9 @@ pub(crate) fn run(args: InitArgs, start_path: &Path) -> Result<()> {
         is_single_package: *project.kind() == ProjectKind::SinglePackage,
     };
 
-    let is_interactive = !args.no_interactive && is_terminal_interactive();
+    let interactive_mode = !args.no_interactive && is_interactive();
 
-    let provider = if is_interactive && !args.defaults {
+    let provider = if interactive_mode && !args.defaults {
         Some(&interaction_provider)
     } else {
         None
@@ -63,7 +62,7 @@ pub(crate) fn run(args: InitArgs, start_path: &Path) -> Result<()> {
 
     print_summary(&plan);
 
-    let skip_confirmation = args.defaults || args.no_interactive || !is_terminal_interactive();
+    let skip_confirmation = args.defaults || args.no_interactive || !interactive_mode;
     if !skip_confirmation && !confirm_proceed("Proceed with initialization?")? {
         println!("Aborted.");
         return Ok(());

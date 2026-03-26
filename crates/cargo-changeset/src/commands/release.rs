@@ -17,13 +17,10 @@ use changeset_version::is_prerelease;
 use super::ReleaseArgs;
 use crate::error::Result;
 
-/// Parsed prerelease specification from CLI
 #[derive(Debug, Clone)]
 pub(crate) struct ParsedPrereleaseArgs {
-    /// Per-package prerelease tags (crate_name -> tag)
-    pub per_package: HashMap<String, PrereleaseSpec>,
-    /// Global prerelease tag (applies to all if per_package is empty)
-    pub global: Option<PrereleaseSpec>,
+    pub(crate) per_package: HashMap<String, PrereleaseSpec>,
+    pub(crate) global: Option<PrereleaseSpec>,
 }
 
 /// Parsed graduation specification from CLI

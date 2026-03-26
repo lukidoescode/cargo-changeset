@@ -2,8 +2,6 @@ use std::fs;
 use std::io::Write as _;
 use std::process::Command;
 
-use crate::environment::is_interactive;
-
 use changeset_core::{BumpType, ChangeCategory, PackageInfo};
 use changeset_git::DEFAULT_BASE_BRANCH;
 use changeset_manifest::{
@@ -17,6 +15,7 @@ use changeset_operations::traits::{
 };
 use dialoguer::{Confirm, Input, MultiSelect, Select};
 
+use crate::environment::is_interactive;
 use crate::error::CliError;
 
 pub(crate) struct TerminalInteractionProvider {
@@ -595,14 +594,7 @@ fn prompt_none_bump_promote_message_template() -> Result<String> {
         .map_err(from_dialoguer)?)
 }
 
-/// Asks the user for confirmation before proceeding.
-///
-/// Returns `true` if the user confirms, `false` if they decline or cancel.
-///
-/// # Errors
-///
-/// Returns an error if the prompt cannot be displayed (e.g., not a terminal).
-pub fn confirm_proceed(prompt: &str) -> crate::error::Result<bool> {
+pub(crate) fn confirm_proceed(prompt: &str) -> crate::error::Result<bool> {
     if !is_interactive() {
         return Err(CliError::NotATty);
     }
@@ -614,15 +606,4 @@ pub fn confirm_proceed(prompt: &str) -> crate::error::Result<bool> {
         .map_err(from_dialoguer)?;
 
     Ok(confirmed == Some(true))
-}
-
-/// Checks if the environment allows interactive prompts.
-///
-/// Returns `true` when:
-/// - `CARGO_CHANGESET_NO_TTY` is NOT set
-/// - No CI environment is detected (CI, GITHUB_ACTIONS, etc.)
-/// - Either `CARGO_CHANGESET_FORCE_TTY` is set OR stdin is a terminal
-#[must_use]
-pub fn is_terminal_interactive() -> bool {
-    crate::environment::is_interactive()
 }

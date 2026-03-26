@@ -1,17 +1,17 @@
 use std::io::IsTerminal;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum NonInteractiveReason {
+pub(crate) enum NonInteractiveReason {
     ExplicitDisable,
     CiDetected { env_var: String },
     NoTerminal,
 }
 
-pub fn is_interactive() -> bool {
+pub(crate) fn is_interactive() -> bool {
     non_interactive_reason().is_none()
 }
 
-pub fn non_interactive_reason() -> Option<NonInteractiveReason> {
+pub(crate) fn non_interactive_reason() -> Option<NonInteractiveReason> {
     if std::env::var("CARGO_CHANGESET_NO_TTY").is_ok() {
         return Some(NonInteractiveReason::ExplicitDisable);
     }
