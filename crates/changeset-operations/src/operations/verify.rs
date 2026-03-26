@@ -70,43 +70,16 @@ where
 
     /// # Errors
     ///
-    /// Returns an error if the project cannot be discovered, git operations fail,
-    /// or changeset files cannot be read.
+    /// Returns an error if project discovery, git operations, or changeset reads fail.
     pub fn execute(&self, start_path: &Path, input: &VerifyInput) -> Result<VerifyResult> {
         let project = self.project_provider.discover_project(start_path)?;
         let (root_config, package_configs) = self.project_provider.load_configs(&project)?;
-        let changeset_dir = root_config.changeset_dir();
 
-        let working_tree_dirty = if input.ignore_dirty() {
-            false
-        } else {
-            !self.git_provider.is_working_tree_clean(project.root())?
-        };
+        let (is_dirty, changeset_files, deleted_changesets, changed_paths) =
+            self.collect_changes(&project, root_config.changeset_dir(), input)?;
 
-        let changed_files = if working_tree_dirty {
-            self.git_provider.uncommitted_changes(project.root())?
-        } else {
-            let head_ref = input.head().map_or("HEAD", String::as_str);
-            self.git_provider
-                .changed_files(project.root(), input.base(), head_ref)?
-        };
-
-        let is_dirty = working_tree_dirty && !changed_files.is_empty();
-
-        let (changeset_changes, code_changes): (Vec<_>, Vec<_>) = changed_files
-            .into_iter()
-            .partition(|change| change.path().starts_with(changeset_dir));
-
-        let deleted_changesets = extract_deleted_changesets(&changeset_changes, changeset_dir);
-        let changeset_files = extract_active_changesets(&changeset_changes);
-
-        let changed_paths: Vec<PathBuf> = code_changes
-            .into_iter()
-            .map(|change| change.path().clone())
-            .collect();
-
-        let has_deleted_changesets = !deleted_changesets.is_empty();
         let has_code_changes = !changed_paths.is_empty();
+        let has_deleted_changesets = !deleted_changesets.is_empty();
 
         if !has_code_changes && !has_deleted_changesets {
             return Ok(VerifyResult {
@@ -115,43 +88,12 @@ where
             });
         }
 
-        let mapping = if has_code_changes {
-            Some(map_files_to_packages(
-                &project,
-                &changed_paths,
-                &root_config,
-                &package_configs,
-            ))
-        } else {
-            None
-        };
-
-        let mut affected_packages: Vec<PackageInfo> = mapping.as_ref().map_or(Vec::new(), |m| {
-            m.affected_packages().into_iter().cloned().collect()
+        let mapping = has_code_changes.then(|| {
+            map_files_to_packages(&project, &changed_paths, &root_config, &package_configs)
         });
 
-        let mut transitive_dependents = HashSet::new();
-
-        if !input.exclude_dependents()
-            && project.packages().len() > 1
-            && !affected_packages.is_empty()
-        {
-            let graph = self.project_provider.build_dependency_graph(&project)?;
-            let affected_names: Vec<&str> = affected_packages
-                .iter()
-                .map(|p| p.name().as_str())
-                .collect();
-            let dependents = graph.transitive_dependents_of_set(&affected_names);
-
-            for pkg in project.packages() {
-                if dependents.contains(pkg.name().as_str())
-                    && !affected_packages.iter().any(|p| p.name() == pkg.name())
-                {
-                    transitive_dependents.insert(pkg.name().clone());
-                    affected_packages.push(pkg.clone());
-                }
-            }
-        }
+        let (affected_packages, transitive_dependents) =
+            self.resolve_affected_packages(&project, mapping.as_ref(), input)?;
 
         if affected_packages.is_empty() && !has_deleted_changesets {
             let (project_file_count, ignored_file_count) = mapping
@@ -174,7 +116,97 @@ where
             deleted_changesets,
         );
 
-        let deleted_rule = DeletedChangesetsRule::new(input.allow_deleted_changesets());
+        let result =
+            self.run_verification(&context, input.allow_deleted_changesets(), &root_config)?;
+
+        let outcome = if result.is_success() {
+            VerifyOutcome::Success(result)
+        } else {
+            VerifyOutcome::Failed(result)
+        };
+
+        Ok(VerifyResult { is_dirty, outcome })
+    }
+
+    fn collect_changes(
+        &self,
+        project: &changeset_project::CargoProject,
+        changeset_dir: &Path,
+        input: &VerifyInput,
+    ) -> Result<(bool, Vec<PathBuf>, Vec<PathBuf>, Vec<PathBuf>)> {
+        let working_tree_dirty = if input.ignore_dirty() {
+            false
+        } else {
+            !self.git_provider.is_working_tree_clean(project.root())?
+        };
+
+        let changed_files = if working_tree_dirty {
+            self.git_provider.uncommitted_changes(project.root())?
+        } else {
+            let head_ref = input.head().map_or("HEAD", String::as_str);
+            self.git_provider
+                .changed_files(project.root(), input.base(), head_ref)?
+        };
+
+        let is_dirty = working_tree_dirty && !changed_files.is_empty();
+
+        let (changeset_changes, code_changes): (Vec<_>, Vec<_>) = changed_files
+            .into_iter()
+            .partition(|change| change.path().starts_with(changeset_dir));
+
+        let deleted_changesets = extract_deleted_changesets(&changeset_changes, changeset_dir);
+        let changeset_files = extract_active_changesets(&changeset_changes);
+        let changed_paths = code_changes
+            .into_iter()
+            .map(|change| change.path().clone())
+            .collect();
+
+        Ok((is_dirty, changeset_files, deleted_changesets, changed_paths))
+    }
+
+    fn resolve_affected_packages(
+        &self,
+        project: &changeset_project::CargoProject,
+        mapping: Option<&changeset_project::FileMapping>,
+        input: &VerifyInput,
+    ) -> Result<(Vec<PackageInfo>, HashSet<String>)> {
+        let mut affected_packages: Vec<PackageInfo> = mapping.map_or(Vec::new(), |m| {
+            m.affected_packages().into_iter().cloned().collect()
+        });
+
+        let mut transitive_dependents: HashSet<String> = HashSet::new();
+
+        if !input.exclude_dependents()
+            && project.packages().len() > 1
+            && !affected_packages.is_empty()
+        {
+            let graph = self.project_provider.build_dependency_graph(project)?;
+            let affected_names: Vec<&str> = affected_packages
+                .iter()
+                .map(|p| p.name().as_str())
+                .collect();
+            let dependents = graph.transitive_dependents_of_set(&affected_names);
+
+            for pkg in project.packages() {
+                if dependents.contains(pkg.name().as_str())
+                    && !affected_packages.iter().any(|p| p.name() == pkg.name())
+                {
+                    transitive_dependents.insert(pkg.name().clone());
+                    affected_packages.push(pkg.clone());
+                }
+            }
+        }
+
+        Ok((affected_packages, transitive_dependents))
+    }
+
+    fn run_verification(
+        &self,
+        context: &VerificationContext,
+        allow_deleted_changesets: bool,
+        root_config: &changeset_project::RootChangesetConfig,
+    ) -> Result<crate::verification::VerificationResult> {
+        let deleted_rule = DeletedChangesetsRule::new(allow_deleted_changesets);
         let coverage_rule = CoverageRule::new(&self.changeset_reader);
         let none_bump_rule = NoneBumpDisallowedRule::new(&self.changeset_reader);
 
@@ -186,15 +218,7 @@ where
             engine.add_rule(&none_bump_rule);
         }
 
-        let result = engine.verify(&context)?;
-
-        let outcome = if result.is_success() {
-            VerifyOutcome::Success(result)
-        } else {
-            VerifyOutcome::Failed(result)
-        };
-
-        Ok(VerifyResult { is_dirty, outcome })
+        engine.verify(context)
     }
 }
 
