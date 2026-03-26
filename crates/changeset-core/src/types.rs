@@ -102,6 +102,7 @@ pub struct PackageRelease {
 }
 
 impl PackageRelease {
+    #[must_use]
     pub fn new(name: String, bump_type: BumpType) -> Self {
         Self { name, bump_type }
     }
@@ -129,6 +130,7 @@ pub struct Changeset {
 }
 
 impl Changeset {
+    #[must_use]
     pub fn new(summary: String, releases: Vec<PackageRelease>, category: ChangeCategory) -> Self {
         Self {
             summary,
@@ -139,11 +141,13 @@ impl Changeset {
         }
     }
 
+    #[must_use]
     pub fn with_consumed_for_prerelease(mut self, v: Option<String>) -> Self {
         self.consumed_for_prerelease = v;
         self
     }
 
+    #[must_use]
     pub fn with_graduate(mut self, v: bool) -> Self {
         self.graduate = v;
         self
@@ -165,6 +169,7 @@ pub struct PackageInfo {
 }
 
 impl PackageInfo {
+    #[must_use]
     pub fn new(name: String, version: Version, path: PathBuf) -> Self {
         Self {
             name,
