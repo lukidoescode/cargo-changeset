@@ -28,7 +28,6 @@ impl Repository {
             path: path.to_path_buf(),
         })?;
 
-        // Use dunce to get a path without the \\?\ prefix on Windows
         let root = dunce::simplified(root).to_path_buf();
 
         Ok(Self { inner, root })
@@ -41,7 +40,6 @@ impl Repository {
 
     pub(crate) fn to_relative_path(&self, path: &Path) -> PathBuf {
         if path.is_absolute() {
-            // Use dunce to normalize the path (removes \\?\ prefix on Windows)
             let normalized = dunce::simplified(path);
             normalized
                 .strip_prefix(&self.root)

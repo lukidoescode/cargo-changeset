@@ -3,16 +3,9 @@ use crate::{CommitInfo, GitError, Result};
 use super::Repository;
 
 impl Repository {
-    /// Performs a soft reset to the parent of HEAD (HEAD~1).
-    ///
-    /// This undoes the last commit while keeping changes staged.
-    ///
     /// # Errors
     ///
-    /// Returns an error if:
-    /// - HEAD cannot be resolved
-    /// - HEAD has no parent (initial commit)
-    /// - The reset operation fails
+    /// Returns an error if HEAD cannot be resolved or has no parent.
     pub fn reset_to_parent(&self) -> Result<()> {
         let head_commit = self.inner.head()?.peel_to_commit()?;
         let parent = head_commit

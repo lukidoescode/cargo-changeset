@@ -3,8 +3,6 @@ use crate::{Result, TagInfo};
 use super::Repository;
 
 impl Repository {
-    /// Deletes a tag by name.
-    ///
     /// Returns `Ok(true)` if the tag was deleted, `Ok(false)` if the tag was not found.
     ///
     /// # Errors
