@@ -75,7 +75,6 @@ pub fn map_files_to_packages<S: BuildHasher>(
         .packages()
         .iter()
         .map(|p| {
-            // Fallback to full path if strip_prefix fails (shouldn't happen in practice)
             let relative_path = p.path().strip_prefix(project.root()).unwrap_or(p.path());
             PackageWithDepth {
                 package: p.clone(),
@@ -106,7 +105,6 @@ pub fn map_files_to_packages<S: BuildHasher>(
         for pwd in &packages_with_depth {
             if abs_file.starts_with(pwd.package.path()) {
                 if let Some(pkg_config) = package_configs.get(pwd.package.name()) {
-                    // Fallback to full path if strip_prefix fails (shouldn't happen in practice)
                     let relative_to_pkg = abs_file
                         .strip_prefix(pwd.package.path())
                         .unwrap_or(&abs_file);

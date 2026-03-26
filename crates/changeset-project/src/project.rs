@@ -24,6 +24,7 @@ pub struct CargoProject {
 }
 
 impl CargoProject {
+    #[cfg(any(test, feature = "testing"))]
     #[must_use]
     pub fn new(root: PathBuf, kind: ProjectKind, packages: Vec<PackageInfo>) -> Self {
         Self {
@@ -64,7 +65,11 @@ pub fn discover_project(start_dir: &Path) -> Result<CargoProject, ProjectError> 
     let kind = determine_project_kind(&manifest);
     let packages = collect_packages(&root, &manifest, &kind)?;
 
-    Ok(CargoProject::new(root, kind, packages))
+    Ok(CargoProject {
+        root,
+        kind,
+        packages,
+    })
 }
 
 /// # Errors

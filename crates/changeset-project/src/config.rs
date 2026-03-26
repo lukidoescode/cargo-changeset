@@ -199,6 +199,11 @@ impl PackageChangesetConfig {
     }
 }
 
+enum CargoRootConfigType {
+    Workspace,
+    Package,
+}
+
 fn build_glob_set(patterns: &[String]) -> Result<GlobSet, ProjectError> {
     let mut builder = GlobSetBuilder::new();
     for pattern in patterns {
@@ -247,14 +252,6 @@ fn build_git_config(metadata: Option<&ChangesetMetadata>) -> GitConfig {
     }
 }
 
-enum CargoRootConfigType {
-    Workspace,
-    Package,
-}
-
-/// # Errors
-///
-/// Returns an error if the manifest cannot be read or parsed, or if glob patterns are invalid.
 fn parse_cargo_root_config(
     project_root: &Path,
     config_type: CargoRootConfigType,
@@ -342,7 +339,7 @@ fn parse_cargo_root_config(
 ///
 /// # Errors
 ///
-/// Returns an error if the manifest cannot be read or parsed, or if glob patterns are invalid.
+/// Returns `ProjectError` if the manifest cannot be read or parsed, or if glob patterns are invalid.
 pub fn parse_root_config(project: &CargoProject) -> Result<RootChangesetConfig, ProjectError> {
     match project.kind() {
         ProjectKind::SinglePackage => {
@@ -356,7 +353,7 @@ pub fn parse_root_config(project: &CargoProject) -> Result<RootChangesetConfig, 
 
 /// # Errors
 ///
-/// Returns an error if the manifest cannot be read or parsed, or if glob patterns are invalid.
+/// Returns `ProjectError` if the manifest cannot be read or parsed, or if glob patterns are invalid.
 pub fn parse_package_config(package_path: &Path) -> Result<PackageChangesetConfig, ProjectError> {
     let manifest_path = package_path.join("Cargo.toml");
     let manifest = read_manifest(&manifest_path)?;
