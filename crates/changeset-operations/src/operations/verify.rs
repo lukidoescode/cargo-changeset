@@ -31,6 +31,7 @@ pub struct VerifyInput {
     ignore_dirty: bool,
 }
 
+#[must_use]
 #[derive(Debug)]
 pub enum VerifyOutcome {
     Success(VerificationResult),
@@ -42,10 +43,19 @@ pub enum VerifyOutcome {
     Failed(VerificationResult),
 }
 
-#[derive(Debug)]
+#[must_use]
+#[derive(Debug, Getset)]
 pub struct VerifyResult {
-    pub is_dirty: bool,
-    pub outcome: VerifyOutcome,
+    #[getset(get_copy, vis = "pub")]
+    is_dirty: bool,
+    #[getset(get, vis = "pub")]
+    outcome: VerifyOutcome,
+}
+
+impl VerifyResult {
+    pub(crate) fn new(is_dirty: bool, outcome: VerifyOutcome) -> Self {
+        Self { is_dirty, outcome }
+    }
 }
 
 pub struct VerifyOperation<P, G, R> {
@@ -82,10 +92,7 @@ where
         let has_deleted_changesets = !deleted_changesets.is_empty();
 
         if !has_code_changes && !has_deleted_changesets {
-            return Ok(VerifyResult {
-                is_dirty,
-                outcome: VerifyOutcome::NoChanges,
-            });
+            return Ok(VerifyResult::new(is_dirty, VerifyOutcome::NoChanges));
         }
 
         let mapping = has_code_changes.then(|| {
@@ -99,13 +106,13 @@ where
             let (project_file_count, ignored_file_count) = mapping
                 .as_ref()
                 .map_or((0, 0), |m| (m.project().len(), m.ignored().len()));
-            return Ok(VerifyResult {
+            return Ok(VerifyResult::new(
                 is_dirty,
-                outcome: VerifyOutcome::NoPackagesAffected {
+                VerifyOutcome::NoPackagesAffected {
                     project_file_count,
                     ignored_file_count,
                 },
-            });
+            ));
         }
 
         let context = build_context(
@@ -125,7 +132,7 @@ where
             VerifyOutcome::Failed(result)
         };
 
-        Ok(VerifyResult { is_dirty, outcome })
+        Ok(VerifyResult::new(is_dirty, outcome))
     }
 
     fn collect_changes(
@@ -305,7 +312,7 @@ mod tests {
             .execute(Path::new("/any"), &input)
             .expect("VerifyOperation failed when no files changed");
 
-        assert!(matches!(result.outcome, VerifyOutcome::NoChanges));
+        assert!(matches!(result.outcome(), VerifyOutcome::NoChanges));
     }
 
     #[test]
@@ -335,7 +342,7 @@ mod tests {
             .execute(Path::new("/any"), &input)
             .expect("VerifyOperation failed when changeset covers affected package");
 
-        match result.outcome {
+        match result.outcome() {
             VerifyOutcome::Success(verification_result) => {
                 assert!(verification_result.uncovered_packages().is_empty());
                 assert!(verification_result.covered_packages().contains("my-crate"));
@@ -366,7 +373,7 @@ mod tests {
             .execute(Path::new("/any"), &input)
             .expect("VerifyOperation failed unexpectedly when package not covered");
 
-        match result.outcome {
+        match result.outcome() {
             VerifyOutcome::Failed(verification_result) => {
                 assert!(!verification_result.uncovered_packages().is_empty());
             }
@@ -444,7 +451,7 @@ mod tests {
             .execute(Path::new("/any"), &input)
             .expect("VerifyOperation failed when changeset has None bump type");
 
-        match result.outcome {
+        match result.outcome() {
             VerifyOutcome::Success(verification_result) => {
                 assert!(verification_result.uncovered_packages().is_empty());
                 assert!(verification_result.covered_packages().contains("my-crate"));
@@ -493,7 +500,7 @@ mod tests {
             .execute(Path::new("/any"), &input)
             .expect("operation should not error");
 
-        match result.outcome {
+        match result.outcome() {
             VerifyOutcome::Failed(verification_result) => {
                 assert!(
                     verification_result
@@ -546,7 +553,7 @@ mod tests {
             .execute(Path::new("/any"), &input)
             .expect("operation should not error");
 
-        match result.outcome {
+        match result.outcome() {
             VerifyOutcome::Success(verification_result) => {
                 assert!(verification_result.covered_packages().contains("core"));
                 assert!(verification_result.covered_packages().contains("app"));
@@ -589,7 +596,7 @@ mod tests {
             .execute(Path::new("/any"), &input)
             .expect("operation should not error");
 
-        match result.outcome {
+        match result.outcome() {
             VerifyOutcome::Success(verification_result) => {
                 assert!(verification_result.covered_packages().contains("core"));
                 assert!(verification_result.uncovered_packages().is_empty());
@@ -625,7 +632,7 @@ mod tests {
             .execute(Path::new("/any"), &input)
             .expect("operation should not error");
 
-        match result.outcome {
+        match result.outcome() {
             VerifyOutcome::Success(verification_result) => {
                 assert!(verification_result.covered_packages().contains("solo"));
                 assert!(verification_result.uncovered_packages().is_empty());
@@ -665,8 +672,8 @@ mod tests {
             .execute(Path::new("/any"), &input)
             .expect("operation should not error");
 
-        assert!(result.is_dirty);
-        match result.outcome {
+        assert!(result.is_dirty());
+        match result.outcome() {
             VerifyOutcome::Success(verification_result) => {
                 assert!(verification_result.covered_packages().contains("my-crate"));
             }
@@ -703,8 +710,8 @@ mod tests {
             .execute(Path::new("/any"), &input)
             .expect("operation should not error");
 
-        assert!(!result.is_dirty);
-        match result.outcome {
+        assert!(!result.is_dirty());
+        match result.outcome() {
             VerifyOutcome::Success(verification_result) => {
                 assert!(verification_result.covered_packages().contains("my-crate"));
             }
@@ -733,8 +740,8 @@ mod tests {
             .execute(Path::new("/any"), &input)
             .expect("operation should not error");
 
-        assert!(!result.is_dirty);
-        assert!(matches!(result.outcome, VerifyOutcome::NoChanges));
+        assert!(!result.is_dirty());
+        assert!(matches!(result.outcome(), VerifyOutcome::NoChanges));
     }
 
     #[test]
@@ -761,8 +768,8 @@ mod tests {
             .execute(Path::new("/any"), &input)
             .expect("operation should not error");
 
-        assert!(result.is_dirty);
-        assert!(matches!(result.outcome, VerifyOutcome::NoChanges));
+        assert!(result.is_dirty());
+        assert!(matches!(result.outcome(), VerifyOutcome::NoChanges));
     }
 
     #[test]
@@ -814,8 +821,8 @@ mod tests {
             .execute(Path::new("/any"), &input)
             .expect("operation should not error");
 
-        assert!(result.is_dirty);
-        match result.outcome {
+        assert!(result.is_dirty());
+        match result.outcome() {
             VerifyOutcome::Failed(verification_result) => {
                 assert!(!verification_result.uncovered_packages().is_empty());
             }
@@ -857,8 +864,8 @@ mod tests {
             .execute(Path::new("/any"), &input)
             .expect("operation should not error");
 
-        assert!(result.is_dirty);
-        match result.outcome {
+        assert!(result.is_dirty());
+        match result.outcome() {
             VerifyOutcome::Failed(verification_result) => {
                 assert!(
                     verification_result
@@ -909,8 +916,8 @@ mod tests {
             .execute(Path::new("/any"), &input)
             .expect("operation should not error");
 
-        assert!(!result.is_dirty);
-        match result.outcome {
+        assert!(!result.is_dirty());
+        match result.outcome() {
             VerifyOutcome::Success(verification_result) => {
                 assert!(verification_result.covered_packages().contains("my-crate"));
             }
@@ -951,7 +958,7 @@ mod tests {
             .execute(Path::new("/any"), &input)
             .expect("operation should not error");
 
-        match result.outcome {
+        match result.outcome() {
             VerifyOutcome::Failed(verification_result) => {
                 assert!(
                     verification_result
@@ -997,7 +1004,7 @@ mod tests {
             .execute(Path::new("/any"), &input)
             .expect("operation should not error");
 
-        match result.outcome {
+        match result.outcome() {
             VerifyOutcome::Success(verification_result) => {
                 assert!(verification_result.none_bump_violations().is_empty());
                 assert!(verification_result.covered_packages().contains("my-crate"));
@@ -1039,7 +1046,7 @@ mod tests {
             .execute(Path::new("/any"), &input)
             .expect("operation should not error");
 
-        match result.outcome {
+        match result.outcome() {
             VerifyOutcome::Success(verification_result) => {
                 assert!(verification_result.none_bump_violations().is_empty());
                 assert!(verification_result.covered_packages().contains("my-crate"));

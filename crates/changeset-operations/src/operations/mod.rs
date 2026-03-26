@@ -8,7 +8,9 @@ mod verify;
 
 pub use crate::planner::{ReleasePlan, VersionPlanner};
 pub use add::{AddInput, AddOperation, AddResult};
-pub use init::{InitInput, InitOperation, InitOutput, InitPlan, build_config_from_input};
+pub use init::{
+    InitInput, InitInputBuilder, InitOperation, InitOutput, InitPlan, build_config_from_input,
+};
 pub use manage::{
     GraduationDirectInput, GraduationDirectOperation, GraduationEvent, GraduationManageOperation,
     PrereleaseDirectInput, PrereleaseDirectOperation, PrereleaseEvent, PrereleaseManageOperation,

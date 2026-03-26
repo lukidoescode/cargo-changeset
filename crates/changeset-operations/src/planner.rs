@@ -28,12 +28,9 @@ impl ReleasePlan {
     }
 }
 
-/// Plans version releases by aggregating changesets and calculating new versions.
 pub struct VersionPlanner;
 
 impl VersionPlanner {
-    /// Plans version releases based on changesets.
-    ///
     /// # Errors
     ///
     /// Returns `VersionError` if version calculation fails.
@@ -44,8 +41,6 @@ impl VersionPlanner {
         Self::plan_releases_with_prerelease(changesets, packages, None)
     }
 
-    /// Plans version releases with optional prerelease specification.
-    ///
     /// # Errors
     ///
     /// Returns `VersionError` if version calculation fails.
@@ -92,8 +87,6 @@ impl VersionPlanner {
         Ok(ReleasePlan::new(releases, unknown_packages))
     }
 
-    /// Plans graduation of prerelease versions to stable.
-    ///
     /// # Errors
     ///
     /// Returns `VersionError` if version calculation fails.
@@ -116,8 +109,6 @@ impl VersionPlanner {
         Ok(ReleasePlan::new(releases, Vec::new()))
     }
 
-    /// Plans version releases with special handling for 0.x versions.
-    ///
     /// # Errors
     ///
     /// Returns `VersionError` if version calculation fails.
@@ -167,8 +158,6 @@ impl VersionPlanner {
         Ok(ReleasePlan::new(releases, unknown_packages))
     }
 
-    /// Plans graduation of 0.x versions to 1.0.0.
-    ///
     /// # Errors
     ///
     /// Returns `VersionError` if version calculation fails.
@@ -200,11 +189,6 @@ impl VersionPlanner {
         Ok(ReleasePlan::new(releases, Vec::new()))
     }
 
-    /// Plans version releases with per-package configuration.
-    ///
-    /// This method applies individual prerelease tags and graduation settings
-    /// to each package based on the validated configuration from CLI + TOML.
-    ///
     /// # Errors
     ///
     /// Returns `VersionError` if version calculation fails.
@@ -370,7 +354,6 @@ impl VersionPlanner {
         bumps_by_package
     }
 
-    /// Identifies packages that have changesets and those without.
     #[must_use]
     pub fn partition_packages(
         changesets: &[Changeset],
@@ -488,14 +471,14 @@ mod tests {
         assert!(plan.unknown_packages().is_empty());
 
         let release_a = plan
-            .releases
+            .releases()
             .iter()
             .find(|r| r.name() == "crate-a")
             .expect("crate-a should be in releases");
         assert_eq!(*release_a.new_version(), Version::new(1, 1, 0));
 
         let release_b = plan
-            .releases
+            .releases()
             .iter()
             .find(|r| r.name() == "crate-b")
             .expect("crate-b should be in releases");
@@ -939,14 +922,14 @@ mod tests {
             assert_eq!(plan.releases().len(), 2);
 
             let graduating = plan
-                .releases
+                .releases()
                 .iter()
                 .find(|r| r.name() == "graduating")
                 .expect("graduating should be in releases");
             assert_eq!(graduating.new_version(), &Version::new(1, 0, 0));
 
             let regular = plan
-                .releases
+                .releases()
                 .iter()
                 .find(|r| r.name() == "regular")
                 .expect("regular should be in releases");
@@ -1079,12 +1062,12 @@ mod tests {
             .expect("plan_releases_per_package");
 
             let release_a = plan
-                .releases
+                .releases()
                 .iter()
                 .find(|r| r.name() == "crate-a")
                 .expect("crate-a should be in releases");
             let release_b = plan
-                .releases
+                .releases()
                 .iter()
                 .find(|r| r.name() == "crate-b")
                 .expect("crate-b should be in releases");
@@ -1125,12 +1108,12 @@ mod tests {
             .expect("plan_releases_per_package");
 
             let release_a = plan
-                .releases
+                .releases()
                 .iter()
                 .find(|r| r.name() == "crate-a")
                 .expect("crate-a should be in releases");
             let release_b = plan
-                .releases
+                .releases()
                 .iter()
                 .find(|r| r.name() == "crate-b")
                 .expect("crate-b should be in releases");
@@ -1253,17 +1236,17 @@ mod tests {
             assert_eq!(plan.releases().len(), 3);
 
             let alpha = plan
-                .releases
+                .releases()
                 .iter()
                 .find(|r| r.name() == "alpha-crate")
                 .expect("alpha-crate should be in releases");
             let beta = plan
-                .releases
+                .releases()
                 .iter()
                 .find(|r| r.name() == "beta-crate")
                 .expect("beta-crate should be in releases");
             let stable = plan
-                .releases
+                .releases()
                 .iter()
                 .find(|r| r.name() == "stable-crate")
                 .expect("stable-crate should be in releases");

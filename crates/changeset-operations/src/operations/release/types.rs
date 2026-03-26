@@ -113,6 +113,7 @@ impl GitOperationResult {
     }
 }
 
+#[must_use]
 #[derive(Debug, Clone, Getset)]
 pub struct ReleaseOutput {
     #[getset(get, vis = "pub")]
@@ -152,6 +153,7 @@ impl ReleaseOutput {
     }
 }
 
+#[must_use]
 #[derive(Debug)]
 pub enum ReleaseOutcome {
     DryRun(ReleaseOutput),

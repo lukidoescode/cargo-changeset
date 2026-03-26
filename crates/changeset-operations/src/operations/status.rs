@@ -496,7 +496,7 @@ mod tests {
         );
 
         assert_eq!(result.changesets().len(), 1);
-        assert_eq!(result.changesets[0].summary(), "Add feature");
+        assert_eq!(result.changesets()[0].summary(), "Add feature");
 
         assert_eq!(result.consumed_prerelease_changesets().len(), 1);
         assert_eq!(
@@ -534,7 +534,7 @@ mod tests {
         assert_eq!(result.consumed_prerelease_changesets().len(), 2);
 
         let versions: Vec<&str> = result
-            .consumed_prerelease_changesets
+            .consumed_prerelease_changesets()
             .iter()
             .map(|(_, v)| v.as_str())
             .collect();
@@ -792,7 +792,7 @@ mod tests {
             .expect("StatusOperation failed");
 
         assert!(
-            result.none_bump_packages.is_empty(),
+            result.none_bump_packages().is_empty(),
             "promoted None bumps should not appear in none_bump_packages"
         );
         assert_eq!(result.projected_releases().len(), 1);
@@ -848,7 +848,9 @@ mod tests {
             .expect("StatusOperation failed");
 
         assert!(
-            result.none_bump_packages.contains(&"my-crate".to_string()),
+            result
+                .none_bump_packages()
+                .contains(&"my-crate".to_string()),
             "my-crate should appear in none_bump_packages with Allow behavior"
         );
         assert!(

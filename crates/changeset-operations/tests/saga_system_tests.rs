@@ -688,7 +688,7 @@ fn system_test_release_updates_root_workspace_dependencies() {
     git_add_all(&dir);
     git_commit(&dir, "Add changeset");
 
-    run_release_with_git(&dir, false, false, false).expect("release should succeed");
+    let _ = run_release_with_git(&dir, false, false, false).expect("release should succeed");
 
     let ws_dep_version = read_dep_version(
         &dir.path().join("Cargo.toml"),
@@ -753,7 +753,7 @@ crate-a = { path = "../crate-a" }
     git_add_all(&dir);
     git_commit(&dir, "Add changeset");
 
-    run_release_with_git(&dir, false, false, false).expect("release should succeed");
+    let _ = run_release_with_git(&dir, false, false, false).expect("release should succeed");
 
     let crate_b_dep_version = read_dep_version(
         &dir.path().join("crates/crate-b/Cargo.toml"),
@@ -820,7 +820,7 @@ crate-a = { path = "../crate-a", version = "1.0.0" }
     git_add_all(&dir);
     git_commit(&dir, "Add changeset");
 
-    run_release_with_git(&dir, false, false, false).expect("release should succeed");
+    let _ = run_release_with_git(&dir, false, false, false).expect("release should succeed");
 
     let dev_dep_version = read_dep_version(
         &dir.path().join("crates/crate-b/Cargo.toml"),
@@ -899,7 +899,7 @@ crate-a = { workspace = true }
     git_add_all(&dir);
     git_commit(&dir, "Add changeset");
 
-    run_release_with_git(&dir, false, false, false).expect("release should succeed");
+    let _ = run_release_with_git(&dir, false, false, false).expect("release should succeed");
 
     let ws_dep_version = read_dep_version(
         &dir.path().join("Cargo.toml"),
