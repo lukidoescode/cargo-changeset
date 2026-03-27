@@ -1,10 +1,9 @@
 use indexmap::IndexMap;
 use serde::Serialize;
 
-use changeset_core::{BumpType, ChangeCategory, Changeset};
-
 use crate::error::{FormatError, ValidationError};
 use crate::parse::FRONT_MATTER_DELIMITER;
+use changeset_core::{BumpType, ChangeCategory, Changeset};
 
 #[derive(Serialize)]
 struct FrontMatterOutput<'a> {
@@ -19,10 +18,6 @@ struct FrontMatterOutput<'a> {
     graduate: bool,
     #[serde(flatten)]
     releases: IndexMap<&'a str, BumpType>,
-}
-
-fn is_default_category(category: &ChangeCategory) -> bool {
-    *category == ChangeCategory::default()
 }
 
 #[must_use = "serialization result should be handled"]
@@ -59,6 +54,10 @@ pub fn serialize_changeset(changeset: &Changeset) -> Result<String, FormatError>
     }
 
     Ok(output)
+}
+
+fn is_default_category(category: &ChangeCategory) -> bool {
+    *category == ChangeCategory::default()
 }
 
 #[cfg(test)]
