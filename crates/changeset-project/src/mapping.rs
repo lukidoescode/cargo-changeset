@@ -55,15 +55,6 @@ impl FileMapping {
     }
 }
 
-struct PackageWithDepth {
-    package: PackageInfo,
-    depth: usize,
-}
-
-fn calculate_path_depth(path: &Path) -> usize {
-    path.components().count()
-}
-
 #[must_use]
 pub fn map_files_to_packages<S: BuildHasher>(
     project: &CargoProject,
@@ -141,6 +132,15 @@ pub fn map_files_to_packages<S: BuildHasher>(
         .collect();
 
     FileMapping::new(package_files, project_files, ignored_files)
+}
+
+struct PackageWithDepth {
+    package: PackageInfo,
+    depth: usize,
+}
+
+fn calculate_path_depth(path: &Path) -> usize {
+    path.components().count()
 }
 
 #[cfg(test)]
