@@ -39,44 +39,6 @@ pub(super) trait ChangelogHandler {
 struct RootChangelogStrategy;
 struct PerPackageChangelogStrategy;
 
-pub(super) fn strategy_for(location: ChangelogLocation) -> Box<dyn ChangelogHandler> {
-    match location {
-        ChangelogLocation::Root => Box::new(RootChangelogStrategy),
-        ChangelogLocation::PerPackage => Box::new(PerPackageChangelogStrategy),
-    }
-}
-
-fn read_changelog_content(path: &Path) -> Result<String> {
-    std::fs::read_to_string(path).map_err(|source| OperationError::ChangelogFileRead {
-        path: path.to_path_buf(),
-        source,
-    })
-}
-
-fn build_changelog_update(
-    result: ChangelogWriteResult,
-    version: Version,
-    package: Option<String>,
-) -> ChangelogUpdate {
-    ChangelogUpdate::new(result.path().clone(), package, version, result.created())
-}
-
-fn max_planned_version(planned_releases: &[PackageVersion]) -> Option<Version> {
-    planned_releases
-        .iter()
-        .map(PackageVersion::new_version)
-        .max()
-        .cloned()
-}
-
-fn max_current_version(planned_releases: &[PackageVersion]) -> Option<Version> {
-    planned_releases
-        .iter()
-        .map(PackageVersion::current_version)
-        .max()
-        .cloned()
-}
-
 impl ChangelogHandler for RootChangelogStrategy {
     fn capture_state(&self, ctx: &ChangelogCaptureContext<'_>) -> Result<Vec<ChangelogFileState>> {
         let mut backups = Vec::new();
@@ -189,6 +151,44 @@ impl ChangelogHandler for PerPackageChangelogStrategy {
 
         Ok(changelog_updates)
     }
+}
+
+pub(super) fn strategy_for(location: ChangelogLocation) -> Box<dyn ChangelogHandler> {
+    match location {
+        ChangelogLocation::Root => Box::new(RootChangelogStrategy),
+        ChangelogLocation::PerPackage => Box::new(PerPackageChangelogStrategy),
+    }
+}
+
+fn read_changelog_content(path: &Path) -> Result<String> {
+    std::fs::read_to_string(path).map_err(|source| OperationError::ChangelogFileRead {
+        path: path.to_path_buf(),
+        source,
+    })
+}
+
+fn build_changelog_update(
+    result: ChangelogWriteResult,
+    version: Version,
+    package: Option<String>,
+) -> ChangelogUpdate {
+    ChangelogUpdate::new(result.path().clone(), package, version, result.created())
+}
+
+fn max_planned_version(planned_releases: &[PackageVersion]) -> Option<Version> {
+    planned_releases
+        .iter()
+        .map(PackageVersion::new_version)
+        .max()
+        .cloned()
+}
+
+fn max_current_version(planned_releases: &[PackageVersion]) -> Option<Version> {
+    planned_releases
+        .iter()
+        .map(PackageVersion::current_version)
+        .max()
+        .cloned()
 }
 
 #[cfg(test)]

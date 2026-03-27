@@ -41,17 +41,6 @@ pub struct ReleaseOperation<P, RW, M, C, G, S> {
     release_state_io: Arc<S>,
 }
 
-#[cfg(test)]
-impl<P, RW, M, C, G, S> ReleaseOperation<P, RW, M, C, G, S> {
-    pub(crate) fn manifest_writer(&self) -> &M {
-        &self.manifest_writer
-    }
-
-    pub(crate) fn git_provider(&self) -> &G {
-        &self.git_provider
-    }
-}
-
 impl<P, RW, M, C, G, S> ReleaseOperation<P, RW, M, C, G, S>
 where
     P: ProjectProvider + DependencyGraphProvider,
@@ -458,6 +447,17 @@ where
             Arc::clone(&self.release_state_io),
             Arc::clone(&self.changelog_writer),
         )
+    }
+}
+
+#[cfg(test)]
+impl<P, RW, M, C, G, S> ReleaseOperation<P, RW, M, C, G, S> {
+    pub(crate) fn manifest_writer(&self) -> &M {
+        &self.manifest_writer
+    }
+
+    pub(crate) fn git_provider(&self) -> &G {
+        &self.git_provider
     }
 }
 

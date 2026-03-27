@@ -5,9 +5,8 @@ use changeset_version::{
     VersionError, calculate_new_version, calculate_new_version_with_zero_behavior, is_zero_version,
     max_bump_type,
 };
-use indexmap::IndexMap;
-
 use gset::Getset;
+use indexmap::IndexMap;
 
 use crate::types::{PackageReleaseConfig, PackageVersion};
 

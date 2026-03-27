@@ -802,30 +802,6 @@ impl InteractionProvider for MockInteractionProvider {
     }
 }
 
-/// # Panics
-///
-/// Panics if the version string is not valid semver.
-#[must_use]
-pub fn make_package(name: &str, version: &str) -> PackageInfo {
-    PackageInfo::new(
-        name.to_string(),
-        version.parse().expect("valid version"),
-        PathBuf::from(format!("/mock/crates/{name}")),
-    )
-}
-
-#[must_use]
-pub fn make_changeset(package_name: &str, bump: BumpType, summary: &str) -> Changeset {
-    Changeset::new(
-        summary.to_string(),
-        vec![changeset_core::PackageRelease::new(
-            package_name.to_string(),
-            bump,
-        )],
-        ChangeCategory::Changed,
-    )
-}
-
 struct MockManifestState {
     written_versions: Vec<(PathBuf, Version)>,
     dependency_version_updates: Vec<(PathBuf, String, Version)>,
@@ -1614,6 +1590,30 @@ impl_arc_delegation! {
         fn select_package_for_graduation(&self, eligible: &[&PackageInfo]) -> Result<MenuSelection<usize>>;
         fn select_package_to_remove_graduation(&self, items: &[String]) -> Result<MenuSelection<usize>>;
     }
+}
+
+/// # Panics
+///
+/// Panics if the version string is not valid semver.
+#[must_use]
+pub fn make_package(name: &str, version: &str) -> PackageInfo {
+    PackageInfo::new(
+        name.to_string(),
+        version.parse().expect("valid version"),
+        PathBuf::from(format!("/mock/crates/{name}")),
+    )
+}
+
+#[must_use]
+pub fn make_changeset(package_name: &str, bump: BumpType, summary: &str) -> Changeset {
+    Changeset::new(
+        summary.to_string(),
+        vec![changeset_core::PackageRelease::new(
+            package_name.to_string(),
+            bump,
+        )],
+        ChangeCategory::Changed,
+    )
 }
 
 #[cfg(test)]

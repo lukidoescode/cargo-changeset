@@ -3,8 +3,6 @@ mod classifiers;
 mod config_builder;
 mod context;
 mod dependency_expansion;
-
-pub(crate) use dependency_expansion::expand_with_reverse_dependencies;
 mod loading;
 mod operation;
 mod saga_data;
@@ -15,6 +13,7 @@ mod validator;
 
 pub use crate::types::{PackageReleaseConfig, PackageReleaseConfigBuilder, PackageVersion};
 pub use config_builder::ValidatedReleaseConfig;
+pub(crate) use dependency_expansion::expand_with_reverse_dependencies;
 pub use operation::ReleaseOperation;
 pub use types::{
     ChangelogUpdate, CommitResult, GitOperationResult, ReleaseInput, ReleaseInputBuilder,

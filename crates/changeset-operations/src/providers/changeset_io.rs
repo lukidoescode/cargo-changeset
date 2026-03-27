@@ -23,32 +23,7 @@ impl FileSystemChangesetIO {
             project_root: project_root.to_path_buf(),
         }
     }
-}
 
-impl ChangesetReader for FileSystemChangesetIO {
-    fn read_changeset(&self, relative_path: &Path) -> Result<Changeset> {
-        let full_path = self.project_root.join(relative_path);
-        let content =
-            fs::read_to_string(&full_path).map_err(|source| OperationError::ChangesetFileRead {
-                path: full_path.clone(),
-                source,
-            })?;
-        parse_changeset(&content).map_err(|source| OperationError::ChangesetParse {
-            path: full_path,
-            source,
-        })
-    }
-
-    fn list_changesets(&self, changeset_dir: &Path) -> Result<Vec<PathBuf>> {
-        self.list_changesets_filtered(changeset_dir, false)
-    }
-
-    fn list_consumed_changesets(&self, changeset_dir: &Path) -> Result<Vec<PathBuf>> {
-        self.list_changesets_filtered(changeset_dir, true)
-    }
-}
-
-impl FileSystemChangesetIO {
     fn resolve_base_path(&self, changeset_dir: &Path) -> PathBuf {
         if changeset_dir.is_absolute() {
             changeset_dir.to_path_buf()
@@ -114,9 +89,7 @@ impl FileSystemChangesetIO {
 
         Ok(changesets)
     }
-}
 
-impl FileSystemChangesetIO {
     fn resolve_changeset_path(&self, changeset_dir: &Path, path: &Path) -> Result<PathBuf> {
         if path.is_absolute() {
             Ok(path.to_path_buf())
@@ -135,28 +108,27 @@ impl FileSystemChangesetIO {
     }
 }
 
-fn update_changeset_file<F>(full_path: &Path, updater: F) -> Result<()>
-where
-    F: FnOnce(&mut Changeset),
-{
-    let content =
-        fs::read_to_string(full_path).map_err(|source| OperationError::ChangesetFileRead {
-            path: full_path.to_path_buf(),
-            source,
-        })?;
-
-    let mut changeset =
+impl ChangesetReader for FileSystemChangesetIO {
+    fn read_changeset(&self, relative_path: &Path) -> Result<Changeset> {
+        let full_path = self.project_root.join(relative_path);
+        let content =
+            fs::read_to_string(&full_path).map_err(|source| OperationError::ChangesetFileRead {
+                path: full_path.clone(),
+                source,
+            })?;
         parse_changeset(&content).map_err(|source| OperationError::ChangesetParse {
-            path: full_path.to_path_buf(),
+            path: full_path,
             source,
-        })?;
+        })
+    }
 
-    updater(&mut changeset);
+    fn list_changesets(&self, changeset_dir: &Path) -> Result<Vec<PathBuf>> {
+        self.list_changesets_filtered(changeset_dir, false)
+    }
 
-    let serialized = serialize_changeset(&changeset)?;
-    fs::write(full_path, serialized).map_err(OperationError::ChangesetFileWrite)?;
-
-    Ok(())
+    fn list_consumed_changesets(&self, changeset_dir: &Path) -> Result<Vec<PathBuf>> {
+        self.list_changesets_filtered(changeset_dir, true)
+    }
 }
 
 impl ChangesetWriter for FileSystemChangesetIO {
@@ -216,6 +188,30 @@ impl ChangesetWriter for FileSystemChangesetIO {
         }
         Ok(())
     }
+}
+
+fn update_changeset_file<F>(full_path: &Path, updater: F) -> Result<()>
+where
+    F: FnOnce(&mut Changeset),
+{
+    let content =
+        fs::read_to_string(full_path).map_err(|source| OperationError::ChangesetFileRead {
+            path: full_path.to_path_buf(),
+            source,
+        })?;
+
+    let mut changeset =
+        parse_changeset(&content).map_err(|source| OperationError::ChangesetParse {
+            path: full_path.to_path_buf(),
+            source,
+        })?;
+
+    updater(&mut changeset);
+
+    let serialized = serialize_changeset(&changeset)?;
+    fs::write(full_path, serialized).map_err(OperationError::ChangesetFileWrite)?;
+
+    Ok(())
 }
 
 fn generate_unique_filename(changeset_dir: &Path) -> String {

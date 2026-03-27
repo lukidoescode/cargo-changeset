@@ -6,6 +6,12 @@ use changeset_core::PackageInfo;
 use super::types::ReleaseInput;
 use crate::types::{PackageReleaseConfig, PackageVersion};
 
+pub(super) enum EarlyReturnDecision {
+    Continue,
+    NoChangesets,
+    ForceRequired,
+}
+
 pub(super) fn is_any_prerelease_configured(
     input: &ReleaseInput,
     per_package_config: &HashMap<String, PackageReleaseConfig>,
@@ -46,12 +52,6 @@ pub(super) fn is_zero_graduation(
     packages
         .iter()
         .any(|p| changeset_version::is_zero_version(p.version()))
-}
-
-pub(super) enum EarlyReturnDecision {
-    Continue,
-    NoChangesets,
-    ForceRequired,
 }
 
 pub(super) fn check_early_return(
