@@ -2,8 +2,6 @@ use std::collections::HashMap;
 use std::io::Read as _;
 use std::path::Path;
 
-use crate::environment::is_interactive;
-
 use changeset_core::BumpType;
 use changeset_operations::operations::{AddInput, AddOperation, AddResult};
 use changeset_operations::providers::{FileSystemChangesetIO, FileSystemProjectProvider};
@@ -11,6 +9,7 @@ use changeset_operations::traits::ProjectProvider;
 use changeset_project::ProjectKind;
 
 use super::AddArgs;
+use crate::environment::is_interactive;
 use crate::error::{CliError, Result};
 use crate::interaction::{NonInteractiveProvider, TerminalInteractionProvider};
 
