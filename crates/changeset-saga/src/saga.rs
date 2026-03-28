@@ -22,13 +22,6 @@ where
     Output: Send + 'static,
     Err: Debug,
 {
-    pub(crate) fn from_steps(steps: Vec<Box<dyn ErasedStep<Ctx, Err>>>) -> Self {
-        Self {
-            steps,
-            _phantom: PhantomData,
-        }
-    }
-
     /// Execute the saga, returning the final output on success.
     ///
     /// On failure, compensates all previously completed steps in reverse order.
@@ -51,6 +44,13 @@ where
         input: Input,
     ) -> (Result<Output, SagaError<Err>>, SagaAuditLog) {
         self.execute_internal(ctx, input)
+    }
+
+    pub(crate) fn from_steps(steps: Vec<Box<dyn ErasedStep<Ctx, Err>>>) -> Self {
+        Self {
+            steps,
+            _phantom: PhantomData,
+        }
     }
 
     fn execute_internal(

@@ -42,6 +42,28 @@ impl SagaAuditLog {
         Self::default()
     }
 
+    /// Get all records in the audit log.
+    #[must_use]
+    pub fn records(&self) -> &[StepRecord] {
+        &self.records
+    }
+
+    /// Get a summary of the saga execution for display.
+    #[must_use]
+    pub fn summary(&self) -> String {
+        let mut lines = Vec::new();
+        for record in &self.records {
+            let status = match record.status {
+                StepStatus::Executed => "✓",
+                StepStatus::Failed => "✗",
+                StepStatus::Compensated => "↩",
+                StepStatus::CompensationFailed => "⚠",
+            };
+            lines.push(format!("{status} {}", record.name));
+        }
+        lines.join("\n")
+    }
+
     /// Record a step execution starting.
     pub(crate) fn record_start(&mut self, name: &str) {
         self.records.push(StepRecord {
@@ -88,28 +110,6 @@ impl SagaAuditLog {
                 record.completed_at = Some(Instant::now());
             }
         }
-    }
-
-    /// Get all records in the audit log.
-    #[must_use]
-    pub fn records(&self) -> &[StepRecord] {
-        &self.records
-    }
-
-    /// Get a summary of the saga execution for display.
-    #[must_use]
-    pub fn summary(&self) -> String {
-        let mut lines = Vec::new();
-        for record in &self.records {
-            let status = match record.status {
-                StepStatus::Executed => "✓",
-                StepStatus::Failed => "✗",
-                StepStatus::Compensated => "↩",
-                StepStatus::CompensationFailed => "⚠",
-            };
-            lines.push(format!("{status} {}", record.name));
-        }
-        lines.join("\n")
     }
 }
 
