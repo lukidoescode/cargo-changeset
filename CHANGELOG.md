@@ -5,6 +5,58 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.2] - 2026-03-29
+### Added
+
+- **changeset-core**: Add `NoneBumpBehavior` type for configuring how `none` bump types are handled
+- **cargo-changeset**: Add `--none-bump-behavior` and `--none-bump-promote-message-template` options to the `init` command
+- **cargo-changeset**: Add CLI options to `cargo changeset init` for configuring commit templates, changelog templates, and file filtering
+- **cargo-changeset**: Add `--base-branch` flag to init, prompt for it interactively, and automatically use the configured base branch in verify when `--base` is not provided
+- **changeset-manifest**: Support configuring a default base branch via the base-branch field in the changeset metadata section
+- **changeset-manifest**: Support reading and writing `none-bump-behavior` and `none-bump-promote-message-template` in `Cargo.toml` metadata
+- **changeset-manifest**: Support reading and writing `dependency-bump-changelog-template` in changeset init config files
+- **changeset-manifest**: Persist commit title, changelog templates, and file filtering configuration to `.changeset/config.toml`
+- **changeset-git**: Export `DEFAULT_BASE_BRANCH` constant for consistent default base branch usage across crates
+- **changeset-operations**: Add filtering settings support to initialization workflow with new `FilteringSettingsInput` type and `configure_filtering_settings()` trait method
+- **changeset-operations**: Make the default base branch configurable via `GitSettingsInput`, propagated through all init paths into the written config
+- **changeset-operations**: Automatically bump packages that depend on a changed package and generate changelog entries for the dependency update
+- **changeset-operations**: Support promoting, allowing, or disallowing `none` bump types in release, status, and verify operations
+- **changeset-project**: Expose `base_branch` on `RootChangesetConfig`, falling back to `DEFAULT_BASE_BRANCH` when not set in the manifest
+- **changeset-project**: Add `dependency-bump-changelog-template` config option to customize the changelog message template for auto-bumped dependency updates
+- **changeset-project**: Support `none-bump-behavior` and `none-bump-promote-message-template` configuration in workspace metadata
+
+### Changed
+
+- **changeset-core**: Internal architectural changes
+- **cargo-changeset**: Internal architectural changes
+- **cargo-changeset**: Use shared `DEFAULT_BASE_BRANCH` constant instead of hardcoded base branch strings
+- **cargo-changeset**: Internal code reorganization following canonical file ordering rules
+- **changeset-version**: Improve clarity of zero-version bump calculation logic
+- **changeset-version**: Internal architectural changes
+- **changeset-manifest**: Internal code reorganization following canonical file ordering rules
+- **changeset-changelog**: Internal architectural changes
+- **changeset-changelog**: Changelog entries are now generated for `none` bump changesets when promoted to `patch`
+- **changeset-changelog**: Internal code reorganization following canonical file ordering rules
+- **changeset-git**: Internal architectural changes
+- **changeset-git**: Internal code reorganization following canonical file ordering rules
+- **changeset-operations**: Internal architectural changes
+- **changeset-operations**: Use shared `DEFAULT_BASE_BRANCH` constant instead of hardcoded base branch strings
+- **changeset-operations**: Internal code reorganization following canonical file ordering rules
+- **changeset-parse**: Internal architectural changes
+- **changeset-parse**: Parsed changesets with `none` bump types can now be promoted to `patch` during release
+- **changeset-parse**: Internal code reorganization following canonical file ordering rules
+- **changeset-project**: Internal architectural changes
+- **changeset-project**: Internal code reorganization following canonical file ordering rules
+- **changeset-project**: Unify workspace and package config parsing into a single function and remove redundant serde rename attribute
+- **changeset-saga**: Internal code reorganization following canonical file ordering rules
+
+### Fixed
+
+- **cargo-changeset**: Auto-bump dependent crates on release
+- **cargo-changeset**: Faster and correct workspace discovery via fixed glob pattern matching
+- **changeset-operations**: Faster and correct workspace discovery via fixed glob pattern matching
+- **changeset-project**: Replace custom recursive directory walker with glob crate for correct and faster pattern matching
+
 ## [0.1.1] - 2026-03-15
 ### Added
 
@@ -78,3 +130,5 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **cargo-changeset**: Fix cargo subcommand dispatch by supporting both 'cargo changeset <cmd>' and direct 'cargo-changeset <cmd>' invocation modes
 
 [0.1.1]: https://github.com/lukidoescode/cargo-changeset/compare/v0.1.0...v0.1.1
+
+[0.1.2]: https://github.com/lukidoescode/cargo-changeset/compare/v0.1.1...v0.1.2
