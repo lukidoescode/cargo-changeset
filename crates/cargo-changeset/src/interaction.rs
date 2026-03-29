@@ -2,6 +2,8 @@ use std::fs;
 use std::io::Write as _;
 use std::process::Command;
 
+use dialoguer::{Confirm, Input, MultiSelect, Select};
+
 use changeset_core::{BumpType, ChangeCategory, PackageInfo};
 use changeset_git::DEFAULT_BASE_BRANCH;
 use changeset_manifest::{
@@ -13,7 +15,6 @@ use changeset_operations::traits::{
     FilteringSettingsInput, GitSettingsInput, InitInteractionProvider, InteractionProvider,
     PackageSelection, ProjectContext, VersionSettingsInput,
 };
-use dialoguer::{Confirm, Input, MultiSelect, Select};
 
 use crate::environment::is_interactive;
 use crate::error::CliError;
@@ -125,95 +126,6 @@ impl InteractionProvider for TerminalInteractionProvider {
             get_description_terminal().map_err(cli_to_operation_error)
         }
     }
-}
-
-fn from_dialoguer(e: dialoguer::Error) -> std::io::Error {
-    match e {
-        dialoguer::Error::IO(io) => io,
-    }
-}
-
-fn cli_to_operation_error(e: CliError) -> changeset_operations::OperationError {
-    use changeset_operations::OperationError;
-
-    match e {
-        CliError::Io(io) => OperationError::Io(io),
-        CliError::NotATty => OperationError::InteractionRequired,
-        CliError::EditorFailed { source } => OperationError::Io(source),
-        CliError::Core(e) => OperationError::Core(e),
-        CliError::Git(e) => OperationError::Git(e),
-        CliError::Project(e) => OperationError::Project(e),
-        CliError::Operation(e) => e,
-        CliError::CurrentDir(io) => OperationError::Io(io),
-        CliError::InvalidPackageBumpFormat { .. }
-        | CliError::InvalidBumpType { .. }
-        | CliError::VerificationFailed { .. }
-        | CliError::ChangesetDeleted { .. } => OperationError::Cancelled,
-    }
-}
-
-fn get_description_terminal() -> std::result::Result<DescriptionInput, CliError> {
-    println!();
-    println!("Enter description (press Enter 3 times to finish):");
-    println!();
-
-    let mut lines = Vec::new();
-    let mut empty_line_count = 0;
-
-    loop {
-        let mut line = String::new();
-        std::io::stdin().read_line(&mut line)?;
-
-        let trimmed = line.trim_end_matches(['\n', '\r']);
-
-        if trimmed.is_empty() {
-            empty_line_count += 1;
-            if empty_line_count >= 2 {
-                break;
-            }
-            lines.push(String::new());
-        } else {
-            empty_line_count = 0;
-            lines.push(trimmed.to_string());
-        }
-    }
-
-    while lines.last().is_some_and(String::is_empty) {
-        lines.pop();
-    }
-
-    Ok(DescriptionInput::Provided(lines.join("\n")))
-}
-
-fn get_description_editor() -> std::result::Result<DescriptionInput, CliError> {
-    let editor = std::env::var("EDITOR").unwrap_or_else(|_| "vi".to_string());
-
-    let mut temp_file = tempfile::NamedTempFile::new()?;
-    let template =
-        "# Enter your changeset description above.\n# Lines starting with # will be ignored.\n";
-    temp_file.write_all(template.as_bytes())?;
-    temp_file.flush()?;
-
-    let status = Command::new(&editor)
-        .arg(temp_file.path())
-        .status()
-        .map_err(|source| CliError::EditorFailed { source })?;
-
-    if !status.success() {
-        return Err(CliError::EditorFailed {
-            source: std::io::Error::other(format!("editor exited with status: {status}")),
-        });
-    }
-
-    let content = fs::read_to_string(temp_file.path())?;
-
-    let description: String = content
-        .lines()
-        .filter(|line| !line.starts_with('#'))
-        .collect::<Vec<_>>()
-        .join("\n");
-
-    Ok(DescriptionInput::Provided(description))
 }
 
 pub(crate) struct NonInteractiveProvider;
@@ -399,6 +311,109 @@ impl InitInteractionProvider for TerminalInitInteractionProvider {
 
         Ok(Some(FilteringSettingsInput { ignored_files }))
     }
+}
+
+pub(crate) fn confirm_proceed(prompt: &str) -> crate::error::Result<bool> {
+    if !is_interactive() {
+        return Err(CliError::NotATty);
+    }
+
+    let confirmed = Confirm::new()
+        .with_prompt(prompt)
+        .default(true)
+        .interact_opt()
+        .map_err(from_dialoguer)?;
+
+    Ok(confirmed == Some(true))
+}
+
+fn from_dialoguer(e: dialoguer::Error) -> std::io::Error {
+    match e {
+        dialoguer::Error::IO(io) => io,
+    }
+}
+
+fn cli_to_operation_error(e: CliError) -> changeset_operations::OperationError {
+    use changeset_operations::OperationError;
+
+    match e {
+        CliError::Io(io) => OperationError::Io(io),
+        CliError::NotATty => OperationError::InteractionRequired,
+        CliError::EditorFailed { source } => OperationError::Io(source),
+        CliError::Core(e) => OperationError::Core(e),
+        CliError::Git(e) => OperationError::Git(e),
+        CliError::Project(e) => OperationError::Project(e),
+        CliError::Operation(e) => e,
+        CliError::CurrentDir(io) => OperationError::Io(io),
+        CliError::InvalidPackageBumpFormat { .. }
+        | CliError::InvalidBumpType { .. }
+        | CliError::VerificationFailed { .. }
+        | CliError::ChangesetDeleted { .. } => OperationError::Cancelled,
+    }
+}
+
+fn get_description_terminal() -> std::result::Result<DescriptionInput, CliError> {
+    println!();
+    println!("Enter description (press Enter 3 times to finish):");
+    println!();
+
+    let mut lines = Vec::new();
+    let mut empty_line_count = 0;
+
+    loop {
+        let mut line = String::new();
+        std::io::stdin().read_line(&mut line)?;
+
+        let trimmed = line.trim_end_matches(['\n', '\r']);
+
+        if trimmed.is_empty() {
+            empty_line_count += 1;
+            if empty_line_count >= 2 {
+                break;
+            }
+            lines.push(String::new());
+        } else {
+            empty_line_count = 0;
+            lines.push(trimmed.to_string());
+        }
+    }
+
+    while lines.last().is_some_and(String::is_empty) {
+        lines.pop();
+    }
+
+    Ok(DescriptionInput::Provided(lines.join("\n")))
+}
+
+fn get_description_editor() -> std::result::Result<DescriptionInput, CliError> {
+    let editor = std::env::var("EDITOR").unwrap_or_else(|_| "vi".to_string());
+
+    let mut temp_file = tempfile::NamedTempFile::new()?;
+    let template =
+        "# Enter your changeset description above.\n# Lines starting with # will be ignored.\n";
+    temp_file.write_all(template.as_bytes())?;
+    temp_file.flush()?;
+
+    let status = Command::new(&editor)
+        .arg(temp_file.path())
+        .status()
+        .map_err(|source| CliError::EditorFailed { source })?;
+
+    if !status.success() {
+        return Err(CliError::EditorFailed {
+            source: std::io::Error::other(format!("editor exited with status: {status}")),
+        });
+    }
+
+    let content = fs::read_to_string(temp_file.path())?;
+
+    let description: String = content
+        .lines()
+        .filter(|line| !line.starts_with('#'))
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    Ok(DescriptionInput::Provided(description))
 }
 
 fn prompt_base_branch() -> Result<String> {
@@ -592,18 +607,4 @@ fn prompt_none_bump_promote_message_template() -> Result<String> {
         .default("Internal architectural changes".to_string())
         .interact_text()
         .map_err(from_dialoguer)?)
-}
-
-pub(crate) fn confirm_proceed(prompt: &str) -> crate::error::Result<bool> {
-    if !is_interactive() {
-        return Err(CliError::NotATty);
-    }
-
-    let confirmed = Confirm::new()
-        .with_prompt(prompt)
-        .default(true)
-        .interact_opt()
-        .map_err(from_dialoguer)?;
-
-    Ok(confirmed == Some(true))
 }

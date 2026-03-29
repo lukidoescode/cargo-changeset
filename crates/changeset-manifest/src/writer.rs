@@ -193,6 +193,72 @@ pub fn write_metadata_section(
     })
 }
 
+/// Updates the version of a dependency in all relevant sections of a Cargo.toml.
+///
+/// Checks `[workspace.dependencies]`, `[dependencies]`, `[dev-dependencies]`,
+/// and `[build-dependencies]`. Only updates table-form entries that have an
+/// explicit `version` key and do NOT have `workspace = true`.
+///
+/// # Errors
+///
+/// Returns an error if the manifest cannot be read, parsed, or written.
+pub fn update_dependency_version(
+    path: &Path,
+    dependency_name: &str,
+    new_version: &Version,
+) -> Result<bool, ManifestError> {
+    let mut doc = read_document(path)?;
+    let mut changed = false;
+
+    if let Some(workspace) = doc.get_mut("workspace") {
+        if let Some(deps) = workspace.get_mut("dependencies") {
+            if update_dep_entry(deps, dependency_name, new_version) {
+                changed = true;
+            }
+        }
+    }
+
+    for section in &DEPENDENCY_SECTIONS {
+        if let Some(deps) = doc.get_mut(section) {
+            if update_dep_entry(deps, dependency_name, new_version) {
+                changed = true;
+            }
+        }
+    }
+
+    if changed {
+        std::fs::write(path, doc.to_string()).map_err(|source| ManifestError::Write {
+            path: path.to_path_buf(),
+            source,
+        })?;
+    }
+
+    Ok(changed)
+}
+
+fn update_dep_entry(deps: &mut Item, dep_name: &str, new_version: &Version) -> bool {
+    let Some(entry) = deps.get_mut(dep_name) else {
+        return false;
+    };
+
+    if let Some(table) = entry.as_table_like_mut() {
+        let has_workspace_true = table
+            .get("workspace")
+            .and_then(toml_edit::Item::as_bool)
+            .unwrap_or(false);
+        if has_workspace_true {
+            return false;
+        }
+
+        if table.get("version").is_some() {
+            table.insert("version", value(new_version.to_string()));
+            return true;
+        }
+    }
+
+    false
+}
+
 fn populate_changeset_table(changeset_table: &mut Table, config: &InitConfig) {
     if let Some(commit) = config.commit {
         changeset_table.insert("commit", value(commit));
@@ -276,72 +342,6 @@ fn populate_changeset_table(changeset_table: &mut Table, config: &InitConfig) {
             changeset_table.insert("ignored-files", Item::Value(toml_edit::Value::Array(arr)));
         }
     }
-}
-
-/// Updates the version of a dependency in all relevant sections of a Cargo.toml.
-///
-/// Checks `[workspace.dependencies]`, `[dependencies]`, `[dev-dependencies]`,
-/// and `[build-dependencies]`. Only updates table-form entries that have an
-/// explicit `version` key and do NOT have `workspace = true`.
-///
-/// # Errors
-///
-/// Returns an error if the manifest cannot be read, parsed, or written.
-pub fn update_dependency_version(
-    path: &Path,
-    dependency_name: &str,
-    new_version: &Version,
-) -> Result<bool, ManifestError> {
-    let mut doc = read_document(path)?;
-    let mut changed = false;
-
-    if let Some(workspace) = doc.get_mut("workspace") {
-        if let Some(deps) = workspace.get_mut("dependencies") {
-            if update_dep_entry(deps, dependency_name, new_version) {
-                changed = true;
-            }
-        }
-    }
-
-    for section in &DEPENDENCY_SECTIONS {
-        if let Some(deps) = doc.get_mut(section) {
-            if update_dep_entry(deps, dependency_name, new_version) {
-                changed = true;
-            }
-        }
-    }
-
-    if changed {
-        std::fs::write(path, doc.to_string()).map_err(|source| ManifestError::Write {
-            path: path.to_path_buf(),
-            source,
-        })?;
-    }
-
-    Ok(changed)
-}
-
-fn update_dep_entry(deps: &mut Item, dep_name: &str, new_version: &Version) -> bool {
-    let Some(entry) = deps.get_mut(dep_name) else {
-        return false;
-    };
-
-    if let Some(table) = entry.as_table_like_mut() {
-        let has_workspace_true = table
-            .get("workspace")
-            .and_then(toml_edit::Item::as_bool)
-            .unwrap_or(false);
-        if has_workspace_true {
-            return false;
-        }
-
-        if table.get("version").is_some() {
-            table.insert("version", value(new_version.to_string()));
-            return true;
-        }
-    }
-
-    false
 }
 
 #[cfg(test)]

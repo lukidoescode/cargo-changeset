@@ -1,6 +1,21 @@
 use std::marker::PhantomData;
 use std::path::Path;
 
+use changeset_project::TagFormat;
+use changeset_saga::SagaStep;
+use semver::Version;
+use tracing::debug;
+
+use super::context::ReleaseSagaContext;
+use super::saga_data::{DependencyUpdate, ManifestUpdate, ReleaseSagaData};
+use super::{CommitResult, TagResult};
+use crate::OperationError;
+use crate::traits::{
+    ChangelogWriter, ChangesetReader, ChangesetWriter, GitCommitProvider, GitStagingProvider,
+    GitTagProvider, LockfileUpdater, ManifestDependencyWriter, ManifestVersionWriter,
+    ReleaseStateIO, WorkspaceVersionManager,
+};
+
 macro_rules! saga_step_struct {
     ($name:ident) => {
         pub struct $name<G, M, RW, S, C> {
@@ -23,21 +38,6 @@ macro_rules! saga_step_struct {
         }
     };
 }
-
-use changeset_project::TagFormat;
-use changeset_saga::SagaStep;
-use semver::Version;
-use tracing::debug;
-
-use super::context::ReleaseSagaContext;
-use super::saga_data::{DependencyUpdate, ManifestUpdate, ReleaseSagaData};
-use super::{CommitResult, TagResult};
-use crate::OperationError;
-use crate::traits::{
-    ChangelogWriter, ChangesetReader, ChangesetWriter, GitCommitProvider, GitStagingProvider,
-    GitTagProvider, LockfileUpdater, ManifestDependencyWriter, ManifestVersionWriter,
-    ReleaseStateIO, WorkspaceVersionManager,
-};
 
 saga_step_struct!(WriteManifestVersionsStep);
 

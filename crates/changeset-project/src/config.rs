@@ -9,6 +9,7 @@ use globset::{Glob, GlobSet, GlobSetBuilder};
 use crate::error::ProjectError;
 use crate::manifest::{ChangesetMetadata, TagFormatValue, read_manifest};
 use crate::project::{CargoProject, ProjectKind};
+
 const DEFAULT_DEPENDENCY_BUMP_CHANGELOG_TEMPLATE: &str =
     "Updated dependency `{dependency}` to v{version}";
 const DEFAULT_NONE_BUMP_PROMOTE_MESSAGE_TEMPLATE: &str = "Internal architectural changes";
@@ -29,19 +30,6 @@ pub struct GitConfig {
     tag_format: TagFormat,
     commit_title_template: String,
     changes_in_body: bool,
-}
-
-impl Default for GitConfig {
-    fn default() -> Self {
-        Self {
-            commit: true,
-            tags: true,
-            keep_changesets: false,
-            tag_format: TagFormat::default(),
-            commit_title_template: String::from("{new-version}"),
-            changes_in_body: true,
-        }
-    }
 }
 
 impl GitConfig {
@@ -83,6 +71,19 @@ impl GitConfig {
     }
 }
 
+impl Default for GitConfig {
+    fn default() -> Self {
+        Self {
+            commit: true,
+            tags: true,
+            keep_changesets: false,
+            tag_format: TagFormat::default(),
+            commit_title_template: String::from("{new-version}"),
+            changes_in_body: true,
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct RootChangesetConfig {
     ignored_files: GlobSet,
@@ -94,26 +95,6 @@ pub struct RootChangesetConfig {
     base_branch: String,
     none_bump_behavior: changeset_core::NoneBumpBehavior,
     none_bump_promote_message_template: String,
-}
-
-impl Default for RootChangesetConfig {
-    fn default() -> Self {
-        Self {
-            ignored_files: GlobSet::empty(),
-            changeset_dir: PathBuf::from(crate::DEFAULT_CHANGESET_DIR),
-            changelog_config: ChangelogConfig::default(),
-            git_config: GitConfig::default(),
-            zero_version_behavior: ZeroVersionBehavior::default(),
-            dependency_bump_changelog_template: String::from(
-                DEFAULT_DEPENDENCY_BUMP_CHANGELOG_TEMPLATE,
-            ),
-            base_branch: String::from(DEFAULT_BASE_BRANCH),
-            none_bump_behavior: changeset_core::NoneBumpBehavior::default(),
-            none_bump_promote_message_template: String::from(
-                DEFAULT_NONE_BUMP_PROMOTE_MESSAGE_TEMPLATE,
-            ),
-        }
-    }
 }
 
 impl RootChangesetConfig {
@@ -182,6 +163,26 @@ impl RootChangesetConfig {
     }
 }
 
+impl Default for RootChangesetConfig {
+    fn default() -> Self {
+        Self {
+            ignored_files: GlobSet::empty(),
+            changeset_dir: PathBuf::from(crate::DEFAULT_CHANGESET_DIR),
+            changelog_config: ChangelogConfig::default(),
+            git_config: GitConfig::default(),
+            zero_version_behavior: ZeroVersionBehavior::default(),
+            dependency_bump_changelog_template: String::from(
+                DEFAULT_DEPENDENCY_BUMP_CHANGELOG_TEMPLATE,
+            ),
+            base_branch: String::from(DEFAULT_BASE_BRANCH),
+            none_bump_behavior: changeset_core::NoneBumpBehavior::default(),
+            none_bump_promote_message_template: String::from(
+                DEFAULT_NONE_BUMP_PROMOTE_MESSAGE_TEMPLATE,
+            ),
+        }
+    }
+}
+
 #[derive(Debug, Default)]
 pub struct PackageChangesetConfig {
     ignored_files: GlobSet,
@@ -202,6 +203,61 @@ impl PackageChangesetConfig {
 enum CargoRootConfigType {
     Workspace,
     Package,
+}
+
+/// Parses the root changeset configuration based on project kind.
+///
+/// For single-package projects, reads from `[package.metadata.changeset]`.
+/// For workspaces, reads from `[workspace.metadata.changeset]`.
+///
+/// # Errors
+///
+/// Returns `ProjectError` if the manifest cannot be read or parsed, or if glob patterns are invalid.
+pub fn parse_root_config(project: &CargoProject) -> Result<RootChangesetConfig, ProjectError> {
+    match project.kind() {
+        ProjectKind::SinglePackage => {
+            parse_cargo_root_config(project.root(), CargoRootConfigType::Package)
+        }
+        ProjectKind::VirtualWorkspace | ProjectKind::WorkspaceWithRoot => {
+            parse_cargo_root_config(project.root(), CargoRootConfigType::Workspace)
+        }
+    }
+}
+
+/// # Errors
+///
+/// Returns `ProjectError` if the manifest cannot be read or parsed, or if glob patterns are invalid.
+pub fn parse_package_config(package_path: &Path) -> Result<PackageChangesetConfig, ProjectError> {
+    let manifest_path = package_path.join("Cargo.toml");
+    let manifest = read_manifest(&manifest_path)?;
+
+    let patterns = manifest
+        .package
+        .and_then(|pkg| pkg.metadata)
+        .and_then(|meta| meta.changeset)
+        .map(|cs| cs.ignored_files)
+        .unwrap_or_default();
+
+    let ignored_files = build_glob_set(&patterns)?;
+
+    Ok(PackageChangesetConfig { ignored_files })
+}
+
+/// # Errors
+///
+/// Returns an error if any manifest cannot be read or parsed, or if glob patterns are invalid.
+pub fn load_changeset_configs(
+    project: &CargoProject,
+) -> Result<(RootChangesetConfig, HashMap<String, PackageChangesetConfig>), ProjectError> {
+    let root_config = parse_root_config(project)?;
+
+    let mut package_configs = HashMap::new();
+    for package in project.packages() {
+        let config = parse_package_config(package.path())?;
+        package_configs.insert(package.name().clone(), config);
+    }
+
+    Ok((root_config, package_configs))
 }
 
 fn build_glob_set(patterns: &[String]) -> Result<GlobSet, ProjectError> {
@@ -330,61 +386,6 @@ fn parse_cargo_root_config(
         none_bump_behavior,
         none_bump_promote_message_template,
     })
-}
-
-/// Parses the root changeset configuration based on project kind.
-///
-/// For single-package projects, reads from `[package.metadata.changeset]`.
-/// For workspaces, reads from `[workspace.metadata.changeset]`.
-///
-/// # Errors
-///
-/// Returns `ProjectError` if the manifest cannot be read or parsed, or if glob patterns are invalid.
-pub fn parse_root_config(project: &CargoProject) -> Result<RootChangesetConfig, ProjectError> {
-    match project.kind() {
-        ProjectKind::SinglePackage => {
-            parse_cargo_root_config(project.root(), CargoRootConfigType::Package)
-        }
-        ProjectKind::VirtualWorkspace | ProjectKind::WorkspaceWithRoot => {
-            parse_cargo_root_config(project.root(), CargoRootConfigType::Workspace)
-        }
-    }
-}
-
-/// # Errors
-///
-/// Returns `ProjectError` if the manifest cannot be read or parsed, or if glob patterns are invalid.
-pub fn parse_package_config(package_path: &Path) -> Result<PackageChangesetConfig, ProjectError> {
-    let manifest_path = package_path.join("Cargo.toml");
-    let manifest = read_manifest(&manifest_path)?;
-
-    let patterns = manifest
-        .package
-        .and_then(|pkg| pkg.metadata)
-        .and_then(|meta| meta.changeset)
-        .map(|cs| cs.ignored_files)
-        .unwrap_or_default();
-
-    let ignored_files = build_glob_set(&patterns)?;
-
-    Ok(PackageChangesetConfig { ignored_files })
-}
-
-/// # Errors
-///
-/// Returns an error if any manifest cannot be read or parsed, or if glob patterns are invalid.
-pub fn load_changeset_configs(
-    project: &CargoProject,
-) -> Result<(RootChangesetConfig, HashMap<String, PackageChangesetConfig>), ProjectError> {
-    let root_config = parse_root_config(project)?;
-
-    let mut package_configs = HashMap::new();
-    for package in project.packages() {
-        let config = parse_package_config(package.path())?;
-        package_configs.insert(package.name().clone(), config);
-    }
-
-    Ok((root_config, package_configs))
 }
 
 #[cfg(test)]

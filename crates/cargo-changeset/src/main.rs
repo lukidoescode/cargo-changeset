@@ -13,13 +13,6 @@ use crate::commands::Commands;
 use crate::error::CliError;
 
 #[derive(Parser)]
-#[command(name = "cargo")]
-#[command(bin_name = "cargo")]
-enum CargoCli {
-    Changeset(ChangesetCli),
-}
-
-#[derive(Parser)]
 #[command(name = "cargo-changeset")]
 #[command(version = env!("CARGO_CHANGESET_VERSION"))]
 #[command(about = "Manage changesets for Cargo projects", long_about = None)]
@@ -29,6 +22,13 @@ struct ChangesetCli {
 
     #[command(subcommand)]
     command: Commands,
+}
+
+#[derive(Parser)]
+#[command(name = "cargo")]
+#[command(bin_name = "cargo")]
+enum CargoCli {
+    Changeset(ChangesetCli),
 }
 
 fn main() -> ExitCode {

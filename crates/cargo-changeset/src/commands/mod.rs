@@ -7,196 +7,14 @@ mod verify;
 
 use std::path::Path;
 
+use clap::{Args, Subcommand, ValueEnum};
+
 use changeset_core::{BumpType, ChangeCategory};
 use changeset_manifest::{
     ChangelogLocation, ComparisonLinks, NoneBumpBehavior, TagFormat, ZeroVersionBehavior,
 };
-use clap::{Args, Subcommand, ValueEnum};
 
 use crate::error::Result;
-
-#[derive(Subcommand)]
-pub(crate) enum Commands {
-    /// Add a new changeset
-    Add(AddArgs),
-    /// Verify changeset coverage for changed packages
-    Verify(VerifyArgs),
-    /// Show pending changesets and projected version bumps
-    Status,
-    /// Calculate version bumps and prepare releases based on pending changesets
-    #[command(
-        verbatim_doc_comment,
-        after_long_help = "\
-Pre-release workflow:
-  1. cargo changeset release --prerelease alpha      → All packages get alpha tag
-  2. cargo changeset release --prerelease foo:alpha  → Only foo gets alpha tag
-  3. cargo changeset release                         → Graduates prereleases to stable
-
-Graduation (0.x to 1.0.0):
-  - cargo changeset release --graduate foo --graduate bar
-  - Or configure in .changeset/graduation.toml
-
-Per-package configuration can also be set via:
-  - .changeset/pre-release.toml
-  - .changeset/graduation.toml
-Use 'cargo changeset manage' to configure these files."
-    )]
-    Release(ReleaseArgs),
-    /// Initialize changeset directory in the project
-    Init(InitArgs),
-    /// Manage release configuration files
-    Manage(ManageArgs),
-}
-
-#[derive(Args)]
-pub(crate) struct InitArgs {
-    /// Use default configuration values without prompts
-    #[arg(long)]
-    pub defaults: bool,
-
-    /// Disable interactive prompts (use only CLI-provided values)
-    #[arg(long)]
-    pub no_interactive: bool,
-
-    /// Create git commits on release (default: true)
-    #[arg(long)]
-    pub commit: Option<bool>,
-
-    /// Create git tags on release (default: true)
-    #[arg(long)]
-    pub tags: Option<bool>,
-
-    /// Keep changeset files after release (default: false)
-    #[arg(long)]
-    pub keep_changesets: Option<bool>,
-
-    /// Tag format: "version-only" or "crate-prefixed" (default: version-only)
-    #[arg(long, value_name = "FORMAT")]
-    pub tag_format: Option<TagFormatArg>,
-
-    /// Changelog location: "root" or "per-package" (default: root)
-    #[arg(long, value_name = "LOCATION")]
-    pub changelog: Option<ChangelogLocationArg>,
-
-    /// Comparison links: "auto", "enabled", or "disabled" (default: auto)
-    #[arg(long, value_name = "MODE")]
-    pub comparison_links: Option<ComparisonLinksArg>,
-
-    /// Zero version behavior: "effective-minor" or "auto-promote-on-major" (default: effective-minor)
-    #[arg(long, value_name = "BEHAVIOR")]
-    pub zero_version_behavior: Option<ZeroVersionBehaviorArg>,
-
-    /// Default base branch for git comparisons (default: main)
-    #[arg(long, value_name = "BRANCH")]
-    pub base_branch: Option<String>,
-
-    /// None bump behavior: "promote-to-patch", "allow", or "disallow" (default: promote-to-patch)
-    #[arg(long, value_name = "BEHAVIOR")]
-    pub none_bump_behavior: Option<NoneBumpBehaviorArg>,
-
-    /// Custom changelog message template when none bumps are promoted to patch
-    #[arg(long, value_name = "MESSAGE")]
-    pub none_bump_promote_message_template: Option<String>,
-
-    /// Commit title template (default: "{new-version}")
-    #[arg(long, value_name = "TEMPLATE")]
-    pub commit_title_template: Option<String>,
-
-    /// Include version transition details in commit body (default: true)
-    #[arg(long)]
-    pub changes_in_body: Option<bool>,
-
-    /// Custom comparison links template for changelogs
-    #[arg(long, value_name = "TEMPLATE")]
-    pub comparison_links_template: Option<String>,
-
-    /// Custom dependency bump changelog template
-    #[arg(long, value_name = "TEMPLATE")]
-    pub dependency_bump_changelog_template: Option<String>,
-
-    /// Glob patterns for files to ignore in change detection (can be repeated)
-    #[arg(long = "ignored-file", value_name = "PATTERN")]
-    pub ignored_files: Vec<String>,
-}
-
-#[derive(Clone, Copy, ValueEnum)]
-pub(crate) enum TagFormatArg {
-    VersionOnly,
-    CratePrefixed,
-}
-
-impl From<TagFormatArg> for TagFormat {
-    fn from(arg: TagFormatArg) -> Self {
-        match arg {
-            TagFormatArg::VersionOnly => Self::VersionOnly,
-            TagFormatArg::CratePrefixed => Self::CratePrefixed,
-        }
-    }
-}
-
-#[derive(Clone, Copy, ValueEnum)]
-pub(crate) enum ChangelogLocationArg {
-    Root,
-    PerPackage,
-}
-
-impl From<ChangelogLocationArg> for ChangelogLocation {
-    fn from(arg: ChangelogLocationArg) -> Self {
-        match arg {
-            ChangelogLocationArg::Root => Self::Root,
-            ChangelogLocationArg::PerPackage => Self::PerPackage,
-        }
-    }
-}
-
-#[derive(Clone, Copy, ValueEnum)]
-pub(crate) enum ComparisonLinksArg {
-    Auto,
-    Enabled,
-    Disabled,
-}
-
-impl From<ComparisonLinksArg> for ComparisonLinks {
-    fn from(arg: ComparisonLinksArg) -> Self {
-        match arg {
-            ComparisonLinksArg::Auto => Self::Auto,
-            ComparisonLinksArg::Enabled => Self::Enabled,
-            ComparisonLinksArg::Disabled => Self::Disabled,
-        }
-    }
-}
-
-#[derive(Clone, Copy, ValueEnum)]
-pub(crate) enum ZeroVersionBehaviorArg {
-    EffectiveMinor,
-    AutoPromoteOnMajor,
-}
-
-impl From<ZeroVersionBehaviorArg> for ZeroVersionBehavior {
-    fn from(arg: ZeroVersionBehaviorArg) -> Self {
-        match arg {
-            ZeroVersionBehaviorArg::EffectiveMinor => Self::EffectiveMinor,
-            ZeroVersionBehaviorArg::AutoPromoteOnMajor => Self::AutoPromoteOnMajor,
-        }
-    }
-}
-
-#[derive(Clone, Copy, ValueEnum)]
-pub(crate) enum NoneBumpBehaviorArg {
-    PromoteToPatch,
-    Allow,
-    Disallow,
-}
-
-impl From<NoneBumpBehaviorArg> for NoneBumpBehavior {
-    fn from(value: NoneBumpBehaviorArg) -> Self {
-        match value {
-            NoneBumpBehaviorArg::PromoteToPatch => Self::PromoteToPatch,
-            NoneBumpBehaviorArg::Allow => Self::Allow,
-            NoneBumpBehaviorArg::Disallow => Self::Disallow,
-        }
-    }
-}
 
 #[derive(Args)]
 pub(crate) struct AddArgs {
@@ -298,20 +116,154 @@ pub(crate) struct ReleaseArgs {
     pub graduate: Vec<String>,
 }
 
-#[derive(Args)]
-pub(crate) struct ManageArgs {
-    #[command(subcommand)]
-    pub command: ManageCommand,
+#[derive(Clone, Copy, ValueEnum)]
+pub(crate) enum TagFormatArg {
+    VersionOnly,
+    CratePrefixed,
 }
 
-#[derive(Subcommand)]
-pub(crate) enum ManageCommand {
-    /// Manage active pre-releases (.changeset/pre-release.toml)
-    #[command(name = "pre-release")]
-    Prerelease(ManagePrereleaseArgs),
+impl From<TagFormatArg> for TagFormat {
+    fn from(arg: TagFormatArg) -> Self {
+        match arg {
+            TagFormatArg::VersionOnly => Self::VersionOnly,
+            TagFormatArg::CratePrefixed => Self::CratePrefixed,
+        }
+    }
+}
 
-    /// Manage graduation queue (.changeset/graduation.toml)
-    Graduation(ManageGraduationArgs),
+#[derive(Clone, Copy, ValueEnum)]
+pub(crate) enum ChangelogLocationArg {
+    Root,
+    PerPackage,
+}
+
+impl From<ChangelogLocationArg> for ChangelogLocation {
+    fn from(arg: ChangelogLocationArg) -> Self {
+        match arg {
+            ChangelogLocationArg::Root => Self::Root,
+            ChangelogLocationArg::PerPackage => Self::PerPackage,
+        }
+    }
+}
+
+#[derive(Clone, Copy, ValueEnum)]
+pub(crate) enum ComparisonLinksArg {
+    Auto,
+    Enabled,
+    Disabled,
+}
+
+impl From<ComparisonLinksArg> for ComparisonLinks {
+    fn from(arg: ComparisonLinksArg) -> Self {
+        match arg {
+            ComparisonLinksArg::Auto => Self::Auto,
+            ComparisonLinksArg::Enabled => Self::Enabled,
+            ComparisonLinksArg::Disabled => Self::Disabled,
+        }
+    }
+}
+
+#[derive(Clone, Copy, ValueEnum)]
+pub(crate) enum ZeroVersionBehaviorArg {
+    EffectiveMinor,
+    AutoPromoteOnMajor,
+}
+
+impl From<ZeroVersionBehaviorArg> for ZeroVersionBehavior {
+    fn from(arg: ZeroVersionBehaviorArg) -> Self {
+        match arg {
+            ZeroVersionBehaviorArg::EffectiveMinor => Self::EffectiveMinor,
+            ZeroVersionBehaviorArg::AutoPromoteOnMajor => Self::AutoPromoteOnMajor,
+        }
+    }
+}
+
+#[derive(Clone, Copy, ValueEnum)]
+pub(crate) enum NoneBumpBehaviorArg {
+    PromoteToPatch,
+    Allow,
+    Disallow,
+}
+
+impl From<NoneBumpBehaviorArg> for NoneBumpBehavior {
+    fn from(value: NoneBumpBehaviorArg) -> Self {
+        match value {
+            NoneBumpBehaviorArg::PromoteToPatch => Self::PromoteToPatch,
+            NoneBumpBehaviorArg::Allow => Self::Allow,
+            NoneBumpBehaviorArg::Disallow => Self::Disallow,
+        }
+    }
+}
+
+#[derive(Args)]
+pub(crate) struct InitArgs {
+    /// Use default configuration values without prompts
+    #[arg(long)]
+    pub defaults: bool,
+
+    /// Disable interactive prompts (use only CLI-provided values)
+    #[arg(long)]
+    pub no_interactive: bool,
+
+    /// Create git commits on release (default: true)
+    #[arg(long)]
+    pub commit: Option<bool>,
+
+    /// Create git tags on release (default: true)
+    #[arg(long)]
+    pub tags: Option<bool>,
+
+    /// Keep changeset files after release (default: false)
+    #[arg(long)]
+    pub keep_changesets: Option<bool>,
+
+    /// Tag format: "version-only" or "crate-prefixed" (default: version-only)
+    #[arg(long, value_name = "FORMAT")]
+    pub tag_format: Option<TagFormatArg>,
+
+    /// Changelog location: "root" or "per-package" (default: root)
+    #[arg(long, value_name = "LOCATION")]
+    pub changelog: Option<ChangelogLocationArg>,
+
+    /// Comparison links: "auto", "enabled", or "disabled" (default: auto)
+    #[arg(long, value_name = "MODE")]
+    pub comparison_links: Option<ComparisonLinksArg>,
+
+    /// Zero version behavior: "effective-minor" or "auto-promote-on-major" (default: effective-minor)
+    #[arg(long, value_name = "BEHAVIOR")]
+    pub zero_version_behavior: Option<ZeroVersionBehaviorArg>,
+
+    /// Default base branch for git comparisons (default: main)
+    #[arg(long, value_name = "BRANCH")]
+    pub base_branch: Option<String>,
+
+    /// None bump behavior: "promote-to-patch", "allow", or "disallow" (default: promote-to-patch)
+    #[arg(long, value_name = "BEHAVIOR")]
+    pub none_bump_behavior: Option<NoneBumpBehaviorArg>,
+
+    /// Custom changelog message template when none bumps are promoted to patch
+    #[arg(long, value_name = "MESSAGE")]
+    pub none_bump_promote_message_template: Option<String>,
+
+    /// Commit title template (default: "{new-version}")
+    #[arg(long, value_name = "TEMPLATE")]
+    pub commit_title_template: Option<String>,
+
+    /// Include version transition details in commit body (default: true)
+    #[arg(long)]
+    pub changes_in_body: Option<bool>,
+
+    /// Custom comparison links template for changelogs
+    #[arg(long, value_name = "TEMPLATE")]
+    pub comparison_links_template: Option<String>,
+
+    /// Custom dependency bump changelog template
+    #[arg(long, value_name = "TEMPLATE")]
+    pub dependency_bump_changelog_template: Option<String>,
+
+    /// Glob patterns for files to ignore in change detection (can be repeated)
+    #[arg(long = "ignored-file", value_name = "PATTERN")]
+    pub ignored_files: Vec<String>,
 }
 
 #[derive(Args)]
@@ -349,8 +301,57 @@ pub(crate) struct ManageGraduationArgs {
     pub list: bool,
 }
 
+#[derive(Subcommand)]
+pub(crate) enum ManageCommand {
+    /// Manage active pre-releases (.changeset/pre-release.toml)
+    #[command(name = "pre-release")]
+    Prerelease(ManagePrereleaseArgs),
+
+    /// Manage graduation queue (.changeset/graduation.toml)
+    Graduation(ManageGraduationArgs),
+}
+
+#[derive(Args)]
+pub(crate) struct ManageArgs {
+    #[command(subcommand)]
+    pub command: ManageCommand,
+}
+
 pub(crate) struct ExecuteResult {
     pub(crate) quiet: bool,
+}
+
+#[derive(Subcommand)]
+pub(crate) enum Commands {
+    /// Add a new changeset
+    Add(AddArgs),
+    /// Verify changeset coverage for changed packages
+    Verify(VerifyArgs),
+    /// Show pending changesets and projected version bumps
+    Status,
+    /// Calculate version bumps and prepare releases based on pending changesets
+    #[command(
+        verbatim_doc_comment,
+        after_long_help = "\
+Pre-release workflow:
+  1. cargo changeset release --prerelease alpha      → All packages get alpha tag
+  2. cargo changeset release --prerelease foo:alpha  → Only foo gets alpha tag
+  3. cargo changeset release                         → Graduates prereleases to stable
+
+Graduation (0.x to 1.0.0):
+  - cargo changeset release --graduate foo --graduate bar
+  - Or configure in .changeset/graduation.toml
+
+Per-package configuration can also be set via:
+  - .changeset/pre-release.toml
+  - .changeset/graduation.toml
+Use 'cargo changeset manage' to configure these files."
+    )]
+    Release(ReleaseArgs),
+    /// Initialize changeset directory in the project
+    Init(InitArgs),
+    /// Manage release configuration files
+    Manage(ManageArgs),
 }
 
 impl Commands {

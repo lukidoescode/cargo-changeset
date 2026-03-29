@@ -12,12 +12,6 @@ pub struct Changelog {
     content: String,
 }
 
-impl Default for Changelog {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 impl Changelog {
     #[must_use]
     pub fn new() -> Self {
@@ -129,6 +123,12 @@ impl Changelog {
         }
 
         self.content.len()
+    }
+}
+
+impl Default for Changelog {
+    fn default() -> Self {
+        Self::new()
     }
 }
 

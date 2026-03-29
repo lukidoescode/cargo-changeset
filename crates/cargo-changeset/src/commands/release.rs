@@ -23,12 +23,9 @@ pub(crate) struct ParsedPrereleaseArgs {
     pub(crate) global: Option<PrereleaseSpec>,
 }
 
-/// Parsed graduation specification from CLI
 #[derive(Debug, Clone)]
 struct ParsedGraduateArgs {
-    /// Specific packages to graduate
     packages: HashSet<String>,
-    /// Whether `--graduate` was passed without specific crates
     all: bool,
 }
 

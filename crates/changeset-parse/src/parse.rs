@@ -2,9 +2,8 @@ use indexmap::IndexMap;
 use serde::Deserialize;
 use serde_with::{MapPreventDuplicates, serde_as};
 
-use changeset_core::{BumpType, ChangeCategory, Changeset, PackageRelease};
-
 use crate::error::{FormatError, FrontMatterError, ValidationError};
+use changeset_core::{BumpType, ChangeCategory, Changeset, PackageRelease};
 
 pub(crate) const FRONT_MATTER_DELIMITER: &str = "---";
 
@@ -22,51 +21,6 @@ struct FrontMatter {
     #[serde(flatten)]
     #[serde_as(as = "MapPreventDuplicates<_, _>")]
     releases: IndexMap<String, BumpType>,
-}
-
-fn strip_line_ending(s: &str) -> &str {
-    s.strip_prefix("\r\n")
-        .or_else(|| s.strip_prefix('\n'))
-        .unwrap_or(s)
-}
-
-fn find_closing_delimiter(content: &str) -> Option<usize> {
-    if content.starts_with(FRONT_MATTER_DELIMITER) {
-        return Some(0);
-    }
-    if let Some(pos) = content.find("\r\n---") {
-        return Some(pos + 2);
-    }
-    if let Some(pos) = content.find("\n---") {
-        return Some(pos + 1);
-    }
-    None
-}
-
-fn extract_front_matter(content: &str) -> Result<(&str, &str), FormatError> {
-    let trimmed = content.trim_start();
-
-    if !trimmed.starts_with(FRONT_MATTER_DELIMITER) {
-        return Err(FrontMatterError::MissingOpeningDelimiter.into());
-    }
-
-    let after_opening = &trimmed[FRONT_MATTER_DELIMITER.len()..];
-    let after_opening = strip_line_ending(after_opening);
-
-    let Some(closing_pos) = find_closing_delimiter(after_opening) else {
-        return Err(FrontMatterError::MissingClosingDelimiter.into());
-    };
-
-    let yaml_content = &after_opening[..closing_pos];
-    let yaml_content = yaml_content.trim_end_matches('\r');
-    if yaml_content.trim().is_empty() {
-        return Err(FrontMatterError::EmptyFrontMatter.into());
-    }
-
-    let after_closing = &after_opening[closing_pos + FRONT_MATTER_DELIMITER.len()..];
-    let body = strip_line_ending(after_closing);
-
-    Ok((yaml_content, body))
 }
 
 #[must_use = "parsing result should be handled"]
@@ -97,6 +51,51 @@ pub fn parse_changeset(content: &str) -> Result<Changeset, FormatError> {
             .with_consumed_for_prerelease(parsed.consumed_for_prerelease)
             .with_graduate(parsed.graduate),
     )
+}
+
+fn extract_front_matter(content: &str) -> Result<(&str, &str), FormatError> {
+    let trimmed = content.trim_start();
+
+    if !trimmed.starts_with(FRONT_MATTER_DELIMITER) {
+        return Err(FrontMatterError::MissingOpeningDelimiter.into());
+    }
+
+    let after_opening = &trimmed[FRONT_MATTER_DELIMITER.len()..];
+    let after_opening = strip_line_ending(after_opening);
+
+    let Some(closing_pos) = find_closing_delimiter(after_opening) else {
+        return Err(FrontMatterError::MissingClosingDelimiter.into());
+    };
+
+    let yaml_content = &after_opening[..closing_pos];
+    let yaml_content = yaml_content.trim_end_matches('\r');
+    if yaml_content.trim().is_empty() {
+        return Err(FrontMatterError::EmptyFrontMatter.into());
+    }
+
+    let after_closing = &after_opening[closing_pos + FRONT_MATTER_DELIMITER.len()..];
+    let body = strip_line_ending(after_closing);
+
+    Ok((yaml_content, body))
+}
+
+fn find_closing_delimiter(content: &str) -> Option<usize> {
+    if content.starts_with(FRONT_MATTER_DELIMITER) {
+        return Some(0);
+    }
+    if let Some(pos) = content.find("\r\n---") {
+        return Some(pos + 2);
+    }
+    if let Some(pos) = content.find("\n---") {
+        return Some(pos + 1);
+    }
+    None
+}
+
+fn strip_line_ending(s: &str) -> &str {
+    s.strip_prefix("\r\n")
+        .or_else(|| s.strip_prefix('\n'))
+        .unwrap_or(s)
 }
 
 #[cfg(test)]

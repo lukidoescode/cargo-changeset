@@ -17,6 +17,112 @@ pub(crate) trait ForgeStrategy: Send + Sync + Debug {
     ) -> String;
 }
 
+pub struct RepositoryInfo {
+    forge: Option<&'static dyn ForgeStrategy>,
+    owner: String,
+    repo: String,
+    base_url: Url,
+}
+
+impl RepositoryInfo {
+    /// # Errors
+    ///
+    /// Fails if the URL cannot be parsed or is missing required path segments.
+    pub fn from_url(url_str: &str) -> Result<Self, ChangelogError> {
+        let url = Url::parse(url_str).map_err(|source| ChangelogError::UrlParse {
+            url: url_str.to_string(),
+            source,
+        })?;
+
+        let host = url.host_str().ok_or_else(|| ChangelogError::MissingHost {
+            url: url_str.to_string(),
+        })?;
+
+        let forge = detect_forge(host);
+        let (owner, repo) = extract_owner_repo(&url)?;
+
+        let base_url = Url::parse(&format!("{}://{}", url.scheme(), host)).map_err(|source| {
+            ChangelogError::UrlParse {
+                url: url_str.to_string(),
+                source,
+            }
+        })?;
+
+        Ok(Self {
+            forge,
+            owner,
+            repo,
+            base_url,
+        })
+    }
+
+    #[must_use]
+    pub fn forge_name(&self) -> &'static str {
+        self.forge.map_or("Unknown", ForgeStrategy::name)
+    }
+
+    #[must_use]
+    pub fn owner(&self) -> &str {
+        &self.owner
+    }
+
+    #[must_use]
+    pub fn repo(&self) -> &str {
+        &self.repo
+    }
+
+    #[must_use]
+    pub fn base_url(&self) -> &Url {
+        &self.base_url
+    }
+
+    #[must_use]
+    pub fn comparison_url(&self, base_tag: &str, target_tag: &str) -> Option<String> {
+        self.forge.map(|f| {
+            f.comparison_url(
+                &self.base_url,
+                &self.owner,
+                &self.repo,
+                base_tag,
+                target_tag,
+            )
+        })
+    }
+}
+
+impl std::fmt::Debug for RepositoryInfo {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("RepositoryInfo")
+            .field("forge", &self.forge_name())
+            .field("owner", &self.owner)
+            .field("repo", &self.repo)
+            .field("base_url", &self.base_url)
+            .finish()
+    }
+}
+
+impl Clone for RepositoryInfo {
+    fn clone(&self) -> Self {
+        Self {
+            forge: self.forge,
+            owner: self.owner.clone(),
+            repo: self.repo.clone(),
+            base_url: self.base_url.clone(),
+        }
+    }
+}
+
+impl PartialEq for RepositoryInfo {
+    fn eq(&self, other: &Self) -> bool {
+        self.forge_name() == other.forge_name()
+            && self.owner == other.owner
+            && self.repo == other.repo
+            && self.base_url == other.base_url
+    }
+}
+
+impl Eq for RepositoryInfo {}
+
 #[derive(Debug)]
 pub(crate) struct GitHub;
 
@@ -144,114 +250,21 @@ impl ForgeStrategy for SourceHut {
 
 static FORGES: &[&dyn ForgeStrategy] = &[&GitHub, &GitLab, &Bitbucket, &Gitea, &SourceHut];
 
+#[must_use]
+pub fn expand_comparison_template(
+    template: &str,
+    repository: &str,
+    base_tag: &str,
+    target_tag: &str,
+) -> String {
+    template
+        .replace("{repository}", repository)
+        .replace("{base}", base_tag)
+        .replace("{target}", target_tag)
+}
+
 fn detect_forge(host: &str) -> Option<&'static dyn ForgeStrategy> {
     FORGES.iter().find(|f| f.matches_host(host)).copied()
-}
-
-pub struct RepositoryInfo {
-    forge: Option<&'static dyn ForgeStrategy>,
-    owner: String,
-    repo: String,
-    base_url: Url,
-}
-
-impl std::fmt::Debug for RepositoryInfo {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("RepositoryInfo")
-            .field("forge", &self.forge_name())
-            .field("owner", &self.owner)
-            .field("repo", &self.repo)
-            .field("base_url", &self.base_url)
-            .finish()
-    }
-}
-
-impl Clone for RepositoryInfo {
-    fn clone(&self) -> Self {
-        Self {
-            forge: self.forge,
-            owner: self.owner.clone(),
-            repo: self.repo.clone(),
-            base_url: self.base_url.clone(),
-        }
-    }
-}
-
-impl PartialEq for RepositoryInfo {
-    fn eq(&self, other: &Self) -> bool {
-        self.forge_name() == other.forge_name()
-            && self.owner == other.owner
-            && self.repo == other.repo
-            && self.base_url == other.base_url
-    }
-}
-
-impl Eq for RepositoryInfo {}
-
-impl RepositoryInfo {
-    /// # Errors
-    ///
-    /// Fails if the URL cannot be parsed or is missing required path segments.
-    pub fn from_url(url_str: &str) -> Result<Self, ChangelogError> {
-        let url = Url::parse(url_str).map_err(|source| ChangelogError::UrlParse {
-            url: url_str.to_string(),
-            source,
-        })?;
-
-        let host = url.host_str().ok_or_else(|| ChangelogError::MissingHost {
-            url: url_str.to_string(),
-        })?;
-
-        let forge = detect_forge(host);
-        let (owner, repo) = extract_owner_repo(&url)?;
-
-        let base_url = Url::parse(&format!("{}://{}", url.scheme(), host)).map_err(|source| {
-            ChangelogError::UrlParse {
-                url: url_str.to_string(),
-                source,
-            }
-        })?;
-
-        Ok(Self {
-            forge,
-            owner,
-            repo,
-            base_url,
-        })
-    }
-
-    #[must_use]
-    pub fn forge_name(&self) -> &'static str {
-        self.forge.map_or("Unknown", ForgeStrategy::name)
-    }
-
-    #[must_use]
-    pub fn owner(&self) -> &str {
-        &self.owner
-    }
-
-    #[must_use]
-    pub fn repo(&self) -> &str {
-        &self.repo
-    }
-
-    #[must_use]
-    pub fn base_url(&self) -> &Url {
-        &self.base_url
-    }
-
-    #[must_use]
-    pub fn comparison_url(&self, base_tag: &str, target_tag: &str) -> Option<String> {
-        self.forge.map(|f| {
-            f.comparison_url(
-                &self.base_url,
-                &self.owner,
-                &self.repo,
-                base_tag,
-                target_tag,
-            )
-        })
-    }
 }
 
 fn extract_owner_repo(url: &Url) -> Result<(String, String), ChangelogError> {
@@ -270,19 +283,6 @@ fn extract_owner_repo(url: &Url) -> Result<(String, String), ChangelogError> {
     let repo = segments[1].to_string();
 
     Ok((owner, repo))
-}
-
-#[must_use]
-pub fn expand_comparison_template(
-    template: &str,
-    repository: &str,
-    base_tag: &str,
-    target_tag: &str,
-) -> String {
-    template
-        .replace("{repository}", repository)
-        .replace("{base}", base_tag)
-        .replace("{target}", target_tag)
 }
 
 #[cfg(test)]

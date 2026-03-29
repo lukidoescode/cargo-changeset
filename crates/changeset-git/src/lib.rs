@@ -2,11 +2,11 @@ mod error;
 mod repository;
 mod types;
 
+use std::path::Path;
+
 pub use error::GitError;
 pub use repository::Repository;
 pub use types::{CommitInfo, FileChange, FileStatus, TagInfo};
-
-use std::path::Path;
 
 pub type Result<T> = std::result::Result<T, GitError>;
 

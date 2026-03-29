@@ -273,6 +273,9 @@ fn resolve_explicit_packages(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::mocks::{
+        MockChangesetWriter, MockInteractionProvider, MockProjectProvider, make_package,
+    };
 
     #[test]
     fn collect_explicit_packages_from_packages_list() {
@@ -334,14 +337,6 @@ mod tests {
 
         assert!(packages.is_empty());
     }
-}
-
-#[cfg(test)]
-mod operation_tests {
-    use super::*;
-    use crate::mocks::{
-        MockChangesetWriter, MockInteractionProvider, MockProjectProvider, make_package,
-    };
 
     #[test]
     fn creates_changeset_for_single_package_project() {
