@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.5] - 2026-03-30
+### Changed
+
+- **cargo-changeset**: Add code quality badges (security audit, coverage, MSRV) to README
+- **cargo-changeset**: Add integration tests verifying lockfile stays current after release
+- **cargo-changeset**: Use non-root user for Docker image with dynamic UID matching via su-exec
+
 ## [0.1.4] - 2026-03-30
 ### Fixed
 
@@ -148,3 +155,5 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 [0.1.3]: https://github.com/lukidoescode/cargo-changeset/compare/v0.1.2...v0.1.3
 
 [0.1.4]: https://github.com/lukidoescode/cargo-changeset/compare/v0.1.3...v0.1.4
+
+[0.1.5]: https://github.com/lukidoescode/cargo-changeset/compare/v0.1.4...v0.1.5
