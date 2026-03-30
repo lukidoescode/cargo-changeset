@@ -1,7 +1,6 @@
 # cargo-changeset
 
 [![Crates.io](https://img.shields.io/crates/v/cargo-changeset)](https://crates.io/crates/cargo-changeset)
-[![docs.rs](https://img.shields.io/docsrs/cargo-changeset)](https://docs.rs/cargo-changeset)
 [![License: MIT](https://img.shields.io/crates/l/cargo-changeset)](https://github.com/lukidoescode/cargo-changeset/blob/main/LICENSE)
 [![CI](https://img.shields.io/github/actions/workflow/status/lukidoescode/cargo-changeset/ci.yml?branch=main&label=CI)](https://github.com/lukidoescode/cargo-changeset/actions/workflows/ci.yml)
 [![Security Audit](https://img.shields.io/github/actions/workflow/status/lukidoescode/cargo-changeset/audit.yml?branch=main&label=audit)](https://github.com/lukidoescode/cargo-changeset/actions/workflows/audit.yml)

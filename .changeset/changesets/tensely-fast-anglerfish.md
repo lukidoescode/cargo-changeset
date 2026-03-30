@@ -1,4 +1,4 @@
 ---
 cargo-changeset: patch
 ---
-Add code quality badges (docs.rs, security audit, coverage, MSRV) to README
+Add code quality badges (security audit, coverage, MSRV) to README
