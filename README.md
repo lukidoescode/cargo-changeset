@@ -491,7 +491,7 @@ With caching to avoid reinstalling on every run:
 
 ```yaml
 - name: Cache cargo-changeset
-  uses: actions/cache@v4
+  uses: actions/cache@v5
   with:
     path: ~/.cargo/bin/cargo-changeset
     key: cargo-changeset-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
