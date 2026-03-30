@@ -1,6 +1,6 @@
 [workspace]
 members = ["crates/*"]
-resolver = "2"
+resolver = "3"
 
 [workspace.package]
 edition = "2024"
@@ -36,7 +36,7 @@ changeset-git = { path = "crates/changeset-git", version = "0.0.4" }
 changeset-version = { path = "crates/changeset-version", version = "0.0.3" }
 changeset-project = { path = "crates/changeset-project", version = "0.1.2" }
 changeset-changelog = { path = "crates/changeset-changelog", version = "0.0.3" }
-changeset-operations = { path = "crates/changeset-operations", version = "0.1.2" }
+changeset-operations = { path = "crates/changeset-operations", version = "0.1.3" }
 changeset-manifest = { path = "crates/changeset-manifest", version = "0.0.3" }
 changeset-saga = { path = "crates/changeset-saga", version = "0.0.2" }
 

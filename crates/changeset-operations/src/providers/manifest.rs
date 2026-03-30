@@ -82,9 +82,9 @@ impl WorkspaceVersionManager for FileSystemManifestWriter {
 }
 
 impl LockfileUpdater for FileSystemManifestWriter {
-    fn generate_lockfile(&self, project_root: &Path) -> Result<()> {
+    fn update_lockfile(&self, project_root: &Path) -> Result<()> {
         let output = Command::new("cargo")
-            .arg("generate-lockfile")
+            .args(["update", "--workspace"])
             .current_dir(project_root)
             .output()
             .map_err(|source| OperationError::LockfileGeneration {

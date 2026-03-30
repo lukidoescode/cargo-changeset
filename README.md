@@ -3,6 +3,9 @@
 [![Crates.io](https://img.shields.io/crates/v/cargo-changeset)](https://crates.io/crates/cargo-changeset)
 [![License: MIT](https://img.shields.io/crates/l/cargo-changeset)](https://github.com/lukidoescode/cargo-changeset/blob/main/LICENSE)
 [![CI](https://img.shields.io/github/actions/workflow/status/lukidoescode/cargo-changeset/ci.yml?branch=main&label=CI)](https://github.com/lukidoescode/cargo-changeset/actions/workflows/ci.yml)
+[![Security Audit](https://img.shields.io/github/actions/workflow/status/lukidoescode/cargo-changeset/audit.yml?branch=main&label=audit)](https://github.com/lukidoescode/cargo-changeset/actions/workflows/audit.yml)
+[![Coverage](https://img.shields.io/endpoint?url=https://gist.githubusercontent.com/lukidoescode/8b0cd92399fa481ee4649cd448413316/raw/cargo-changeset-coverage.json)](https://github.com/lukidoescode/cargo-changeset/actions/workflows/coverage.yml)
+[![MSRV](https://img.shields.io/badge/MSRV-1.85.0-blue)](https://github.com/lukidoescode/cargo-changeset/blob/main/Cargo.toml)
 [![Downloads](https://img.shields.io/crates/d/cargo-changeset)](https://crates.io/crates/cargo-changeset)
 
 > [!NOTE]

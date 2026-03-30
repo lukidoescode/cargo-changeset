@@ -165,4 +165,15 @@ jobs:
             }}
 
       - name: Check MSRV
-        run: cargo check --workspace --all-features
+        run: cargo test --workspace --all-features --locked
+
+  docker:
+    name: Docker Build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Build Docker image
+        run: docker build -t cargo-changeset-ci .

@@ -997,7 +997,7 @@ impl WorkspaceVersionManager for MockManifestWriter {
 }
 
 impl LockfileUpdater for MockManifestWriter {
-    fn generate_lockfile(&self, _project_root: &Path) -> Result<()> {
+    fn update_lockfile(&self, _project_root: &Path) -> Result<()> {
         Ok(())
     }
 
@@ -1066,7 +1066,7 @@ impl_arc_delegation! {
 
 impl_arc_delegation! {
     impl LockfileUpdater for Arc<MockManifestWriter> {
-        fn generate_lockfile(&self, project_root: &Path) -> Result<()>;
+        fn update_lockfile(&self, project_root: &Path) -> Result<()>;
         fn read_lockfile(&self, project_root: &Path) -> Result<Option<Vec<u8>>>;
         fn restore_lockfile(&self, project_root: &Path, content: &[u8]) -> Result<()>;
         fn remove_lockfile(&self, project_root: &Path) -> Result<()>;
