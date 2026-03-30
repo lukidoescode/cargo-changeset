@@ -86,16 +86,16 @@ where
                 .packages()
                 .iter()
                 .map(|pkg| {
-                    let dependents = g.transitive_dependents(&pkg.name);
+                    let dependents = g.transitive_dependents(pkg.name());
                     if dependents.is_empty() {
-                        format!("{} ({})", pkg.name, pkg.version)
+                        format!("{} ({})", pkg.name(), pkg.version())
                     } else {
                         let mut dep_list: Vec<&str> = dependents.into_iter().collect();
                         dep_list.sort_unstable();
                         format!(
                             "{} ({}) [depended on by: {}]",
-                            pkg.name,
-                            pkg.version,
+                            pkg.name(),
+                            pkg.version(),
                             dep_list.join(", ")
                         )
                     }
@@ -111,7 +111,7 @@ where
             };
 
         let uncovered_dependents = if let Some(ref g) = graph {
-            let selected_names: Vec<&str> = packages.iter().map(|p| p.name.as_str()).collect();
+            let selected_names: Vec<&str> = packages.iter().map(|p| p.name().as_str()).collect();
             let dependents = g.transitive_dependents_of_set(&selected_names);
             let mut result: Vec<String> = dependents.into_iter().map(String::from).collect();
             result.sort();
@@ -137,13 +137,7 @@ where
             return Err(OperationError::EmptyDescription);
         }
 
-        let changeset = Changeset {
-            summary: description,
-            releases,
-            category,
-            consumed_for_prerelease: None,
-            graduate: false,
-        };
+        let changeset = Changeset::new(description, releases, category);
 
         let (root_config, _) = self.project_provider.load_configs(&project)?;
         let changeset_dir = self
@@ -196,21 +190,18 @@ where
         let mut releases = Vec::with_capacity(packages.len());
 
         for package in packages {
-            let bump_type = if let Some(bump) = input.package_bumps.get(&package.name) {
+            let bump_type = if let Some(bump) = input.package_bumps.get(package.name()) {
                 *bump
             } else if let Some(bump) = input.bump {
                 bump
             } else {
-                match self.interaction_provider.select_bump_type(&package.name)? {
+                match self.interaction_provider.select_bump_type(package.name())? {
                     BumpSelection::Selected(bump) => bump,
                     BumpSelection::Cancelled => return Ok(None),
                 }
             };
 
-            releases.push(PackageRelease {
-                name: package.name.clone(),
-                bump_type,
-            });
+            releases.push(PackageRelease::new(package.name().clone(), bump_type));
         }
 
         Ok(Some(releases))
@@ -262,10 +253,10 @@ fn resolve_explicit_packages(
     let mut selected = Vec::with_capacity(unique_names.len());
 
     for name in unique_names {
-        let package = packages.iter().find(|p| p.name == *name).ok_or_else(|| {
+        let package = packages.iter().find(|p| p.name() == name).ok_or_else(|| {
             let available = packages
                 .iter()
-                .map(|p| p.name.as_str())
+                .map(|p| p.name().as_str())
                 .collect::<Vec<_>>()
                 .join(", ");
             OperationError::UnknownPackage {
@@ -282,6 +273,9 @@ fn resolve_explicit_packages(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::mocks::{
+        MockChangesetWriter, MockInteractionProvider, MockProjectProvider, make_package,
+    };
 
     #[test]
     fn collect_explicit_packages_from_packages_list() {
@@ -343,14 +337,6 @@ mod tests {
 
         assert!(packages.is_empty());
     }
-}
-
-#[cfg(test)]
-mod operation_tests {
-    use super::*;
-    use crate::mocks::{
-        MockChangesetWriter, MockInteractionProvider, MockProjectProvider, make_package,
-    };
 
     #[test]
     fn creates_changeset_for_single_package_project() {
@@ -377,10 +363,10 @@ mod operation_tests {
                 file_path,
                 ..
             } => {
-                assert_eq!(changeset.summary, "Fix a bug");
-                assert_eq!(changeset.releases.len(), 1);
-                assert_eq!(changeset.releases[0].name, "my-crate");
-                assert_eq!(changeset.releases[0].bump_type, BumpType::Patch);
+                assert_eq!(changeset.summary(), "Fix a bug");
+                assert_eq!(changeset.releases().len(), 1);
+                assert_eq!(changeset.releases()[0].name(), "my-crate");
+                assert_eq!(changeset.releases()[0].bump_type(), BumpType::Patch);
                 assert!(file_path.ends_with("test-changeset.md"));
             }
             _ => panic!("Expected AddResult::Created"),
@@ -412,8 +398,12 @@ mod operation_tests {
 
         match result {
             AddResult::Created { changeset, .. } => {
-                assert_eq!(changeset.releases.len(), 2);
-                let names: Vec<_> = changeset.releases.iter().map(|r| r.name.as_str()).collect();
+                assert_eq!(changeset.releases().len(), 2);
+                let names: Vec<_> = changeset
+                    .releases()
+                    .iter()
+                    .map(|r| r.name().as_str())
+                    .collect();
                 assert!(names.contains(&"crate-a"));
                 assert!(names.contains(&"crate-b"));
             }
@@ -522,8 +512,8 @@ mod operation_tests {
 
         match result {
             AddResult::Created { changeset, .. } => {
-                assert_eq!(changeset.summary, "Interactive desc");
-                assert_eq!(changeset.releases.len(), 2);
+                assert_eq!(changeset.summary(), "Interactive desc");
+                assert_eq!(changeset.releases().len(), 2);
             }
             _ => panic!("Expected AddResult::Created"),
         }
@@ -553,9 +543,9 @@ mod operation_tests {
 
         match result {
             AddResult::Created { changeset, .. } => {
-                assert_eq!(changeset.releases.len(), 1);
-                assert_eq!(changeset.releases[0].name, "solo-crate");
-                assert_eq!(changeset.summary, "Non-interactive description");
+                assert_eq!(changeset.releases().len(), 1);
+                assert_eq!(changeset.releases()[0].name(), "solo-crate");
+                assert_eq!(changeset.summary(), "Non-interactive description");
             }
             _ => panic!("Expected AddResult::Created"),
         }
@@ -583,7 +573,7 @@ mod operation_tests {
 
         match result {
             AddResult::Created { changeset, .. } => {
-                assert_eq!(changeset.category, ChangeCategory::Fixed);
+                assert_eq!(changeset.category(), ChangeCategory::Fixed);
             }
             _ => panic!("Expected AddResult::Created"),
         }
@@ -659,8 +649,8 @@ mod operation_tests {
 
         match result {
             AddResult::Created { changeset, .. } => {
-                assert_eq!(changeset.summary, "Internal refactoring");
-                assert_eq!(changeset.releases[0].bump_type, BumpType::None);
+                assert_eq!(changeset.summary(), "Internal refactoring");
+                assert_eq!(changeset.releases()[0].bump_type(), BumpType::None);
             }
             _ => panic!("Expected AddResult::Created"),
         }
@@ -692,9 +682,9 @@ mod operation_tests {
 
         match result {
             AddResult::Created { changeset, .. } => {
-                assert_eq!(changeset.summary, "Interactive reason");
-                assert_eq!(changeset.releases[0].bump_type, BumpType::None);
-                assert_eq!(changeset.category, ChangeCategory::Changed);
+                assert_eq!(changeset.summary(), "Interactive reason");
+                assert_eq!(changeset.releases()[0].bump_type(), BumpType::None);
+                assert_eq!(changeset.category(), ChangeCategory::Changed);
             }
             _ => panic!("Expected AddResult::Created"),
         }
@@ -726,22 +716,22 @@ mod operation_tests {
         match result {
             AddResult::Created { changeset, .. } => {
                 assert_eq!(
-                    changeset.summary,
+                    changeset.summary(),
                     "Update crate-b with internal crate-a changes"
                 );
-                assert_eq!(changeset.releases.len(), 2);
+                assert_eq!(changeset.releases().len(), 2);
                 let none_release = changeset
-                    .releases
+                    .releases()
                     .iter()
-                    .find(|r| r.name == "crate-a")
+                    .find(|r| r.name() == "crate-a")
                     .expect("crate-a should be in releases");
-                assert_eq!(none_release.bump_type, BumpType::None);
+                assert_eq!(none_release.bump_type(), BumpType::None);
                 let patch_release = changeset
-                    .releases
+                    .releases()
                     .iter()
-                    .find(|r| r.name == "crate-b")
+                    .find(|r| r.name() == "crate-b")
                     .expect("crate-b should be in releases");
-                assert_eq!(patch_release.bump_type, BumpType::Patch);
+                assert_eq!(patch_release.bump_type(), BumpType::Patch);
             }
             _ => panic!("Expected AddResult::Created"),
         }

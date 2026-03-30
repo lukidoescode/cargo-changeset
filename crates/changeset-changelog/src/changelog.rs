@@ -12,12 +12,6 @@ pub struct Changelog {
     content: String,
 }
 
-impl Default for Changelog {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 impl Changelog {
     #[must_use]
     pub fn new() -> Self {
@@ -28,7 +22,7 @@ impl Changelog {
 
     /// # Errors
     ///
-    /// Returns `ChangelogError::Read` if the file cannot be read.
+    /// Fails when the file does not exist or cannot be read (permissions, I/O).
     pub fn from_file(path: &Path) -> Result<Self, ChangelogError> {
         let content = std::fs::read_to_string(path).map_err(|source| ChangelogError::Read {
             path: path.to_path_buf(),
@@ -40,8 +34,7 @@ impl Changelog {
 
     /// # Errors
     ///
-    /// Returns `ChangelogError::Read` if the file cannot be read.
-    /// Returns `ChangelogError::InvalidChangelogFormat` if the file does not contain a valid changelog header.
+    /// Fails when the file cannot be read, or when it exists but lacks a `# Changelog` header.
     pub fn from_file_validated(path: &Path) -> Result<Self, ChangelogError> {
         let changelog = Self::from_file(path)?;
 
@@ -91,9 +84,9 @@ impl Changelog {
 
         if let Some(repo) = repo_info {
             let base_tag = previous_version.map_or("HEAD".to_string(), |v| format!("v{v}"));
-            let target_tag = format!("v{}", release.version);
+            let target_tag = format!("v{}", release.version());
             if let Some(comparison_url) = repo.comparison_url(&base_tag, &target_tag) {
-                let link_line = format!("[{}]: {}", release.version, comparison_url);
+                let link_line = format!("[{}]: {}", release.version(), comparison_url);
                 if !new_content.contains(&link_line) {
                     if !new_content.ends_with('\n') {
                         new_content.push('\n');
@@ -110,7 +103,7 @@ impl Changelog {
 
     /// # Errors
     ///
-    /// Returns `ChangelogError::Write` if the file cannot be written.
+    /// Fails when the file cannot be written (permissions, I/O, missing parent directory).
     pub fn write_to_file(&self, path: &Path) -> Result<(), ChangelogError> {
         std::fs::write(path, &self.content).map_err(|source| ChangelogError::Write {
             path: path.to_path_buf(),
@@ -130,6 +123,12 @@ impl Changelog {
         }
 
         self.content.len()
+    }
+}
+
+impl Default for Changelog {
+    fn default() -> Self {
+        Self::new()
     }
 }
 

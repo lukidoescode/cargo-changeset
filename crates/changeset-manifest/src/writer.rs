@@ -185,36 +185,7 @@ pub fn write_metadata_section(
 
     changeset_table.set_implicit(true);
 
-    if let Some(commit) = config.commit {
-        changeset_table.insert("commit", value(commit));
-    }
-
-    if let Some(tags) = config.tags {
-        changeset_table.insert("tags", value(tags));
-    }
-
-    if let Some(keep_changesets) = config.keep_changesets {
-        changeset_table.insert("keep_changesets", value(keep_changesets));
-    }
-
-    if let Some(tag_format) = config.tag_format {
-        changeset_table.insert("tag_format", value(tag_format.as_str()));
-    }
-
-    if let Some(changelog) = config.changelog {
-        changeset_table.insert("changelog", value(changelog.as_str()));
-    }
-
-    if let Some(comparison_links) = config.comparison_links {
-        changeset_table.insert("comparison_links", value(comparison_links.as_str()));
-    }
-
-    if let Some(zero_version_behavior) = config.zero_version_behavior {
-        changeset_table.insert(
-            "zero_version_behavior",
-            value(zero_version_behavior.as_str()),
-        );
-    }
+    populate_changeset_table(changeset_table, config);
 
     std::fs::write(path, doc.to_string()).map_err(|source| ManifestError::Write {
         path: path.to_path_buf(),
@@ -286,6 +257,91 @@ fn update_dep_entry(deps: &mut Item, dep_name: &str, new_version: &Version) -> b
     }
 
     false
+}
+
+fn populate_changeset_table(changeset_table: &mut Table, config: &InitConfig) {
+    if let Some(commit) = config.commit {
+        changeset_table.insert("commit", value(commit));
+    }
+
+    if let Some(tags) = config.tags {
+        changeset_table.insert("tags", value(tags));
+    }
+
+    if let Some(keep_changesets) = config.keep_changesets {
+        changeset_table.insert("keep-changesets", value(keep_changesets));
+    }
+
+    if let Some(tag_format) = config.tag_format {
+        changeset_table.insert("tag-format", value(tag_format.as_str()));
+    }
+
+    if let Some(changelog) = config.changelog {
+        changeset_table.insert("changelog", value(changelog.as_str()));
+    }
+
+    if let Some(comparison_links) = config.comparison_links {
+        changeset_table.insert("comparison-links", value(comparison_links.as_str()));
+    }
+
+    if let Some(zero_version_behavior) = config.zero_version_behavior {
+        changeset_table.insert(
+            "zero-version-behavior",
+            value(zero_version_behavior.as_str()),
+        );
+    }
+
+    if let Some(ref dependency_bump_changelog_template) = config.dependency_bump_changelog_template
+    {
+        changeset_table.insert(
+            "dependency-bump-changelog-template",
+            value(dependency_bump_changelog_template.as_str()),
+        );
+    }
+
+    if let Some(ref base_branch) = config.base_branch {
+        changeset_table.insert("base-branch", value(base_branch.as_str()));
+    }
+
+    if let Some(none_bump_behavior) = config.none_bump_behavior {
+        changeset_table.insert("none-bump-behavior", value(none_bump_behavior.as_str()));
+    }
+
+    if let Some(ref none_bump_promote_message_template) = config.none_bump_promote_message_template
+    {
+        changeset_table.insert(
+            "none-bump-promote-message-template",
+            value(none_bump_promote_message_template.as_str()),
+        );
+    }
+
+    if let Some(ref commit_title_template) = config.commit_title_template {
+        changeset_table.insert(
+            "commit-title-template",
+            value(commit_title_template.as_str()),
+        );
+    }
+
+    if let Some(changes_in_body) = config.changes_in_body {
+        changeset_table.insert("changes-in-body", value(changes_in_body));
+    }
+
+    if let Some(ref comparison_links_template) = config.comparison_links_template {
+        changeset_table.insert(
+            "comparison-links-template",
+            value(comparison_links_template.as_str()),
+        );
+    }
+
+    if let Some(ref ignored_files) = config.ignored_files {
+        if !ignored_files.is_empty() {
+            let mut arr = toml_edit::Array::new();
+            for pattern in ignored_files {
+                arr.push(pattern.as_str());
+            }
+            changeset_table.insert("ignored-files", Item::Value(toml_edit::Value::Array(arr)));
+        }
+    }
 }
 
 #[cfg(test)]
@@ -582,7 +638,9 @@ key = "value"
 
     #[test]
     fn write_metadata_handles_all_config_options() {
-        use crate::config::{ChangelogLocation, ComparisonLinks, TagFormat, ZeroVersionBehavior};
+        use crate::config::{
+            ChangelogLocation, ComparisonLinks, NoneBumpBehavior, TagFormat, ZeroVersionBehavior,
+        };
 
         let toml = r#"
 [workspace]
@@ -600,6 +658,16 @@ members = ["crates/*"]
             changelog: Some(ChangelogLocation::PerPackage),
             comparison_links: Some(ComparisonLinks::Enabled),
             zero_version_behavior: Some(ZeroVersionBehavior::AutoPromoteOnMajor),
+            dependency_bump_changelog_template: None,
+            base_branch: None,
+            none_bump_behavior: Some(NoneBumpBehavior::Disallow),
+            none_bump_promote_message_template: Some("My message".to_string()),
+            commit_title_template: Some("Release {new-version}".to_string()),
+            changes_in_body: Some(true),
+            comparison_links_template: Some(
+                "https://github.com/org/repo/compare/{base}...{target}".to_string(),
+            ),
+            ignored_files: Some(vec!["*.lock".to_string(), "docs/**".to_string()]),
         };
 
         write_metadata_section(&path, MetadataSection::Workspace, &config).expect("write metadata");
@@ -607,11 +675,19 @@ members = ["crates/*"]
         let content = std::fs::read_to_string(&path).expect("read file");
         assert!(content.contains("commit = true"));
         assert!(content.contains("tags = true"));
-        assert!(content.contains("keep_changesets = false"));
-        assert!(content.contains(r#"tag_format = "crate-prefixed""#));
+        assert!(content.contains("keep-changesets = false"));
+        assert!(content.contains(r#"tag-format = "crate-prefixed""#));
         assert!(content.contains(r#"changelog = "per-package""#));
-        assert!(content.contains(r#"comparison_links = "enabled""#));
-        assert!(content.contains(r#"zero_version_behavior = "auto-promote-on-major""#));
+        assert!(content.contains(r#"comparison-links = "enabled""#));
+        assert!(content.contains(r#"zero-version-behavior = "auto-promote-on-major""#));
+        assert!(content.contains(r#"none-bump-behavior = "disallow""#));
+        assert!(content.contains(r#"none-bump-promote-message-template = "My message""#));
+        assert!(content.contains(r#"commit-title-template = "Release {new-version}""#));
+        assert!(content.contains("changes-in-body = true"));
+        assert!(content.contains(
+            r#"comparison-links-template = "https://github.com/org/repo/compare/{base}...{target}""#
+        ));
+        assert!(content.contains(r#"ignored-files = ["*.lock", "docs/**"]"#));
     }
 
     #[test]
@@ -626,12 +702,7 @@ members = ["crates/*"]
 
         let config = InitConfig {
             commit: Some(true),
-            tags: None,
-            keep_changesets: None,
-            tag_format: None,
-            changelog: None,
-            comparison_links: None,
-            zero_version_behavior: None,
+            ..Default::default()
         };
 
         write_metadata_section(&path, MetadataSection::Workspace, &config).expect("write metadata");
@@ -639,11 +710,11 @@ members = ["crates/*"]
         let content = std::fs::read_to_string(&path).expect("read file");
         assert!(content.contains("commit = true"));
         assert!(!content.contains("tags"));
-        assert!(!content.contains("keep_changesets"));
-        assert!(!content.contains("tag_format"));
+        assert!(!content.contains("keep-changesets"));
+        assert!(!content.contains("tag-format"));
         assert!(!content.contains("changelog"));
-        assert!(!content.contains("comparison_links"));
-        assert!(!content.contains("zero_version_behavior"));
+        assert!(!content.contains("comparison-links"));
+        assert!(!content.contains("zero-version-behavior"));
     }
 
     #[test]
@@ -669,10 +740,10 @@ members = ["crates/*"]
         write_metadata_section(&path, MetadataSection::Workspace, &config).expect("write metadata");
 
         let content = std::fs::read_to_string(&path).expect("read file");
-        assert!(content.contains(r#"tag_format = "version-only""#));
+        assert!(content.contains(r#"tag-format = "version-only""#));
         assert!(content.contains(r#"changelog = "root""#));
-        assert!(content.contains(r#"comparison_links = "auto""#));
-        assert!(content.contains(r#"zero_version_behavior = "effective-minor""#));
+        assert!(content.contains(r#"comparison-links = "auto""#));
+        assert!(content.contains(r#"zero-version-behavior = "effective-minor""#));
     }
 
     #[test]
@@ -890,6 +961,32 @@ my-crate = "1.0.0"
     }
 
     #[test]
+    fn write_metadata_serializes_dependency_bump_changelog_template() {
+        let toml = r#"
+[workspace]
+members = ["crates/*"]
+"#;
+        let dir = tempfile::tempdir().expect("create temp dir");
+        let path = dir.path().join("Cargo.toml");
+        std::fs::write(&path, toml).expect("write test file");
+
+        let config = InitConfig {
+            dependency_bump_changelog_template: Some(
+                "Updated dependency `{dependency}` to v{version}".to_string(),
+            ),
+            ..Default::default()
+        };
+
+        write_metadata_section(&path, MetadataSection::Workspace, &config).expect("write metadata");
+
+        let content = std::fs::read_to_string(&path).expect("read file");
+        assert!(content.contains("[workspace.metadata.changeset]"));
+        assert!(content.contains(
+            r#"dependency-bump-changelog-template = "Updated dependency `{dependency}` to v{version}""#
+        ));
+    }
+
+    #[test]
     fn update_dep_version_updates_multiple_sections() {
         let toml = r#"
 [package]
@@ -932,5 +1029,186 @@ my-crate = { path = "crates/my-crate", version = "1.0.0" }
         let not_changed = update_dependency_version(&path, "nonexistent", &Version::new(2, 0, 0))
             .expect("update");
         assert!(!not_changed);
+    }
+
+    #[test]
+    fn write_metadata_serializes_base_branch() {
+        let toml = r#"
+[workspace]
+members = ["crates/*"]
+"#;
+        let dir = tempfile::tempdir().expect("create temp dir");
+        let path = dir.path().join("Cargo.toml");
+        std::fs::write(&path, toml).expect("write test file");
+
+        let config = InitConfig {
+            base_branch: Some("develop".to_string()),
+            ..Default::default()
+        };
+
+        write_metadata_section(&path, MetadataSection::Workspace, &config).expect("write metadata");
+
+        let content = std::fs::read_to_string(&path).expect("read file");
+        assert!(content.contains("[workspace.metadata.changeset]"));
+        assert!(content.contains(r#"base-branch = "develop""#));
+    }
+
+    #[test]
+    fn write_metadata_serializes_none_bump_behavior() {
+        use crate::config::NoneBumpBehavior;
+
+        let toml = r#"
+[workspace]
+members = ["crates/*"]
+"#;
+        let dir = tempfile::tempdir().expect("create temp dir");
+        let path = dir.path().join("Cargo.toml");
+        std::fs::write(&path, toml).expect("write test file");
+
+        let config = InitConfig {
+            none_bump_behavior: Some(NoneBumpBehavior::Disallow),
+            ..Default::default()
+        };
+
+        write_metadata_section(&path, MetadataSection::Workspace, &config).expect("write metadata");
+
+        let content = std::fs::read_to_string(&path).expect("read file");
+        assert!(content.contains("[workspace.metadata.changeset]"));
+        assert!(content.contains(r#"none-bump-behavior = "disallow""#));
+    }
+
+    #[test]
+    fn write_metadata_serializes_none_bump_promote_message_template() {
+        let toml = r#"
+[workspace]
+members = ["crates/*"]
+"#;
+        let dir = tempfile::tempdir().expect("create temp dir");
+        let path = dir.path().join("Cargo.toml");
+        std::fs::write(&path, toml).expect("write test file");
+
+        let config = InitConfig {
+            none_bump_promote_message_template: Some("chore: internal refactor".to_string()),
+            ..Default::default()
+        };
+
+        write_metadata_section(&path, MetadataSection::Workspace, &config).expect("write metadata");
+
+        let content = std::fs::read_to_string(&path).expect("read file");
+        assert!(content.contains("[workspace.metadata.changeset]"));
+        assert!(
+            content.contains(r#"none-bump-promote-message-template = "chore: internal refactor""#)
+        );
+    }
+
+    #[test]
+    fn write_metadata_serializes_commit_title_template() {
+        let toml = r#"
+[workspace]
+members = ["crates/*"]
+"#;
+        let dir = tempfile::tempdir().expect("create temp dir");
+        let path = dir.path().join("Cargo.toml");
+        std::fs::write(&path, toml).expect("write test file");
+
+        let config = InitConfig {
+            commit_title_template: Some("Release {new-version}".to_string()),
+            ..Default::default()
+        };
+
+        write_metadata_section(&path, MetadataSection::Workspace, &config).expect("write metadata");
+
+        let content = std::fs::read_to_string(&path).expect("read file");
+        assert!(content.contains(r#"commit-title-template = "Release {new-version}""#));
+    }
+
+    #[test]
+    fn write_metadata_serializes_changes_in_body() {
+        let toml = r#"
+[workspace]
+members = ["crates/*"]
+"#;
+        let dir = tempfile::tempdir().expect("create temp dir");
+        let path = dir.path().join("Cargo.toml");
+        std::fs::write(&path, toml).expect("write test file");
+
+        let config = InitConfig {
+            changes_in_body: Some(false),
+            ..Default::default()
+        };
+
+        write_metadata_section(&path, MetadataSection::Workspace, &config).expect("write metadata");
+
+        let content = std::fs::read_to_string(&path).expect("read file");
+        assert!(content.contains("changes-in-body = false"));
+    }
+
+    #[test]
+    fn write_metadata_serializes_comparison_links_template() {
+        let toml = r#"
+[workspace]
+members = ["crates/*"]
+"#;
+        let dir = tempfile::tempdir().expect("create temp dir");
+        let path = dir.path().join("Cargo.toml");
+        std::fs::write(&path, toml).expect("write test file");
+
+        let config = InitConfig {
+            comparison_links_template: Some(
+                "https://github.com/{repository}/compare/{base}...{target}".to_string(),
+            ),
+            ..Default::default()
+        };
+
+        write_metadata_section(&path, MetadataSection::Workspace, &config).expect("write metadata");
+
+        let content = std::fs::read_to_string(&path).expect("read file");
+        assert!(content.contains(
+            r#"comparison-links-template = "https://github.com/{repository}/compare/{base}...{target}""#
+        ));
+    }
+
+    #[test]
+    fn write_metadata_serializes_ignored_files() {
+        let toml = r#"
+[workspace]
+members = ["crates/*"]
+"#;
+        let dir = tempfile::tempdir().expect("create temp dir");
+        let path = dir.path().join("Cargo.toml");
+        std::fs::write(&path, toml).expect("write test file");
+
+        let config = InitConfig {
+            ignored_files: Some(vec!["*.md".to_string(), "docs/**".to_string()]),
+            ..Default::default()
+        };
+
+        write_metadata_section(&path, MetadataSection::Workspace, &config).expect("write metadata");
+
+        let content = std::fs::read_to_string(&path).expect("read file");
+        assert!(content.contains(r#"ignored-files = ["*.md", "docs/**"]"#));
+    }
+
+    #[test]
+    fn write_metadata_skips_empty_ignored_files() {
+        let toml = r#"
+[workspace]
+members = ["crates/*"]
+"#;
+        let dir = tempfile::tempdir().expect("create temp dir");
+        let path = dir.path().join("Cargo.toml");
+        std::fs::write(&path, toml).expect("write test file");
+
+        let config = InitConfig {
+            ignored_files: Some(vec![]),
+            commit: Some(true),
+            ..Default::default()
+        };
+
+        write_metadata_section(&path, MetadataSection::Workspace, &config).expect("write metadata");
+
+        let content = std::fs::read_to_string(&path).expect("read file");
+        assert!(!content.contains("ignored-files"));
+        assert!(content.contains("commit = true"));
     }
 }

@@ -1,6 +1,6 @@
 [package]
 name = "changeset-project"
-version = "0.1.1"
+version = "0.1.2"
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
@@ -18,7 +18,10 @@ testing = []
 [dependencies]
 changeset-changelog = { workspace = true }
 changeset-core = { workspace = true }
+changeset-git = { workspace = true }
+glob = { workspace = true }
 globset = "0.4"
+gset = { workspace = true }
 semver = { workspace = true }
 serde = { workspace = true }
 thiserror = { workspace = true }

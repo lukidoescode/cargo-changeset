@@ -162,17 +162,17 @@ pub fn calculate_new_version_with_zero_behavior(
     }
 
     let effective_bump = match zero_behavior {
-        ZeroVersionBehavior::EffectiveMinor => bump_type.map(|bt| match bt {
-            BumpType::None => BumpType::None,
-            BumpType::Major => BumpType::Minor,
-            BumpType::Minor | BumpType::Patch => BumpType::Patch,
-        }),
         ZeroVersionBehavior::AutoPromoteOnMajor => {
             if bump_type == Some(BumpType::Major) {
                 return apply_prerelease_to_version(Version::new(1, 0, 0), prerelease);
             }
             bump_type
         }
+        _ => bump_type.map(|bt| match bt {
+            BumpType::None => BumpType::None,
+            BumpType::Major => BumpType::Minor,
+            BumpType::Minor | BumpType::Patch => BumpType::Patch,
+        }),
     };
 
     calculate_new_version(current, effective_bump, prerelease)

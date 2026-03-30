@@ -14,19 +14,20 @@ impl<'a, R: ChangesetReader> CoverageRule<'a, R> {
 
 impl<R: ChangesetReader> VerificationRule for CoverageRule<'_, R> {
     fn check(&self, context: &VerificationContext, result: &mut VerificationResult) -> Result<()> {
-        for path in &context.changeset_files {
+        for path in context.changeset_files() {
             let changeset = self.reader.read_changeset(path)?;
-            for release in changeset.releases {
-                result.covered_packages.insert(release.name);
+            for release in changeset.releases() {
+                result.insert_covered_package(release.name().clone());
             }
         }
 
-        result.uncovered_packages = context
-            .affected_packages
+        let uncovered = context
+            .affected_packages()
             .iter()
-            .filter(|pkg| !result.covered_packages.contains(&pkg.name))
+            .filter(|pkg| !result.covered_packages().contains(pkg.name()))
             .cloned()
             .collect();
+        result.set_uncovered_packages(uncovered);
 
         Ok(())
     }

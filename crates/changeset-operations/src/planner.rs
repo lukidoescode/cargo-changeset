@@ -5,25 +5,31 @@ use changeset_version::{
     VersionError, calculate_new_version, calculate_new_version_with_zero_behavior, is_zero_version,
     max_bump_type,
 };
+use gset::Getset;
 use indexmap::IndexMap;
 
 use crate::types::{PackageReleaseConfig, PackageVersion};
 
-/// Result of planning version releases from changesets.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Getset)]
 pub struct ReleasePlan {
-    /// Calculated package versions for release.
-    pub releases: Vec<PackageVersion>,
-    /// Packages referenced in changesets but not found in workspace.
-    pub unknown_packages: Vec<String>,
+    #[getset(get, vis = "pub")]
+    releases: Vec<PackageVersion>,
+    #[getset(get, vis = "pub")]
+    unknown_packages: Vec<String>,
 }
 
-/// Plans version releases by aggregating changesets and calculating new versions.
+impl ReleasePlan {
+    pub(crate) fn new(releases: Vec<PackageVersion>, unknown_packages: Vec<String>) -> Self {
+        Self {
+            releases,
+            unknown_packages,
+        }
+    }
+}
+
 pub struct VersionPlanner;
 
 impl VersionPlanner {
-    /// Plans version releases based on changesets.
-    ///
     /// # Errors
     ///
     /// Returns `VersionError` if version calculation fails.
@@ -34,8 +40,6 @@ impl VersionPlanner {
         Self::plan_releases_with_prerelease(changesets, packages, None)
     }
 
-    /// Plans version releases with optional prerelease specification.
-    ///
     /// # Errors
     ///
     /// Returns `VersionError` if version calculation fails.
@@ -44,7 +48,8 @@ impl VersionPlanner {
         packages: &[PackageInfo],
         prerelease: Option<&PrereleaseSpec>,
     ) -> Result<ReleasePlan, VersionError> {
-        let package_lookup: IndexMap<_, _> = packages.iter().map(|p| (p.name.clone(), p)).collect();
+        let package_lookup: IndexMap<_, _> =
+            packages.iter().map(|p| (p.name().clone(), p)).collect();
         let bumps_by_package = Self::aggregate_bumps(changesets);
         let graduates = Self::collect_graduates(changesets);
 
@@ -61,30 +66,26 @@ impl VersionPlanner {
 
             if let Some(pkg) = package_lookup.get(name) {
                 let (new_version, effective_bump) = Self::compute_version_and_bump(
-                    &pkg.version,
+                    pkg.version(),
                     bump_type,
                     prerelease,
                     should_graduate,
                 )?;
-                releases.push(PackageVersion {
-                    name: name.clone(),
-                    current_version: pkg.version.clone(),
+                releases.push(PackageVersion::new(
+                    name.clone(),
+                    pkg.version().clone(),
                     new_version,
-                    bump_type: effective_bump,
-                });
+                    effective_bump,
+                    false,
+                ));
             } else {
                 unknown_packages.push(name.clone());
             }
         }
 
-        Ok(ReleasePlan {
-            releases,
-            unknown_packages,
-        })
+        Ok(ReleasePlan::new(releases, unknown_packages))
     }
 
-    /// Plans graduation of prerelease versions to stable.
-    ///
     /// # Errors
     ///
     /// Returns `VersionError` if version calculation fails.
@@ -92,25 +93,21 @@ impl VersionPlanner {
         let mut releases = Vec::new();
 
         for pkg in packages {
-            if changeset_version::is_prerelease(&pkg.version) {
-                let new_version = calculate_new_version(&pkg.version, None, None)?;
-                releases.push(PackageVersion {
-                    name: pkg.name.clone(),
-                    current_version: pkg.version.clone(),
+            if changeset_version::is_prerelease(pkg.version()) {
+                let new_version = calculate_new_version(pkg.version(), None, None)?;
+                releases.push(PackageVersion::new(
+                    pkg.name().clone(),
+                    pkg.version().clone(),
                     new_version,
-                    bump_type: BumpType::Patch,
-                });
+                    BumpType::Patch,
+                    false,
+                ));
             }
         }
 
-        Ok(ReleasePlan {
-            releases,
-            unknown_packages: Vec::new(),
-        })
+        Ok(ReleasePlan::new(releases, Vec::new()))
     }
 
-    /// Plans version releases with special handling for 0.x versions.
-    ///
     /// # Errors
     ///
     /// Returns `VersionError` if version calculation fails.
@@ -120,7 +117,8 @@ impl VersionPlanner {
         prerelease: Option<&PrereleaseSpec>,
         zero_behavior: ZeroVersionBehavior,
     ) -> Result<ReleasePlan, VersionError> {
-        let package_lookup: IndexMap<_, _> = packages.iter().map(|p| (p.name.clone(), p)).collect();
+        let package_lookup: IndexMap<_, _> =
+            packages.iter().map(|p| (p.name().clone(), p)).collect();
         let bumps_by_package = Self::aggregate_bumps(changesets);
         let graduates = Self::collect_graduates(changesets);
 
@@ -138,31 +136,27 @@ impl VersionPlanner {
             if let Some(pkg) = package_lookup.get(name) {
                 let (new_version, effective_bump) =
                     Self::compute_version_and_bump_with_zero_behavior(
-                        &pkg.version,
+                        pkg.version(),
                         bump_type,
                         prerelease,
                         zero_behavior,
                         should_graduate,
                     )?;
-                releases.push(PackageVersion {
-                    name: name.clone(),
-                    current_version: pkg.version.clone(),
+                releases.push(PackageVersion::new(
+                    name.clone(),
+                    pkg.version().clone(),
                     new_version,
-                    bump_type: effective_bump,
-                });
+                    effective_bump,
+                    false,
+                ));
             } else {
                 unknown_packages.push(name.clone());
             }
         }
 
-        Ok(ReleasePlan {
-            releases,
-            unknown_packages,
-        })
+        Ok(ReleasePlan::new(releases, unknown_packages))
     }
 
-    /// Plans graduation of 0.x versions to 1.0.0.
-    ///
     /// # Errors
     ///
     /// Returns `VersionError` if version calculation fails.
@@ -173,34 +167,27 @@ impl VersionPlanner {
         let mut releases = Vec::new();
 
         for pkg in packages {
-            if is_zero_version(&pkg.version) {
+            if is_zero_version(pkg.version()) {
                 let new_version = calculate_new_version_with_zero_behavior(
-                    &pkg.version,
+                    pkg.version(),
                     None,
                     prerelease,
                     ZeroVersionBehavior::EffectiveMinor,
                     true,
                 )?;
-                releases.push(PackageVersion {
-                    name: pkg.name.clone(),
-                    current_version: pkg.version.clone(),
+                releases.push(PackageVersion::new(
+                    pkg.name().clone(),
+                    pkg.version().clone(),
                     new_version,
-                    bump_type: BumpType::Major,
-                });
+                    BumpType::Major,
+                    false,
+                ));
             }
         }
 
-        Ok(ReleasePlan {
-            releases,
-            unknown_packages: Vec::new(),
-        })
+        Ok(ReleasePlan::new(releases, Vec::new()))
     }
 
-    /// Plans version releases with per-package configuration.
-    ///
-    /// This method applies individual prerelease tags and graduation settings
-    /// to each package based on the validated configuration from CLI + TOML.
-    ///
     /// # Errors
     ///
     /// Returns `VersionError` if version calculation fails.
@@ -210,7 +197,8 @@ impl VersionPlanner {
         per_package_config: &HashMap<String, PackageReleaseConfig>,
         zero_behavior: ZeroVersionBehavior,
     ) -> Result<ReleasePlan, VersionError> {
-        let package_lookup: IndexMap<_, _> = packages.iter().map(|p| (p.name.clone(), p)).collect();
+        let package_lookup: IndexMap<_, _> =
+            packages.iter().map(|p| (p.name().clone(), p)).collect();
         let bumps_by_package = Self::aggregate_bumps(changesets);
         let changeset_graduates = Self::collect_graduates(changesets);
 
@@ -221,9 +209,9 @@ impl VersionPlanner {
             let bump_type = max_bump_type(bumps);
             let config = per_package_config.get(name);
 
-            let prerelease = config.and_then(|c| c.prerelease.as_ref());
-            let should_graduate =
-                config.is_some_and(|c| c.graduate_zero) || changeset_graduates.contains(name);
+            let prerelease = config.and_then(|c| c.prerelease());
+            let should_graduate = config.is_some_and(PackageReleaseConfig::graduate_zero)
+                || changeset_graduates.contains(name);
 
             if Self::should_skip_package(bump_type, prerelease, should_graduate) {
                 continue;
@@ -232,18 +220,19 @@ impl VersionPlanner {
             if let Some(pkg) = package_lookup.get(name) {
                 let (new_version, effective_bump) =
                     Self::compute_version_and_bump_with_zero_behavior(
-                        &pkg.version,
+                        pkg.version(),
                         bump_type,
                         prerelease,
                         zero_behavior,
                         should_graduate,
                     )?;
-                releases.push(PackageVersion {
-                    name: name.clone(),
-                    current_version: pkg.version.clone(),
+                releases.push(PackageVersion::new(
+                    name.clone(),
+                    pkg.version().clone(),
                     new_version,
-                    bump_type: effective_bump,
-                });
+                    effective_bump,
+                    false,
+                ));
             } else {
                 unknown_packages.push(name.clone());
             }
@@ -254,32 +243,30 @@ impl VersionPlanner {
                 continue;
             }
 
-            if config.prerelease.is_none() && !config.graduate_zero {
+            if config.prerelease().is_none() && !config.graduate_zero() {
                 continue;
             }
 
             if let Some(pkg) = package_lookup.get(name) {
                 let (new_version, effective_bump) =
                     Self::compute_version_and_bump_with_zero_behavior(
-                        &pkg.version,
+                        pkg.version(),
                         None,
-                        config.prerelease.as_ref(),
+                        config.prerelease(),
                         zero_behavior,
-                        config.graduate_zero,
+                        config.graduate_zero(),
                     )?;
-                releases.push(PackageVersion {
-                    name: name.clone(),
-                    current_version: pkg.version.clone(),
+                releases.push(PackageVersion::new(
+                    name.clone(),
+                    pkg.version().clone(),
                     new_version,
-                    bump_type: effective_bump,
-                });
+                    effective_bump,
+                    false,
+                ));
             }
         }
 
-        Ok(ReleasePlan {
-            releases,
-            unknown_packages,
-        })
+        Ok(ReleasePlan::new(releases, unknown_packages))
     }
 
     fn effective_bump_type(aggregated_bump: Option<BumpType>, should_graduate: bool) -> BumpType {
@@ -345,8 +332,8 @@ impl VersionPlanner {
     fn collect_graduates(changesets: &[Changeset]) -> HashSet<String> {
         changesets
             .iter()
-            .filter(|c| c.graduate)
-            .flat_map(|c| c.releases.iter().map(|r| r.name.clone()))
+            .filter(|c| c.graduate())
+            .flat_map(|c| c.releases().iter().map(|r| r.name().clone()))
             .collect()
     }
 
@@ -355,18 +342,17 @@ impl VersionPlanner {
         let mut bumps_by_package: IndexMap<String, Vec<BumpType>> = IndexMap::new();
 
         for changeset in changesets {
-            for release in &changeset.releases {
+            for release in changeset.releases() {
                 bumps_by_package
-                    .entry(release.name.clone())
+                    .entry(release.name().clone())
                     .or_default()
-                    .push(release.bump_type);
+                    .push(release.bump_type());
             }
         }
 
         bumps_by_package
     }
 
-    /// Identifies packages that have changesets and those without.
     #[must_use]
     pub fn partition_packages(
         changesets: &[Changeset],
@@ -374,12 +360,12 @@ impl VersionPlanner {
     ) -> (HashSet<String>, Vec<PackageInfo>) {
         let packages_with_changesets: HashSet<String> = changesets
             .iter()
-            .flat_map(|c| c.releases.iter().map(|r| r.name.clone()))
+            .flat_map(|c| c.releases().iter().map(|r| r.name().clone()))
             .collect();
 
         let unchanged_packages: Vec<PackageInfo> = packages
             .iter()
-            .filter(|p| !packages_with_changesets.contains(&p.name))
+            .filter(|p| !packages_with_changesets.contains(p.name()))
             .cloned()
             .collect();
 
@@ -394,41 +380,33 @@ mod tests {
     use semver::Version;
     use std::path::PathBuf;
 
+    use crate::types::PackageReleaseConfigBuilder;
+
     fn make_package(name: &str, version: &str) -> PackageInfo {
-        PackageInfo {
-            name: name.to_string(),
-            version: version.parse().expect("valid version"),
-            path: PathBuf::from(format!("/mock/crates/{name}")),
-        }
+        PackageInfo::new(
+            name.to_string(),
+            version.parse().expect("valid version"),
+            PathBuf::from(format!("/mock/crates/{name}")),
+        )
     }
 
     fn make_changeset(package_name: &str, bump: BumpType, summary: &str) -> Changeset {
-        Changeset {
-            summary: summary.to_string(),
-            releases: vec![PackageRelease {
-                name: package_name.to_string(),
-                bump_type: bump,
-            }],
-            category: ChangeCategory::Changed,
-            consumed_for_prerelease: None,
-            graduate: false,
-        }
+        Changeset::new(
+            summary.to_string(),
+            vec![PackageRelease::new(package_name.to_string(), bump)],
+            ChangeCategory::Changed,
+        )
     }
 
     fn make_multi_changeset(releases: Vec<(&str, BumpType)>, summary: &str) -> Changeset {
-        Changeset {
-            summary: summary.to_string(),
-            releases: releases
+        Changeset::new(
+            summary.to_string(),
+            releases
                 .into_iter()
-                .map(|(name, bump)| PackageRelease {
-                    name: name.to_string(),
-                    bump_type: bump,
-                })
+                .map(|(name, bump)| PackageRelease::new(name.to_string(), bump))
                 .collect(),
-            category: ChangeCategory::Changed,
-            consumed_for_prerelease: None,
-            graduate: false,
-        }
+            ChangeCategory::Changed,
+        )
     }
 
     #[test]
@@ -437,8 +415,8 @@ mod tests {
 
         let plan = VersionPlanner::plan_releases(&[], &packages).expect("plan_releases");
 
-        assert!(plan.releases.is_empty());
-        assert!(plan.unknown_packages.is_empty());
+        assert!(plan.releases().is_empty());
+        assert!(plan.unknown_packages().is_empty());
     }
 
     #[test]
@@ -448,14 +426,14 @@ mod tests {
 
         let plan = VersionPlanner::plan_releases(&changesets, &packages).expect("plan_releases");
 
-        assert_eq!(plan.releases.len(), 1);
-        assert!(plan.unknown_packages.is_empty());
+        assert_eq!(plan.releases().len(), 1);
+        assert!(plan.unknown_packages().is_empty());
 
-        let release = &plan.releases[0];
-        assert_eq!(release.name, "my-crate");
-        assert_eq!(release.current_version, Version::new(1, 0, 0));
-        assert_eq!(release.new_version, Version::new(1, 0, 1));
-        assert_eq!(release.bump_type, BumpType::Patch);
+        let release = &plan.releases()[0];
+        assert_eq!(release.name(), "my-crate");
+        assert_eq!(*release.current_version(), Version::new(1, 0, 0));
+        assert_eq!(*release.new_version(), Version::new(1, 0, 1));
+        assert_eq!(release.bump_type(), BumpType::Patch);
     }
 
     #[test]
@@ -469,10 +447,10 @@ mod tests {
 
         let plan = VersionPlanner::plan_releases(&changesets, &packages).expect("plan_releases");
 
-        assert_eq!(plan.releases.len(), 1);
-        let release = &plan.releases[0];
-        assert_eq!(release.new_version, Version::new(1, 1, 0));
-        assert_eq!(release.bump_type, BumpType::Minor);
+        assert_eq!(plan.releases().len(), 1);
+        let release = &plan.releases()[0];
+        assert_eq!(*release.new_version(), Version::new(1, 1, 0));
+        assert_eq!(release.bump_type(), BumpType::Minor);
     }
 
     #[test]
@@ -488,22 +466,22 @@ mod tests {
 
         let plan = VersionPlanner::plan_releases(&changesets, &packages).expect("plan_releases");
 
-        assert_eq!(plan.releases.len(), 2);
-        assert!(plan.unknown_packages.is_empty());
+        assert_eq!(plan.releases().len(), 2);
+        assert!(plan.unknown_packages().is_empty());
 
         let release_a = plan
-            .releases
+            .releases()
             .iter()
-            .find(|r| r.name == "crate-a")
+            .find(|r| r.name() == "crate-a")
             .expect("crate-a should be in releases");
-        assert_eq!(release_a.new_version, Version::new(1, 1, 0));
+        assert_eq!(*release_a.new_version(), Version::new(1, 1, 0));
 
         let release_b = plan
-            .releases
+            .releases()
             .iter()
-            .find(|r| r.name == "crate-b")
+            .find(|r| r.name() == "crate-b")
             .expect("crate-b should be in releases");
-        assert_eq!(release_b.new_version, Version::new(3, 0, 0));
+        assert_eq!(*release_b.new_version(), Version::new(3, 0, 0));
     }
 
     #[test]
@@ -513,8 +491,8 @@ mod tests {
 
         let plan = VersionPlanner::plan_releases(&changesets, &packages).expect("plan_releases");
 
-        assert!(plan.releases.is_empty());
-        assert_eq!(plan.unknown_packages, vec!["unknown-crate"]);
+        assert!(plan.releases().is_empty());
+        assert_eq!(plan.unknown_packages(), &["unknown-crate"]);
     }
 
     #[test]
@@ -530,9 +508,9 @@ mod tests {
 
         let plan = VersionPlanner::plan_releases(&changesets, &packages).expect("plan_releases");
 
-        assert_eq!(plan.releases.len(), 1);
-        assert_eq!(plan.releases[0].name, "known-crate");
-        assert_eq!(plan.unknown_packages, vec!["unknown-crate"]);
+        assert_eq!(plan.releases().len(), 1);
+        assert_eq!(plan.releases()[0].name(), "known-crate");
+        assert_eq!(plan.unknown_packages(), &["unknown-crate"]);
     }
 
     #[test]
@@ -562,7 +540,7 @@ mod tests {
         assert!(with_changesets.contains("changed"));
         assert!(!with_changesets.contains("unchanged"));
         assert_eq!(without.len(), 1);
-        assert_eq!(without[0].name, "unchanged");
+        assert_eq!(without[0].name(), "unchanged");
     }
 
     #[test]
@@ -572,13 +550,13 @@ mod tests {
 
         let plan = VersionPlanner::plan_releases(&changesets, &packages).expect("plan_releases");
 
-        assert_eq!(plan.releases.len(), 1);
-        let release = &plan.releases[0];
+        assert_eq!(plan.releases().len(), 1);
+        let release = &plan.releases()[0];
         assert_eq!(
-            release.current_version,
+            *release.current_version(),
             "1.0.0-alpha.1".parse::<Version>().expect("valid")
         );
-        assert!(release.new_version > release.current_version);
+        assert!(release.new_version() > release.current_version());
     }
 
     #[test]
@@ -588,10 +566,10 @@ mod tests {
 
         let plan = VersionPlanner::plan_releases(&changesets, &packages).expect("plan_releases");
 
-        assert_eq!(plan.releases.len(), 1);
-        let release = &plan.releases[0];
+        assert_eq!(plan.releases().len(), 1);
+        let release = &plan.releases()[0];
         assert_eq!(
-            release.current_version,
+            *release.current_version(),
             "1.0.0+build.123".parse::<Version>().expect("valid")
         );
     }
@@ -603,10 +581,10 @@ mod tests {
 
         let plan = VersionPlanner::plan_releases(&changesets, &packages).expect("plan_releases");
 
-        assert_eq!(plan.releases.len(), 1);
-        let release = &plan.releases[0];
-        assert_eq!(release.current_version, Version::new(0, 1, 0));
-        assert_eq!(release.new_version, Version::new(1, 0, 0));
+        assert_eq!(plan.releases().len(), 1);
+        let release = &plan.releases()[0];
+        assert_eq!(*release.current_version(), Version::new(0, 1, 0));
+        assert_eq!(*release.new_version(), Version::new(1, 0, 0));
     }
 
     #[test]
@@ -621,10 +599,10 @@ mod tests {
         )
         .expect("plan_releases_with_prerelease");
 
-        assert_eq!(plan.releases.len(), 1);
-        let release = &plan.releases[0];
+        assert_eq!(plan.releases().len(), 1);
+        let release = &plan.releases()[0];
         assert_eq!(
-            release.new_version,
+            *release.new_version(),
             "1.0.1-alpha.1".parse::<Version>().expect("valid")
         );
     }
@@ -641,10 +619,10 @@ mod tests {
         )
         .expect("plan_releases_with_prerelease");
 
-        assert_eq!(plan.releases.len(), 1);
-        let release = &plan.releases[0];
+        assert_eq!(plan.releases().len(), 1);
+        let release = &plan.releases()[0];
         assert_eq!(
-            release.new_version,
+            *release.new_version(),
             "1.0.1-alpha.3".parse::<Version>().expect("valid")
         );
     }
@@ -658,10 +636,10 @@ mod tests {
 
         let plan = VersionPlanner::plan_graduation(&packages).expect("plan_graduation");
 
-        assert_eq!(plan.releases.len(), 1);
-        let release = &plan.releases[0];
-        assert_eq!(release.name, "crate-a");
-        assert_eq!(release.new_version, Version::new(1, 0, 1));
+        assert_eq!(plan.releases().len(), 1);
+        let release = &plan.releases()[0];
+        assert_eq!(release.name(), "crate-a");
+        assert_eq!(*release.new_version(), Version::new(1, 0, 1));
     }
 
     #[test]
@@ -673,7 +651,7 @@ mod tests {
 
         let plan = VersionPlanner::plan_graduation(&packages).expect("plan_graduation");
 
-        assert!(plan.releases.is_empty());
+        assert!(plan.releases().is_empty());
     }
 
     mod zero_version_behavior_tests {
@@ -692,9 +670,9 @@ mod tests {
             )
             .expect("plan_releases_with_behavior");
 
-            assert_eq!(plan.releases.len(), 1);
-            let release = &plan.releases[0];
-            assert_eq!(release.new_version, Version::new(0, 2, 0));
+            assert_eq!(plan.releases().len(), 1);
+            let release = &plan.releases()[0];
+            assert_eq!(*release.new_version(), Version::new(0, 2, 0));
         }
 
         #[test]
@@ -710,9 +688,9 @@ mod tests {
             )
             .expect("plan_releases_with_behavior");
 
-            assert_eq!(plan.releases.len(), 1);
-            let release = &plan.releases[0];
-            assert_eq!(release.new_version, Version::new(0, 1, 3));
+            assert_eq!(plan.releases().len(), 1);
+            let release = &plan.releases()[0];
+            assert_eq!(*release.new_version(), Version::new(0, 1, 3));
         }
 
         #[test]
@@ -728,9 +706,9 @@ mod tests {
             )
             .expect("plan_releases_with_behavior");
 
-            assert_eq!(plan.releases.len(), 1);
-            let release = &plan.releases[0];
-            assert_eq!(release.new_version, Version::new(1, 0, 0));
+            assert_eq!(plan.releases().len(), 1);
+            let release = &plan.releases()[0];
+            assert_eq!(*release.new_version(), Version::new(1, 0, 0));
         }
 
         #[test]
@@ -746,9 +724,9 @@ mod tests {
             )
             .expect("plan_releases_with_behavior");
 
-            assert_eq!(plan.releases.len(), 1);
-            let release = &plan.releases[0];
-            assert_eq!(release.new_version, Version::new(0, 2, 0));
+            assert_eq!(plan.releases().len(), 1);
+            let release = &plan.releases()[0];
+            assert_eq!(*release.new_version(), Version::new(0, 2, 0));
         }
 
         #[test]
@@ -764,9 +742,9 @@ mod tests {
             )
             .expect("plan_releases_with_behavior");
 
-            assert_eq!(plan.releases.len(), 1);
-            let release = &plan.releases[0];
-            assert_eq!(release.new_version, Version::new(2, 0, 0));
+            assert_eq!(plan.releases().len(), 1);
+            let release = &plan.releases()[0];
+            assert_eq!(*release.new_version(), Version::new(2, 0, 0));
         }
 
         #[test]
@@ -782,10 +760,10 @@ mod tests {
             )
             .expect("plan_releases_with_behavior");
 
-            assert_eq!(plan.releases.len(), 1);
-            let release = &plan.releases[0];
+            assert_eq!(plan.releases().len(), 1);
+            let release = &plan.releases()[0];
             assert_eq!(
-                release.new_version,
+                *release.new_version(),
                 "0.2.0-alpha.1".parse::<Version>().expect("valid")
             );
         }
@@ -804,7 +782,7 @@ mod tests {
             .expect("plan_releases_with_behavior");
 
             assert!(
-                plan.releases.is_empty(),
+                plan.releases().is_empty(),
                 "package with only None bumps should not appear in releases"
             );
         }
@@ -823,10 +801,10 @@ mod tests {
             let plan = VersionPlanner::plan_zero_graduation(&packages, None)
                 .expect("plan_zero_graduation");
 
-            assert_eq!(plan.releases.len(), 1);
-            let release = &plan.releases[0];
-            assert_eq!(release.name, "crate-a");
-            assert_eq!(release.new_version, Version::new(1, 0, 0));
+            assert_eq!(plan.releases().len(), 1);
+            let release = &plan.releases()[0];
+            assert_eq!(release.name(), "crate-a");
+            assert_eq!(*release.new_version(), Version::new(1, 0, 0));
         }
 
         #[test]
@@ -837,10 +815,10 @@ mod tests {
                 VersionPlanner::plan_zero_graduation(&packages, Some(&PrereleaseSpec::Alpha))
                     .expect("plan_zero_graduation");
 
-            assert_eq!(plan.releases.len(), 1);
-            let release = &plan.releases[0];
+            assert_eq!(plan.releases().len(), 1);
+            let release = &plan.releases()[0];
             assert_eq!(
-                release.new_version,
+                *release.new_version(),
                 "1.0.0-alpha.1".parse::<Version>().expect("valid")
             );
         }
@@ -855,7 +833,7 @@ mod tests {
             let plan = VersionPlanner::plan_zero_graduation(&packages, None)
                 .expect("plan_zero_graduation");
 
-            assert!(plan.releases.is_empty());
+            assert!(plan.releases().is_empty());
         }
 
         #[test]
@@ -869,9 +847,9 @@ mod tests {
             let plan = VersionPlanner::plan_zero_graduation(&packages, None)
                 .expect("plan_zero_graduation");
 
-            assert_eq!(plan.releases.len(), 2);
-            for release in &plan.releases {
-                assert_eq!(release.new_version, Version::new(1, 0, 0));
+            assert_eq!(plan.releases().len(), 2);
+            for release in plan.releases() {
+                assert_eq!(*release.new_version(), Version::new(1, 0, 0));
             }
         }
     }
@@ -880,16 +858,12 @@ mod tests {
         use super::*;
 
         fn make_graduating_changeset(package_name: &str, bump: BumpType) -> Changeset {
-            Changeset {
-                summary: "Graduate to 1.0".to_string(),
-                releases: vec![PackageRelease {
-                    name: package_name.to_string(),
-                    bump_type: bump,
-                }],
-                category: ChangeCategory::Changed,
-                consumed_for_prerelease: None,
-                graduate: true,
-            }
+            Changeset::new(
+                "Graduate to 1.0".to_string(),
+                vec![PackageRelease::new(package_name.to_string(), bump)],
+                ChangeCategory::Changed,
+            )
+            .with_graduate(true)
         }
 
         #[test]
@@ -905,9 +879,9 @@ mod tests {
             )
             .expect("plan_releases_with_behavior");
 
-            assert_eq!(plan.releases.len(), 1);
-            let release = &plan.releases[0];
-            assert_eq!(release.new_version, Version::new(1, 0, 0));
+            assert_eq!(plan.releases().len(), 1);
+            let release = &plan.releases()[0];
+            assert_eq!(*release.new_version(), Version::new(1, 0, 0));
         }
 
         #[test]
@@ -944,21 +918,21 @@ mod tests {
             )
             .expect("plan_releases_with_behavior");
 
-            assert_eq!(plan.releases.len(), 2);
+            assert_eq!(plan.releases().len(), 2);
 
             let graduating = plan
-                .releases
+                .releases()
                 .iter()
-                .find(|r| r.name == "graduating")
+                .find(|r| r.name() == "graduating")
                 .expect("graduating should be in releases");
-            assert_eq!(graduating.new_version, Version::new(1, 0, 0));
+            assert_eq!(graduating.new_version(), &Version::new(1, 0, 0));
 
             let regular = plan
-                .releases
+                .releases()
                 .iter()
-                .find(|r| r.name == "regular")
+                .find(|r| r.name() == "regular")
                 .expect("regular should be in releases");
-            assert_eq!(regular.new_version, Version::new(0, 4, 0));
+            assert_eq!(regular.new_version(), &Version::new(0, 4, 0));
         }
     }
 
@@ -966,16 +940,12 @@ mod tests {
         use super::*;
 
         fn make_graduating_changeset(package_name: &str, bump: BumpType) -> Changeset {
-            Changeset {
-                summary: "Graduate to 1.0".to_string(),
-                releases: vec![PackageRelease {
-                    name: package_name.to_string(),
-                    bump_type: bump,
-                }],
-                category: ChangeCategory::Changed,
-                consumed_for_prerelease: None,
-                graduate: true,
-            }
+            Changeset::new(
+                "Graduate to 1.0".to_string(),
+                vec![PackageRelease::new(package_name.to_string(), bump)],
+                ChangeCategory::Changed,
+            )
+            .with_graduate(true)
         }
 
         #[test]
@@ -991,9 +961,9 @@ mod tests {
             )
             .expect("plan_releases_with_behavior");
 
-            assert_eq!(plan.releases.len(), 1);
-            let release = &plan.releases[0];
-            assert_eq!(release.new_version, Version::new(1, 0, 0));
+            assert_eq!(plan.releases().len(), 1);
+            let release = &plan.releases()[0];
+            assert_eq!(*release.new_version(), Version::new(1, 0, 0));
         }
 
         #[test]
@@ -1004,10 +974,10 @@ mod tests {
             let mut config = HashMap::new();
             config.insert(
                 "my-crate".to_string(),
-                PackageReleaseConfig {
-                    prerelease: None,
-                    graduate_zero: true,
-                },
+                PackageReleaseConfigBuilder::default()
+                    .graduate_zero(true)
+                    .build()
+                    .expect("all fields have defaults"),
             );
 
             let plan = VersionPlanner::plan_releases_per_package(
@@ -1018,9 +988,9 @@ mod tests {
             )
             .expect("plan_releases_per_package");
 
-            assert_eq!(plan.releases.len(), 1);
-            let release = &plan.releases[0];
-            assert_eq!(release.new_version, Version::new(1, 0, 0));
+            assert_eq!(plan.releases().len(), 1);
+            let release = &plan.releases()[0];
+            assert_eq!(*release.new_version(), Version::new(1, 0, 0));
         }
 
         #[test]
@@ -1031,10 +1001,10 @@ mod tests {
             let plan = VersionPlanner::plan_releases_with_prerelease(&changesets, &packages, None)
                 .expect("plan_releases_with_prerelease");
 
-            assert_eq!(plan.releases.len(), 1);
-            let release = &plan.releases[0];
-            assert_eq!(release.new_version, Version::new(1, 0, 0));
-            assert_eq!(release.bump_type, BumpType::Major);
+            assert_eq!(plan.releases().len(), 1);
+            let release = &plan.releases()[0];
+            assert_eq!(*release.new_version(), Version::new(1, 0, 0));
+            assert_eq!(release.bump_type(), BumpType::Major);
         }
 
         #[test]
@@ -1049,13 +1019,13 @@ mod tests {
             )
             .expect("plan_releases_with_prerelease");
 
-            assert_eq!(plan.releases.len(), 1);
-            let release = &plan.releases[0];
+            assert_eq!(plan.releases().len(), 1);
+            let release = &plan.releases()[0];
             assert_eq!(
-                release.new_version,
+                *release.new_version(),
                 "1.0.0-alpha.1".parse::<Version>().expect("valid")
             );
-            assert_eq!(release.bump_type, BumpType::Major);
+            assert_eq!(release.bump_type(), BumpType::Major);
         }
     }
 
@@ -1076,10 +1046,10 @@ mod tests {
             let mut config = HashMap::new();
             config.insert(
                 "crate-a".to_string(),
-                PackageReleaseConfig {
-                    prerelease: Some(PrereleaseSpec::Alpha),
-                    graduate_zero: false,
-                },
+                PackageReleaseConfigBuilder::default()
+                    .prerelease(Some(PrereleaseSpec::Alpha))
+                    .build()
+                    .expect("all fields have defaults"),
             );
 
             let plan = VersionPlanner::plan_releases_per_package(
@@ -1091,21 +1061,21 @@ mod tests {
             .expect("plan_releases_per_package");
 
             let release_a = plan
-                .releases
+                .releases()
                 .iter()
-                .find(|r| r.name == "crate-a")
+                .find(|r| r.name() == "crate-a")
                 .expect("crate-a should be in releases");
             let release_b = plan
-                .releases
+                .releases()
                 .iter()
-                .find(|r| r.name == "crate-b")
+                .find(|r| r.name() == "crate-b")
                 .expect("crate-b should be in releases");
 
             assert_eq!(
-                release_a.new_version,
-                "1.0.1-alpha.1".parse::<Version>().expect("valid")
+                release_a.new_version(),
+                &"1.0.1-alpha.1".parse::<Version>().expect("valid")
             );
-            assert_eq!(release_b.new_version, Version::new(1, 0, 1));
+            assert_eq!(release_b.new_version(), &Version::new(1, 0, 1));
         }
 
         #[test]
@@ -1122,10 +1092,10 @@ mod tests {
             let mut config = HashMap::new();
             config.insert(
                 "crate-a".to_string(),
-                PackageReleaseConfig {
-                    prerelease: None,
-                    graduate_zero: true,
-                },
+                PackageReleaseConfigBuilder::default()
+                    .graduate_zero(true)
+                    .build()
+                    .expect("all fields have defaults"),
             );
 
             let plan = VersionPlanner::plan_releases_per_package(
@@ -1137,18 +1107,18 @@ mod tests {
             .expect("plan_releases_per_package");
 
             let release_a = plan
-                .releases
+                .releases()
                 .iter()
-                .find(|r| r.name == "crate-a")
+                .find(|r| r.name() == "crate-a")
                 .expect("crate-a should be in releases");
             let release_b = plan
-                .releases
+                .releases()
                 .iter()
-                .find(|r| r.name == "crate-b")
+                .find(|r| r.name() == "crate-b")
                 .expect("crate-b should be in releases");
 
-            assert_eq!(release_a.new_version, Version::new(1, 0, 0));
-            assert_eq!(release_b.new_version, Version::new(0, 3, 1));
+            assert_eq!(release_a.new_version(), &Version::new(1, 0, 0));
+            assert_eq!(release_b.new_version(), &Version::new(0, 3, 1));
         }
 
         #[test]
@@ -1159,10 +1129,10 @@ mod tests {
             let mut config = HashMap::new();
             config.insert(
                 "crate-a".to_string(),
-                PackageReleaseConfig {
-                    prerelease: None,
-                    graduate_zero: true,
-                },
+                PackageReleaseConfigBuilder::default()
+                    .graduate_zero(true)
+                    .build()
+                    .expect("all fields have defaults"),
             );
 
             let plan = VersionPlanner::plan_releases_per_package(
@@ -1173,8 +1143,8 @@ mod tests {
             )
             .expect("plan_releases_per_package");
 
-            assert_eq!(plan.releases.len(), 1);
-            assert_eq!(plan.releases[0].new_version, Version::new(1, 0, 0));
+            assert_eq!(plan.releases().len(), 1);
+            assert_eq!(plan.releases()[0].new_version(), &Version::new(1, 0, 0));
         }
 
         #[test]
@@ -1185,10 +1155,11 @@ mod tests {
             let mut config = HashMap::new();
             config.insert(
                 "crate-a".to_string(),
-                PackageReleaseConfig {
-                    prerelease: Some(PrereleaseSpec::Rc),
-                    graduate_zero: true,
-                },
+                PackageReleaseConfigBuilder::default()
+                    .prerelease(Some(PrereleaseSpec::Rc))
+                    .graduate_zero(true)
+                    .build()
+                    .expect("all fields have defaults"),
             );
 
             let plan = VersionPlanner::plan_releases_per_package(
@@ -1199,10 +1170,10 @@ mod tests {
             )
             .expect("plan_releases_per_package");
 
-            assert_eq!(plan.releases.len(), 1);
+            assert_eq!(plan.releases().len(), 1);
             assert_eq!(
-                plan.releases[0].new_version,
-                "1.0.0-rc.1".parse::<Version>().expect("valid")
+                plan.releases()[0].new_version(),
+                &"1.0.0-rc.1".parse::<Version>().expect("valid")
             );
         }
 
@@ -1220,8 +1191,8 @@ mod tests {
             )
             .expect("plan_releases_per_package");
 
-            assert_eq!(plan.releases.len(), 1);
-            assert_eq!(plan.releases[0].new_version, Version::new(1, 0, 1));
+            assert_eq!(plan.releases().len(), 1);
+            assert_eq!(plan.releases()[0].new_version(), &Version::new(1, 0, 1));
         }
 
         #[test]
@@ -1240,17 +1211,17 @@ mod tests {
             let mut config = HashMap::new();
             config.insert(
                 "alpha-crate".to_string(),
-                PackageReleaseConfig {
-                    prerelease: Some(PrereleaseSpec::Alpha),
-                    graduate_zero: false,
-                },
+                PackageReleaseConfigBuilder::default()
+                    .prerelease(Some(PrereleaseSpec::Alpha))
+                    .build()
+                    .expect("all fields have defaults"),
             );
             config.insert(
                 "beta-crate".to_string(),
-                PackageReleaseConfig {
-                    prerelease: Some(PrereleaseSpec::Beta),
-                    graduate_zero: false,
-                },
+                PackageReleaseConfigBuilder::default()
+                    .prerelease(Some(PrereleaseSpec::Beta))
+                    .build()
+                    .expect("all fields have defaults"),
             );
 
             let plan = VersionPlanner::plan_releases_per_package(
@@ -1261,57 +1232,55 @@ mod tests {
             )
             .expect("plan_releases_per_package");
 
-            assert_eq!(plan.releases.len(), 3);
+            assert_eq!(plan.releases().len(), 3);
 
             let alpha = plan
-                .releases
+                .releases()
                 .iter()
-                .find(|r| r.name == "alpha-crate")
+                .find(|r| r.name() == "alpha-crate")
                 .expect("alpha-crate should be in releases");
             let beta = plan
-                .releases
+                .releases()
                 .iter()
-                .find(|r| r.name == "beta-crate")
+                .find(|r| r.name() == "beta-crate")
                 .expect("beta-crate should be in releases");
             let stable = plan
-                .releases
+                .releases()
                 .iter()
-                .find(|r| r.name == "stable-crate")
+                .find(|r| r.name() == "stable-crate")
                 .expect("stable-crate should be in releases");
 
             assert_eq!(
-                alpha.new_version,
-                "1.1.0-alpha.1".parse::<Version>().expect("valid")
+                alpha.new_version(),
+                &"1.1.0-alpha.1".parse::<Version>().expect("valid")
             );
             assert_eq!(
-                beta.new_version,
-                "2.0.1-beta.1".parse::<Version>().expect("valid")
+                beta.new_version(),
+                &"2.0.1-beta.1".parse::<Version>().expect("valid")
             );
-            assert_eq!(stable.new_version, Version::new(4, 0, 0));
+            assert_eq!(stable.new_version(), &Version::new(4, 0, 0));
         }
 
         #[test]
         fn changeset_graduate_field_combined_with_config() {
             let packages = vec![make_package("crate-a", "0.5.0")];
 
-            let changesets = vec![Changeset {
-                summary: "Graduate".to_string(),
-                releases: vec![PackageRelease {
-                    name: "crate-a".to_string(),
-                    bump_type: BumpType::Major,
-                }],
-                category: ChangeCategory::Changed,
-                consumed_for_prerelease: None,
-                graduate: true,
-            }];
+            let changesets = vec![
+                Changeset::new(
+                    "Graduate".to_string(),
+                    vec![PackageRelease::new("crate-a".to_string(), BumpType::Major)],
+                    ChangeCategory::Changed,
+                )
+                .with_graduate(true),
+            ];
 
             let mut config = HashMap::new();
             config.insert(
                 "crate-a".to_string(),
-                PackageReleaseConfig {
-                    prerelease: Some(PrereleaseSpec::Rc),
-                    graduate_zero: false,
-                },
+                PackageReleaseConfigBuilder::default()
+                    .prerelease(Some(PrereleaseSpec::Rc))
+                    .build()
+                    .expect("all fields have defaults"),
             );
 
             let plan = VersionPlanner::plan_releases_per_package(
@@ -1322,10 +1291,10 @@ mod tests {
             )
             .expect("plan_releases_per_package");
 
-            assert_eq!(plan.releases.len(), 1);
+            assert_eq!(plan.releases().len(), 1);
             assert_eq!(
-                plan.releases[0].new_version,
-                "1.0.0-rc.1".parse::<Version>().expect("valid")
+                plan.releases()[0].new_version(),
+                &"1.0.0-rc.1".parse::<Version>().expect("valid")
             );
         }
 
@@ -1337,10 +1306,10 @@ mod tests {
             let mut config = HashMap::new();
             config.insert(
                 "crate-a".to_string(),
-                PackageReleaseConfig {
-                    prerelease: None,
-                    graduate_zero: true,
-                },
+                PackageReleaseConfigBuilder::default()
+                    .graduate_zero(true)
+                    .build()
+                    .expect("all fields have defaults"),
             );
 
             let plan = VersionPlanner::plan_releases_per_package(
@@ -1351,8 +1320,8 @@ mod tests {
             )
             .expect("plan_releases_per_package");
 
-            assert_eq!(plan.releases.len(), 1);
-            assert_eq!(plan.releases[0].new_version, Version::new(1, 0, 0));
+            assert_eq!(plan.releases().len(), 1);
+            assert_eq!(plan.releases()[0].new_version(), &Version::new(1, 0, 0));
         }
 
         #[test]
@@ -1369,8 +1338,8 @@ mod tests {
             )
             .expect("plan_releases_per_package");
 
-            assert!(plan.releases.is_empty());
-            assert_eq!(plan.unknown_packages, vec!["unknown"]);
+            assert!(plan.releases().is_empty());
+            assert_eq!(plan.unknown_packages(), &["unknown"]);
         }
 
         #[test]
@@ -1381,10 +1350,10 @@ mod tests {
             let mut config = HashMap::new();
             config.insert(
                 "unknown".to_string(),
-                PackageReleaseConfig {
-                    prerelease: Some(PrereleaseSpec::Alpha),
-                    graduate_zero: false,
-                },
+                PackageReleaseConfigBuilder::default()
+                    .prerelease(Some(PrereleaseSpec::Alpha))
+                    .build()
+                    .expect("all fields have defaults"),
             );
 
             let plan = VersionPlanner::plan_releases_per_package(
@@ -1395,7 +1364,7 @@ mod tests {
             )
             .expect("plan_releases_per_package");
 
-            assert!(plan.releases.is_empty());
+            assert!(plan.releases().is_empty());
         }
 
         #[test]
@@ -1406,10 +1375,10 @@ mod tests {
             let mut config = HashMap::new();
             config.insert(
                 "crate-a".to_string(),
-                PackageReleaseConfig {
-                    prerelease: Some(PrereleaseSpec::Alpha),
-                    graduate_zero: false,
-                },
+                PackageReleaseConfigBuilder::default()
+                    .prerelease(Some(PrereleaseSpec::Alpha))
+                    .build()
+                    .expect("all fields have defaults"),
             );
 
             let plan = VersionPlanner::plan_releases_per_package(
@@ -1420,10 +1389,10 @@ mod tests {
             )
             .expect("plan_releases_per_package");
 
-            assert_eq!(plan.releases.len(), 1);
+            assert_eq!(plan.releases().len(), 1);
             assert_eq!(
-                plan.releases[0].new_version,
-                "1.0.1-alpha.1".parse::<Version>().expect("valid")
+                plan.releases()[0].new_version(),
+                &"1.0.1-alpha.1".parse::<Version>().expect("valid")
             );
         }
 
@@ -1441,8 +1410,8 @@ mod tests {
             )
             .expect("plan_releases_per_package");
 
-            assert_eq!(plan.releases.len(), 1);
-            assert_eq!(plan.releases[0].new_version, Version::new(0, 6, 0));
+            assert_eq!(plan.releases().len(), 1);
+            assert_eq!(plan.releases()[0].new_version(), &Version::new(0, 6, 0));
         }
 
         #[test]
@@ -1459,8 +1428,8 @@ mod tests {
             )
             .expect("plan_releases_per_package");
 
-            assert_eq!(plan.releases.len(), 1);
-            assert_eq!(plan.releases[0].new_version, Version::new(1, 0, 0));
+            assert_eq!(plan.releases().len(), 1);
+            assert_eq!(plan.releases()[0].new_version(), &Version::new(1, 0, 0));
         }
 
         #[test]
@@ -1480,9 +1449,9 @@ mod tests {
             )
             .expect("plan_releases_per_package");
 
-            assert_eq!(plan.releases.len(), 1);
-            assert_eq!(plan.releases[0].name, "with-changeset");
-            assert!(plan.unknown_packages.is_empty());
+            assert_eq!(plan.releases().len(), 1);
+            assert_eq!(plan.releases()[0].name(), "with-changeset");
+            assert!(plan.unknown_packages().is_empty());
         }
 
         #[test]
@@ -1493,10 +1462,10 @@ mod tests {
             let mut config = HashMap::new();
             config.insert(
                 "crate-a".to_string(),
-                PackageReleaseConfig {
-                    prerelease: None,
-                    graduate_zero: true,
-                },
+                PackageReleaseConfigBuilder::default()
+                    .graduate_zero(true)
+                    .build()
+                    .expect("all fields have defaults"),
             );
 
             let plan = VersionPlanner::plan_releases_per_package(
@@ -1507,8 +1476,8 @@ mod tests {
             )
             .expect("plan_releases_per_package");
 
-            assert_eq!(plan.releases.len(), 1);
-            assert_eq!(plan.releases[0].new_version, Version::new(1, 0, 0));
+            assert_eq!(plan.releases().len(), 1);
+            assert_eq!(plan.releases()[0].new_version(), &Version::new(1, 0, 0));
         }
 
         #[test]
@@ -1519,10 +1488,9 @@ mod tests {
             let mut config = HashMap::new();
             config.insert(
                 "crate-a".to_string(),
-                PackageReleaseConfig {
-                    prerelease: None,
-                    graduate_zero: false,
-                },
+                PackageReleaseConfigBuilder::default()
+                    .build()
+                    .expect("all fields have defaults"),
             );
 
             let plan = VersionPlanner::plan_releases_per_package(
@@ -1533,7 +1501,7 @@ mod tests {
             )
             .expect("plan_releases_per_package");
 
-            assert!(plan.releases.is_empty());
+            assert!(plan.releases().is_empty());
         }
 
         #[test]
@@ -1548,11 +1516,11 @@ mod tests {
             let mut config = HashMap::new();
             for pkg in &packages {
                 config.insert(
-                    pkg.name.clone(),
-                    PackageReleaseConfig {
-                        prerelease: None,
-                        graduate_zero: true,
-                    },
+                    pkg.name().clone(),
+                    PackageReleaseConfigBuilder::default()
+                        .graduate_zero(true)
+                        .build()
+                        .expect("all fields have defaults"),
                 );
             }
 
@@ -1564,13 +1532,13 @@ mod tests {
             )
             .expect("plan_releases_per_package");
 
-            assert_eq!(plan.releases.len(), 3);
-            for release in &plan.releases {
+            assert_eq!(plan.releases().len(), 3);
+            for release in plan.releases() {
                 assert_eq!(
-                    release.new_version,
+                    *release.new_version(),
                     Version::new(1, 0, 0),
                     "{} should graduate to 1.0.0",
-                    release.name
+                    release.name()
                 );
             }
         }
@@ -1583,10 +1551,11 @@ mod tests {
             let mut config = HashMap::new();
             config.insert(
                 "crate-a".to_string(),
-                PackageReleaseConfig {
-                    prerelease: Some(PrereleaseSpec::Beta),
-                    graduate_zero: true,
-                },
+                PackageReleaseConfigBuilder::default()
+                    .prerelease(Some(PrereleaseSpec::Beta))
+                    .graduate_zero(true)
+                    .build()
+                    .expect("all fields have defaults"),
             );
 
             let plan = VersionPlanner::plan_releases_per_package(
@@ -1597,10 +1566,10 @@ mod tests {
             )
             .expect("plan_releases_per_package");
 
-            assert_eq!(plan.releases.len(), 1);
+            assert_eq!(plan.releases().len(), 1);
             assert_eq!(
-                plan.releases[0].new_version,
-                "1.0.0-beta.1".parse::<Version>().expect("valid")
+                plan.releases()[0].new_version(),
+                &"1.0.0-beta.1".parse::<Version>().expect("valid")
             );
         }
     }
@@ -1621,8 +1590,8 @@ mod tests {
             )
             .expect("plan_releases_with_behavior");
 
-            assert_eq!(plan.releases.len(), 1);
-            assert_eq!(plan.releases[0].new_version, Version::new(1, 0, 0));
+            assert_eq!(plan.releases().len(), 1);
+            assert_eq!(plan.releases()[0].new_version(), &Version::new(1, 0, 0));
         }
 
         #[test]
@@ -1638,8 +1607,8 @@ mod tests {
             )
             .expect("plan_releases_with_behavior");
 
-            assert_eq!(plan.releases.len(), 1);
-            assert_eq!(plan.releases[0].new_version, Version::new(0, 2, 0));
+            assert_eq!(plan.releases().len(), 1);
+            assert_eq!(plan.releases()[0].new_version(), &Version::new(0, 2, 0));
         }
 
         #[test]
@@ -1655,8 +1624,8 @@ mod tests {
             )
             .expect("plan_releases_with_behavior");
 
-            assert_eq!(plan.releases.len(), 1);
-            assert_eq!(plan.releases[0].new_version, Version::new(0, 1, 3));
+            assert_eq!(plan.releases().len(), 1);
+            assert_eq!(plan.releases()[0].new_version(), &Version::new(0, 1, 3));
         }
     }
 
@@ -1678,11 +1647,11 @@ mod tests {
             let plan =
                 VersionPlanner::plan_releases(&changesets, &packages).expect("plan_releases");
 
-            assert!(plan.releases.is_empty());
-            assert_eq!(plan.unknown_packages.len(), 3);
-            assert!(plan.unknown_packages.contains(&"unknown1".to_string()));
-            assert!(plan.unknown_packages.contains(&"unknown2".to_string()));
-            assert!(plan.unknown_packages.contains(&"unknown3".to_string()));
+            assert!(plan.releases().is_empty());
+            assert_eq!(plan.unknown_packages().len(), 3);
+            assert!(plan.unknown_packages().contains(&"unknown1".to_string()));
+            assert!(plan.unknown_packages().contains(&"unknown2".to_string()));
+            assert!(plan.unknown_packages().contains(&"unknown3".to_string()));
         }
 
         #[test]
@@ -1693,10 +1662,10 @@ mod tests {
             let mut config = HashMap::new();
             config.insert(
                 "nonexistent".to_string(),
-                PackageReleaseConfig {
-                    prerelease: Some(PrereleaseSpec::Alpha),
-                    graduate_zero: false,
-                },
+                PackageReleaseConfigBuilder::default()
+                    .prerelease(Some(PrereleaseSpec::Alpha))
+                    .build()
+                    .expect("all fields have defaults"),
             );
 
             let plan = VersionPlanner::plan_releases_per_package(
@@ -1707,9 +1676,9 @@ mod tests {
             )
             .expect("plan_releases_per_package");
 
-            assert!(plan.releases.is_empty());
+            assert!(plan.releases().is_empty());
             assert!(
-                plan.unknown_packages.is_empty(),
+                plan.unknown_packages().is_empty(),
                 "config for nonexistent packages does not add to unknown_packages"
             );
         }
@@ -1727,7 +1696,7 @@ mod tests {
                 VersionPlanner::plan_releases(&changesets, &packages).expect("should succeed");
 
             assert!(
-                plan.releases.is_empty(),
+                plan.releases().is_empty(),
                 "package with only None bumps should not appear in releases"
             );
         }
@@ -1753,11 +1722,11 @@ mod tests {
             let plan =
                 VersionPlanner::plan_releases(&changesets, &packages).expect("should succeed");
 
-            assert_eq!(plan.releases.len(), 1);
-            assert_eq!(plan.releases[0].bump_type, BumpType::Patch);
+            assert_eq!(plan.releases().len(), 1);
+            assert_eq!(plan.releases()[0].bump_type(), BumpType::Patch);
             assert_eq!(
-                plan.releases[0].new_version,
-                Version::parse("1.0.1").expect("valid version")
+                plan.releases()[0].new_version(),
+                &Version::parse("1.0.1").expect("valid version")
             );
         }
 
@@ -1774,7 +1743,7 @@ mod tests {
             )
             .expect("should succeed");
 
-            assert!(plan.releases.is_empty());
+            assert!(plan.releases().is_empty());
         }
 
         #[test]
@@ -1790,7 +1759,7 @@ mod tests {
             )
             .expect("should succeed");
 
-            assert!(plan.releases.is_empty());
+            assert!(plan.releases().is_empty());
         }
     }
 }

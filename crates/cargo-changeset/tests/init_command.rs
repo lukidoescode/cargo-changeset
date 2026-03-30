@@ -299,7 +299,7 @@ mod config_flags {
 
         let cargo_toml =
             fs::read_to_string(dir.path().join("Cargo.toml")).expect("read Cargo.toml");
-        assert!(cargo_toml.contains("keep_changesets = true"));
+        assert!(cargo_toml.contains("keep-changesets = true"));
     }
 
     #[test]
@@ -314,7 +314,7 @@ mod config_flags {
 
         let cargo_toml =
             fs::read_to_string(dir.path().join("Cargo.toml")).expect("read Cargo.toml");
-        assert!(cargo_toml.contains(r#"tag_format = "version-only""#));
+        assert!(cargo_toml.contains(r#"tag-format = "version-only""#));
     }
 
     #[test]
@@ -329,7 +329,7 @@ mod config_flags {
 
         let cargo_toml =
             fs::read_to_string(dir.path().join("Cargo.toml")).expect("read Cargo.toml");
-        assert!(cargo_toml.contains(r#"tag_format = "crate-prefixed""#));
+        assert!(cargo_toml.contains(r#"tag-format = "crate-prefixed""#));
     }
 
     #[test]
@@ -374,7 +374,7 @@ mod config_flags {
 
         let cargo_toml =
             fs::read_to_string(dir.path().join("Cargo.toml")).expect("read Cargo.toml");
-        assert!(cargo_toml.contains(r#"comparison_links = "auto""#));
+        assert!(cargo_toml.contains(r#"comparison-links = "auto""#));
     }
 
     #[test]
@@ -389,7 +389,7 @@ mod config_flags {
 
         let cargo_toml =
             fs::read_to_string(dir.path().join("Cargo.toml")).expect("read Cargo.toml");
-        assert!(cargo_toml.contains(r#"comparison_links = "enabled""#));
+        assert!(cargo_toml.contains(r#"comparison-links = "enabled""#));
     }
 
     #[test]
@@ -404,7 +404,7 @@ mod config_flags {
 
         let cargo_toml =
             fs::read_to_string(dir.path().join("Cargo.toml")).expect("read Cargo.toml");
-        assert!(cargo_toml.contains(r#"comparison_links = "disabled""#));
+        assert!(cargo_toml.contains(r#"comparison-links = "disabled""#));
     }
 
     #[test]
@@ -419,7 +419,7 @@ mod config_flags {
 
         let cargo_toml =
             fs::read_to_string(dir.path().join("Cargo.toml")).expect("read Cargo.toml");
-        assert!(cargo_toml.contains(r#"zero_version_behavior = "effective-minor""#));
+        assert!(cargo_toml.contains(r#"zero-version-behavior = "effective-minor""#));
     }
 
     #[test]
@@ -434,7 +434,7 @@ mod config_flags {
 
         let cargo_toml =
             fs::read_to_string(dir.path().join("Cargo.toml")).expect("read Cargo.toml");
-        assert!(cargo_toml.contains(r#"zero_version_behavior = "auto-promote-on-major""#));
+        assert!(cargo_toml.contains(r#"zero-version-behavior = "auto-promote-on-major""#));
     }
 
     #[test]
@@ -459,7 +459,7 @@ mod config_flags {
             fs::read_to_string(dir.path().join("Cargo.toml")).expect("read Cargo.toml");
         assert!(cargo_toml.contains("commit = false"));
         assert!(cargo_toml.contains("tags = true"));
-        assert!(cargo_toml.contains("keep_changesets = true"));
+        assert!(cargo_toml.contains("keep-changesets = true"));
     }
 
     #[test]
@@ -492,11 +492,11 @@ mod config_flags {
             fs::read_to_string(workspace.path().join("Cargo.toml")).expect("read Cargo.toml");
         assert!(cargo_toml.contains("commit = true"));
         assert!(cargo_toml.contains("tags = true"));
-        assert!(cargo_toml.contains("keep_changesets = false"));
-        assert!(cargo_toml.contains(r#"tag_format = "crate-prefixed""#));
+        assert!(cargo_toml.contains("keep-changesets = false"));
+        assert!(cargo_toml.contains(r#"tag-format = "crate-prefixed""#));
         assert!(cargo_toml.contains(r#"changelog = "per-package""#));
-        assert!(cargo_toml.contains(r#"comparison_links = "enabled""#));
-        assert!(cargo_toml.contains(r#"zero_version_behavior = "auto-promote-on-major""#));
+        assert!(cargo_toml.contains(r#"comparison-links = "enabled""#));
+        assert!(cargo_toml.contains(r#"zero-version-behavior = "auto-promote-on-major""#));
 
         assert_cmd::cargo::cargo_bin_cmd!("cargo-changeset")
             .args(["status"])
@@ -705,7 +705,7 @@ mod reinit_scenarios {
 
         let cargo_toml =
             fs::read_to_string(workspace.path().join("Cargo.toml")).expect("read Cargo.toml");
-        assert!(cargo_toml.contains(r#"tag_format = "version-only""#));
+        assert!(cargo_toml.contains(r#"tag-format = "version-only""#));
 
         assert_cmd::cargo::cargo_bin_cmd!("cargo-changeset")
             .args(["init", "--tag-format", "crate-prefixed"])
@@ -716,7 +716,7 @@ mod reinit_scenarios {
         let cargo_toml =
             fs::read_to_string(workspace.path().join("Cargo.toml")).expect("read Cargo.toml");
         assert!(
-            cargo_toml.contains(r#"tag_format = "crate-prefixed""#),
+            cargo_toml.contains(r#"tag-format = "crate-prefixed""#),
             "config should be updated with new value"
         );
     }

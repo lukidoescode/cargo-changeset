@@ -9,7 +9,7 @@ use std::path::Path;
 use std::process::Command;
 
 use changeset_operations::OperationError;
-use changeset_operations::operations::{ReleaseInput, ReleaseOperation, ReleaseOutcome};
+use changeset_operations::operations::{ReleaseInputBuilder, ReleaseOperation, ReleaseOutcome};
 use changeset_operations::providers::{
     FileSystemChangelogWriter, FileSystemChangesetIO, FileSystemManifestWriter,
     FileSystemProjectProvider, FileSystemReleaseStateIO, Git2Provider,
@@ -205,11 +205,12 @@ fn run_release_with_git(
         git_provider,
         release_state_io,
     );
-    let input = ReleaseInput::builder()
+    let input = ReleaseInputBuilder::default()
         .no_commit(no_commit)
         .no_tags(no_tags)
         .keep_changesets(keep_changesets)
-        .build();
+        .build()
+        .expect("all fields have defaults");
 
     operation.execute(dir.path(), &input)
 }
@@ -239,8 +240,11 @@ fn system_test_successful_release_single_package() {
         panic!("expected Executed outcome");
     };
 
-    assert_eq!(output.planned_releases.len(), 1);
-    assert_eq!(output.planned_releases[0].new_version.to_string(), "1.0.1");
+    assert_eq!(output.planned_releases().len(), 1);
+    assert_eq!(
+        output.planned_releases()[0].new_version().to_string(),
+        "1.0.1"
+    );
 
     let final_version = read_version(&dir.path().join("Cargo.toml"));
     assert_eq!(final_version, "1.0.1", "version should be updated");
@@ -280,7 +284,7 @@ fn system_test_successful_release_workspace() {
         panic!("expected Executed outcome");
     };
 
-    assert_eq!(output.planned_releases.len(), 2);
+    assert_eq!(output.planned_releases().len(), 2);
 
     let version_a = read_version(&dir.path().join("crates/crate-a/Cargo.toml"));
     assert_eq!(version_a, "1.1.0");
@@ -487,7 +491,10 @@ fn system_test_no_rollback_needed_for_dry_run() {
         git_provider,
         release_state_io,
     );
-    let input = ReleaseInput::builder().dry_run(true).build();
+    let input = ReleaseInputBuilder::default()
+        .dry_run(true)
+        .build()
+        .expect("all fields have defaults");
 
     let result = operation
         .execute(dir.path(), &input)
@@ -497,7 +504,10 @@ fn system_test_no_rollback_needed_for_dry_run() {
         panic!("expected DryRun outcome");
     };
 
-    assert_eq!(output.planned_releases[0].new_version.to_string(), "1.0.1");
+    assert_eq!(
+        output.planned_releases()[0].new_version().to_string(),
+        "1.0.1"
+    );
 
     let final_version = read_version(&dir.path().join("Cargo.toml"));
     assert_eq!(
@@ -532,7 +542,10 @@ fn system_test_no_commit_mode_still_updates_files() {
         panic!("expected Executed outcome");
     };
 
-    assert_eq!(output.planned_releases[0].new_version.to_string(), "1.0.1");
+    assert_eq!(
+        output.planned_releases()[0].new_version().to_string(),
+        "1.0.1"
+    );
 
     let final_version = read_version(&dir.path().join("Cargo.toml"));
     assert_eq!(final_version, "1.0.1", "version should be updated");
@@ -635,8 +648,22 @@ fn system_test_release_updates_workspace_dependency_versions() {
         panic!("expected Executed outcome");
     };
 
-    assert_eq!(output.planned_releases.len(), 1);
-    assert_eq!(output.planned_releases[0].new_version.to_string(), "1.1.0");
+    assert_eq!(output.planned_releases().len(), 2);
+
+    let release_a = output
+        .planned_releases()
+        .iter()
+        .find(|r| r.name() == "crate-a")
+        .expect("crate-a should be in releases");
+    assert_eq!(release_a.new_version().to_string(), "1.1.0");
+    assert!(!release_a.auto_bumped());
+
+    let release_b = output
+        .planned_releases()
+        .iter()
+        .find(|r| r.name() == "crate-b")
+        .expect("crate-b should be auto-bumped as dependent");
+    assert!(release_b.auto_bumped());
 
     let crate_b_dep_version = read_dep_version(
         &dir.path().join("crates/crate-b/Cargo.toml"),
@@ -661,7 +688,7 @@ fn system_test_release_updates_root_workspace_dependencies() {
     git_add_all(&dir);
     git_commit(&dir, "Add changeset");
 
-    run_release_with_git(&dir, false, false, false).expect("release should succeed");
+    let _ = run_release_with_git(&dir, false, false, false).expect("release should succeed");
 
     let ws_dep_version = read_dep_version(
         &dir.path().join("Cargo.toml"),
@@ -726,7 +753,7 @@ crate-a = { path = "../crate-a" }
     git_add_all(&dir);
     git_commit(&dir, "Add changeset");
 
-    run_release_with_git(&dir, false, false, false).expect("release should succeed");
+    let _ = run_release_with_git(&dir, false, false, false).expect("release should succeed");
 
     let crate_b_dep_version = read_dep_version(
         &dir.path().join("crates/crate-b/Cargo.toml"),
@@ -793,7 +820,7 @@ crate-a = { path = "../crate-a", version = "1.0.0" }
     git_add_all(&dir);
     git_commit(&dir, "Add changeset");
 
-    run_release_with_git(&dir, false, false, false).expect("release should succeed");
+    let _ = run_release_with_git(&dir, false, false, false).expect("release should succeed");
 
     let dev_dep_version = read_dep_version(
         &dir.path().join("crates/crate-b/Cargo.toml"),
@@ -872,7 +899,7 @@ crate-a = { workspace = true }
     git_add_all(&dir);
     git_commit(&dir, "Add changeset");
 
-    run_release_with_git(&dir, false, false, false).expect("release should succeed");
+    let _ = run_release_with_git(&dir, false, false, false).expect("release should succeed");
 
     let ws_dep_version = read_dep_version(
         &dir.path().join("Cargo.toml"),
@@ -960,7 +987,7 @@ crate-a = { path = "../crate-a", version = "1.0.0" }
         panic!("expected Executed outcome");
     };
 
-    assert_eq!(output.planned_releases.len(), 2);
+    assert_eq!(output.planned_releases().len(), 2);
 
     let version_a = read_version(&dir.path().join("crates/crate-a/Cargo.toml"));
     assert_eq!(version_a, "1.1.0");
@@ -1035,5 +1062,134 @@ fn system_test_dependency_versions_rolled_back_on_tag_conflict() {
     assert_eq!(
         final_version_a, "1.0.0",
         "crate-a's own version should be restored"
+    );
+}
+
+// =============================================================================
+// Dependency Expansion Tests
+// =============================================================================
+
+fn create_workspace_with_dependency_chain() -> TempDir {
+    let dir = TempDir::new().expect("create temp dir");
+
+    fs::write(
+        dir.path().join("Cargo.toml"),
+        r#"[workspace]
+members = ["crates/*"]
+resolver = "2"
+
+[workspace.metadata.changeset]
+changelog = "per-package"
+"#,
+    )
+    .expect("write workspace Cargo.toml");
+
+    fs::create_dir_all(dir.path().join("crates/core/src")).expect("create core dir");
+    fs::write(
+        dir.path().join("crates/core/Cargo.toml"),
+        r#"[package]
+name = "core"
+version = "1.0.0"
+edition = "2021"
+"#,
+    )
+    .expect("write core Cargo.toml");
+    fs::write(dir.path().join("crates/core/src/lib.rs"), "").expect("write lib.rs");
+
+    fs::create_dir_all(dir.path().join("crates/lib/src")).expect("create lib dir");
+    fs::write(
+        dir.path().join("crates/lib/Cargo.toml"),
+        r#"[package]
+name = "lib"
+version = "1.0.0"
+edition = "2021"
+
+[dependencies]
+core = { path = "../core", version = "1.0.0" }
+"#,
+    )
+    .expect("write lib Cargo.toml");
+    fs::write(dir.path().join("crates/lib/src/lib.rs"), "").expect("write lib.rs");
+
+    fs::create_dir_all(dir.path().join(".changeset/changesets"))
+        .expect("create .changeset/changesets dir");
+
+    dir
+}
+
+#[test]
+fn system_test_release_auto_bumps_dependents() {
+    let dir = create_workspace_with_dependency_chain();
+    init_git_repo(&dir);
+    git_add_all(&dir);
+    git_commit(&dir, "Initial commit");
+
+    write_changeset(
+        &dir,
+        "feature-core.md",
+        "core",
+        "minor",
+        "Add feature to core",
+    );
+    git_add_all(&dir);
+    git_commit(&dir, "Add changeset");
+
+    let result = run_release_with_git(&dir, false, false, false).expect("release should succeed");
+
+    let ReleaseOutcome::Executed(output) = result else {
+        panic!("expected Executed outcome");
+    };
+
+    assert_eq!(output.planned_releases().len(), 2);
+
+    let core_release = output
+        .planned_releases()
+        .iter()
+        .find(|r| r.name() == "core")
+        .expect("core should be in releases");
+    assert_eq!(core_release.new_version().to_string(), "1.1.0");
+    assert!(!core_release.auto_bumped());
+
+    let lib_release = output
+        .planned_releases()
+        .iter()
+        .find(|r| r.name() == "lib")
+        .expect("lib should be auto-bumped");
+    assert_eq!(lib_release.new_version().to_string(), "1.0.1");
+    assert!(lib_release.auto_bumped());
+
+    let version_core = read_version(&dir.path().join("crates/core/Cargo.toml"));
+    assert_eq!(version_core, "1.1.0");
+
+    let version_lib = read_version(&dir.path().join("crates/lib/Cargo.toml"));
+    assert_eq!(version_lib, "1.0.1");
+
+    let tags = git_tags(&dir);
+    assert!(
+        tags.contains(&"core@v1.1.0".to_string()),
+        "core tag should be created"
+    );
+    assert!(
+        tags.contains(&"lib@v1.0.1".to_string()),
+        "lib tag should be created for auto-bumped dependent"
+    );
+
+    let lib_changelog_path = dir.path().join("crates/lib/CHANGELOG.md");
+    assert!(
+        lib_changelog_path.exists(),
+        "lib changelog should be created for auto-bumped dependent"
+    );
+    let lib_changelog = fs::read_to_string(&lib_changelog_path).expect("read lib changelog");
+    assert!(
+        lib_changelog.contains("1.0.1"),
+        "lib changelog should contain version 1.0.1"
+    );
+    assert!(
+        lib_changelog.contains("Updated dependency"),
+        "lib changelog should contain dependency update text"
+    );
+    assert!(
+        lib_changelog.contains("core"),
+        "lib changelog should reference the updated dependency name"
     );
 }

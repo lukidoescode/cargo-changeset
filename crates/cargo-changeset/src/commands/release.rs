@@ -4,8 +4,8 @@ use std::path::Path;
 use changeset_core::PrereleaseSpec;
 use changeset_operations::OperationError;
 use changeset_operations::operations::{
-    GitOperationResult, PackageReleaseConfig, ReleaseInput, ReleaseOperation, ReleaseOutcome,
-    ReleaseOutput,
+    GitOperationResult, PackageReleaseConfig, ReleaseInputBuilder, ReleaseOperation,
+    ReleaseOutcome, ReleaseOutput,
 };
 use changeset_operations::providers::{
     FileSystemChangelogWriter, FileSystemChangesetIO, FileSystemManifestWriter,
@@ -17,21 +17,15 @@ use changeset_version::is_prerelease;
 use super::ReleaseArgs;
 use crate::error::Result;
 
-/// Parsed prerelease specification from CLI
 #[derive(Debug, Clone)]
 pub(crate) struct ParsedPrereleaseArgs {
-    /// Per-package prerelease tags (crate_name -> tag)
-    pub per_package: HashMap<String, PrereleaseSpec>,
-    /// Global prerelease tag (applies to all if per_package is empty)
-    pub global: Option<PrereleaseSpec>,
+    pub(crate) per_package: HashMap<String, PrereleaseSpec>,
+    pub(crate) global: Option<PrereleaseSpec>,
 }
 
-/// Parsed graduation specification from CLI
 #[derive(Debug, Clone)]
 struct ParsedGraduateArgs {
-    /// Specific packages to graduate
     packages: HashSet<String>,
-    /// Whether `--graduate` was passed without specific crates
     all: bool,
 }
 
@@ -53,14 +47,14 @@ pub(crate) fn run(args: ReleaseArgs, start_path: &Path) -> Result<()> {
             per_package_config
                 .entry(pkg.clone())
                 .or_insert_with(PackageReleaseConfig::default)
-                .prerelease = Some(spec.clone());
+                .set_prerelease(spec.clone());
         }
     }
     for pkg in &parsed_graduate.packages {
         per_package_config
             .entry(pkg.clone())
             .or_insert_with(PackageReleaseConfig::default)
-            .graduate_zero = true;
+            .set_graduate_zero();
     }
 
     let operation = ReleaseOperation::new(
@@ -71,7 +65,7 @@ pub(crate) fn run(args: ReleaseArgs, start_path: &Path) -> Result<()> {
         git_provider,
         release_state_io,
     );
-    let input = ReleaseInput::builder()
+    let input = ReleaseInputBuilder::default()
         .dry_run(args.dry_run)
         .convert_inherited(args.convert)
         .no_commit(args.no_commit)
@@ -81,7 +75,8 @@ pub(crate) fn run(args: ReleaseArgs, start_path: &Path) -> Result<()> {
         .per_package_config(per_package_config)
         .global_prerelease(parsed_prerelease.and_then(|p| p.global))
         .graduate_all(parsed_graduate.all)
-        .build();
+        .build()
+        .expect("all fields have defaults");
     let outcome = operation.execute(start_path, &input)?;
 
     print_outcome(&outcome);
@@ -103,13 +98,16 @@ fn parse_prerelease_args(
     for arg in args {
         if arg.is_empty() {
             // Empty string means infer from existing prerelease
-            let has_prerelease = project.packages().iter().any(|p| is_prerelease(&p.version));
+            let has_prerelease = project
+                .packages()
+                .iter()
+                .any(|p| is_prerelease(p.version()));
             if has_prerelease {
                 let first_prerelease = project
                     .packages()
                     .iter()
-                    .find(|p| is_prerelease(&p.version))
-                    .and_then(|p| changeset_version::extract_prerelease_tag(&p.version));
+                    .find(|p| is_prerelease(p.version()))
+                    .and_then(|p| changeset_version::extract_prerelease_tag(p.version()));
 
                 if let Some(existing_tag) = first_prerelease {
                     global = Some(parse_prerelease_spec(&existing_tag)?);
@@ -171,65 +169,77 @@ fn print_outcome(outcome: &ReleaseOutcome) {
 }
 
 fn print_release_output(output: &ReleaseOutput) {
-    if output.planned_releases.is_empty() {
+    if output.planned_releases().is_empty() {
         println!("No packages to release.");
         return;
     }
 
     println!("Releases:");
-    for release in &output.planned_releases {
+    for release in output.planned_releases() {
+        let auto_label = if release.auto_bumped() {
+            " (dependency update)"
+        } else {
+            ""
+        };
         println!(
-            "  - {} {} -> {}",
-            release.name, release.current_version, release.new_version
+            "  - {} {} -> {}{}",
+            release.name(),
+            release.current_version(),
+            release.new_version(),
+            auto_label
         );
     }
 
-    if !output.unchanged_packages.is_empty() {
+    if !output.unchanged_packages().is_empty() {
         println!("\nUnchanged packages:");
-        for name in &output.unchanged_packages {
+        for name in output.unchanged_packages() {
             println!("  - {name}");
         }
     }
 
-    if !output.changelog_updates.is_empty() {
+    if !output.changelog_updates().is_empty() {
         println!("\nChangelogs updated:");
-        for update in &output.changelog_updates {
-            let status = if update.created { "created" } else { "updated" };
-            println!("  - {} ({})", update.path.display(), status);
+        for update in output.changelog_updates() {
+            let status = if update.created() {
+                "created"
+            } else {
+                "updated"
+            };
+            println!("  - {} ({})", update.path().display(), status);
         }
     }
 
-    if let Some(git_result) = &output.git_result {
+    if let Some(git_result) = output.git_result() {
         print_git_result(git_result);
     }
 
-    if !output.changesets_consumed.is_empty() {
+    if !output.changesets_consumed().is_empty() {
         println!(
             "\nConsumed {} changeset file(s)",
-            output.changesets_consumed.len()
+            output.changesets_consumed().len()
         );
     }
 }
 
 fn print_git_result(git_result: &GitOperationResult) {
-    if let Some(commit) = &git_result.commit {
+    if let Some(commit) = git_result.commit() {
         println!(
             "\nCommit created: {}",
-            &commit.sha[..7.min(commit.sha.len())]
+            &commit.sha()[..7.min(commit.sha().len())]
         );
     }
 
-    if !git_result.tags_created.is_empty() {
+    if !git_result.tags_created().is_empty() {
         println!("\nTags created:");
-        for tag in &git_result.tags_created {
-            println!("  - {}", tag.name);
+        for tag in git_result.tags_created() {
+            println!("  - {}", tag.name());
         }
     }
 
-    if !git_result.changesets_deleted.is_empty() {
+    if !git_result.changesets_deleted().is_empty() {
         println!(
             "\nDeleted {} changeset file(s)",
-            git_result.changesets_deleted.len()
+            git_result.changesets_deleted().len()
         );
     }
 }

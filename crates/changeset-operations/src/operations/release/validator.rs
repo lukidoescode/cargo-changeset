@@ -23,17 +23,14 @@ impl From<&ReleaseInput> for ReleaseCliInput {
                 .per_package_config()
                 .iter()
                 .filter_map(|(name, config)| {
-                    config
-                        .prerelease
-                        .as_ref()
-                        .map(|spec| (name.clone(), spec.clone()))
+                    config.prerelease().map(|spec| (name.clone(), spec.clone()))
                 })
                 .collect(),
             global_prerelease: input.global_prerelease().cloned(),
             cli_graduate: input
                 .per_package_config()
                 .iter()
-                .filter(|(_, config)| config.graduate_zero)
+                .filter(|(_, config)| config.graduate_zero())
                 .map(|(name, _)| name.clone())
                 .collect(),
             graduate_all: input.graduate_all(),
@@ -279,9 +276,10 @@ impl ReleaseValidator {
         project_kind: &ProjectKind,
     ) -> Result<ValidatedReleaseConfig, ValidationErrors> {
         let mut collector = ValidationErrorCollector::new();
-        let package_names: HashSet<_> = packages.iter().map(|p| p.name.as_str()).collect();
-        let available_packages: Vec<String> = packages.iter().map(|p| p.name.clone()).collect();
-        let package_lookup: HashMap<_, _> = packages.iter().map(|p| (p.name.as_str(), p)).collect();
+        let package_names: HashSet<_> = packages.iter().map(|p| p.name().as_str()).collect();
+        let available_packages: Vec<String> = packages.iter().map(|p| p.name().clone()).collect();
+        let package_lookup: HashMap<_, _> =
+            packages.iter().map(|p| (p.name().as_str(), p)).collect();
 
         Self::validate_packages_exist(
             cli_input.cli_prerelease.keys().map(String::as_str),
@@ -377,10 +375,10 @@ impl ReleaseValidator {
     ) {
         for pkg_name in &cli_input.cli_graduate {
             if let Some(pkg) = package_lookup.get(pkg_name.as_str()) {
-                if is_prerelease(&pkg.version) {
+                if is_prerelease(pkg.version()) {
                     collector.push(ValidationError::CannotGraduateFromPrerelease {
                         package: pkg_name.clone(),
-                        current_version: pkg.version.clone(),
+                        current_version: pkg.version().clone(),
                     });
                 }
             }
@@ -389,10 +387,10 @@ impl ReleaseValidator {
         if let Some(state) = graduation_state {
             for pkg_name in state.iter() {
                 if let Some(pkg) = package_lookup.get(pkg_name) {
-                    if is_prerelease(&pkg.version) {
+                    if is_prerelease(pkg.version()) {
                         collector.push(ValidationError::CannotGraduateFromPrerelease {
                             package: pkg_name.to_string(),
-                            current_version: pkg.version.clone(),
+                            current_version: pkg.version().clone(),
                         });
                     }
                 }
@@ -408,10 +406,10 @@ impl ReleaseValidator {
     ) {
         for pkg_name in &cli_input.cli_graduate {
             if let Some(pkg) = package_lookup.get(pkg_name.as_str()) {
-                if !is_zero_version(&pkg.version) && !is_prerelease(&pkg.version) {
+                if !is_zero_version(pkg.version()) && !is_prerelease(pkg.version()) {
                     collector.push(ValidationError::CannotGraduateStableVersion {
                         package: pkg_name.clone(),
-                        version: pkg.version.clone(),
+                        version: pkg.version().clone(),
                     });
                 }
             }
@@ -420,10 +418,10 @@ impl ReleaseValidator {
         if let Some(state) = graduation_state {
             for pkg_name in state.iter() {
                 if let Some(pkg) = package_lookup.get(pkg_name) {
-                    if !is_zero_version(&pkg.version) && !is_prerelease(&pkg.version) {
+                    if !is_zero_version(pkg.version()) && !is_prerelease(pkg.version()) {
                         collector.push(ValidationError::CannotGraduateStableVersion {
                             package: pkg_name.to_string(),
-                            version: pkg.version.clone(),
+                            version: pkg.version().clone(),
                         });
                     }
                 }
@@ -486,14 +484,16 @@ impl ReleaseValidator {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::operations::ReleaseInputBuilder;
+    use crate::types::PackageReleaseConfig;
     use std::path::PathBuf;
 
     fn make_package(name: &str, version: &str) -> PackageInfo {
-        PackageInfo {
-            name: name.to_string(),
-            version: version.parse().expect("valid version"),
-            path: PathBuf::from(format!("/mock/{name}")),
-        }
+        PackageInfo::new(
+            name.to_string(),
+            version.parse().expect("valid version"),
+            PathBuf::from(format!("/mock/{name}")),
+        )
     }
 
     mod prerelease_consistency {
@@ -718,9 +718,12 @@ mod tests {
                 .per_package()
                 .get("crate-a")
                 .expect("crate-a should have config");
-            assert!(pkg_config.graduate_zero, "should be marked for graduation");
             assert!(
-                matches!(pkg_config.prerelease, Some(PrereleaseSpec::Alpha)),
+                pkg_config.graduate_zero(),
+                "should be marked for graduation"
+            );
+            assert!(
+                matches!(pkg_config.prerelease(), Some(PrereleaseSpec::Alpha)),
                 "should have alpha prerelease tag"
             );
         }
@@ -837,15 +840,15 @@ mod tests {
                 .per_package()
                 .get("crate-a")
                 .expect("crate-a should have config");
-            assert!(matches!(config_a.prerelease, Some(PrereleaseSpec::Beta)));
-            assert!(config_a.graduate_zero);
+            assert!(matches!(config_a.prerelease(), Some(PrereleaseSpec::Beta)));
+            assert!(config_a.graduate_zero());
 
             let config_b = config
                 .per_package()
                 .get("crate-b")
                 .expect("crate-b should have config");
-            assert!(matches!(config_b.prerelease, Some(PrereleaseSpec::Alpha)));
-            assert!(!config_b.graduate_zero);
+            assert!(matches!(config_b.prerelease(), Some(PrereleaseSpec::Alpha)));
+            assert!(!config_b.graduate_zero());
         }
     }
 
@@ -953,9 +956,12 @@ mod tests {
                 .per_package()
                 .get("crate-a")
                 .expect("crate-a should have config");
-            assert!(pkg_config.graduate_zero, "should be marked for graduation");
             assert!(
-                matches!(pkg_config.prerelease, Some(PrereleaseSpec::Alpha)),
+                pkg_config.graduate_zero(),
+                "should be marked for graduation"
+            );
+            assert!(
+                matches!(pkg_config.prerelease(), Some(PrereleaseSpec::Alpha)),
                 "should have alpha prerelease tag from TOML"
             );
         }
@@ -1009,9 +1015,12 @@ mod tests {
             for pkg in &packages {
                 let pkg_config = config
                     .per_package()
-                    .get(&pkg.name)
+                    .get(pkg.name())
                     .expect("each package should have config");
-                assert!(matches!(pkg_config.prerelease, Some(PrereleaseSpec::Beta)));
+                assert!(matches!(
+                    pkg_config.prerelease(),
+                    Some(PrereleaseSpec::Beta)
+                ));
             }
         }
 
@@ -1039,13 +1048,14 @@ mod tests {
 
             let zero_config = config.per_package().get("zero-crate");
             assert!(
-                zero_config.is_some_and(|c| c.graduate_zero),
+                zero_config.is_some_and(PackageReleaseConfig::graduate_zero),
                 "zero version should graduate"
             );
 
             let stable_config = config.per_package().get("stable-crate");
             assert!(
-                stable_config.is_none() || !stable_config.is_some_and(|c| c.graduate_zero),
+                stable_config.is_none()
+                    || !stable_config.is_some_and(PackageReleaseConfig::graduate_zero),
                 "stable version should not graduate"
             );
         }
@@ -1215,7 +1225,7 @@ mod tests {
 
     mod release_cli_input_conversion {
         use super::*;
-        use crate::types::PackageReleaseConfig;
+        use crate::types::PackageReleaseConfigBuilder;
         use changeset_core::PrereleaseSpec;
         use std::collections::HashMap;
 
@@ -1224,20 +1234,22 @@ mod tests {
             let mut map = HashMap::new();
             map.insert(
                 "crate-a".to_string(),
-                PackageReleaseConfig {
-                    prerelease: Some(PrereleaseSpec::Alpha),
-                    graduate_zero: false,
-                },
+                PackageReleaseConfigBuilder::default()
+                    .prerelease(Some(PrereleaseSpec::Alpha))
+                    .build()
+                    .expect("all fields have defaults"),
             );
             map.insert(
                 "crate-b".to_string(),
-                PackageReleaseConfig {
-                    prerelease: None,
-                    graduate_zero: false,
-                },
+                PackageReleaseConfigBuilder::default()
+                    .build()
+                    .expect("all fields have defaults"),
             );
 
-            let input = ReleaseInput::builder().per_package_config(map).build();
+            let input = ReleaseInputBuilder::default()
+                .per_package_config(map)
+                .build()
+                .expect("all fields have defaults");
             let cli_input = ReleaseCliInput::from(&input);
 
             assert_eq!(cli_input.cli_prerelease.len(), 1);
@@ -1249,20 +1261,22 @@ mod tests {
             let mut map = HashMap::new();
             map.insert(
                 "crate-a".to_string(),
-                PackageReleaseConfig {
-                    prerelease: None,
-                    graduate_zero: true,
-                },
+                PackageReleaseConfigBuilder::default()
+                    .graduate_zero(true)
+                    .build()
+                    .expect("all fields have defaults"),
             );
             map.insert(
                 "crate-b".to_string(),
-                PackageReleaseConfig {
-                    prerelease: None,
-                    graduate_zero: false,
-                },
+                PackageReleaseConfigBuilder::default()
+                    .build()
+                    .expect("all fields have defaults"),
             );
 
-            let input = ReleaseInput::builder().per_package_config(map).build();
+            let input = ReleaseInputBuilder::default()
+                .per_package_config(map)
+                .build()
+                .expect("all fields have defaults");
             let cli_input = ReleaseCliInput::from(&input);
 
             assert_eq!(cli_input.cli_graduate.len(), 1);
@@ -1271,12 +1285,13 @@ mod tests {
 
         #[test]
         fn extracts_global_prerelease() {
-            let input = ReleaseInput::builder()
+            let input = ReleaseInputBuilder::default()
                 .global_prerelease(Some(PrereleaseSpec::Rc))
-                .build();
+                .build()
+                .expect("all fields have defaults");
             let cli_input = ReleaseCliInput::from(&input);
 
-            let global = cli_input.global_prerelease;
+            let global = cli_input.global_prerelease.clone();
             assert!(global.is_some());
             assert_eq!(
                 global.expect("should have global prerelease").identifier(),
@@ -1286,7 +1301,9 @@ mod tests {
 
         #[test]
         fn defaults_empty() {
-            let input = ReleaseInput::builder().build();
+            let input = ReleaseInputBuilder::default()
+                .build()
+                .expect("all fields have defaults");
             let cli_input = ReleaseCliInput::from(&input);
 
             assert!(cli_input.cli_prerelease.is_empty());
@@ -1297,7 +1314,10 @@ mod tests {
 
         #[test]
         fn graduate_all_propagates() {
-            let input = ReleaseInput::builder().graduate_all(true).build();
+            let input = ReleaseInputBuilder::default()
+                .graduate_all(true)
+                .build()
+                .expect("all fields have defaults");
             let cli_input = ReleaseCliInput::from(&input);
 
             assert!(cli_input.graduate_all);

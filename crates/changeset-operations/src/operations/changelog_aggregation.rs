@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use changeset_changelog::{ChangelogEntry, VersionRelease};
-use changeset_core::Changeset;
+use changeset_core::{ChangeCategory, Changeset};
 use chrono::NaiveDate;
 use semver::Version;
 
@@ -17,10 +17,28 @@ impl ChangesetAggregator {
     }
 
     pub(crate) fn add_changeset(&mut self, changeset: &Changeset) {
-        for release in &changeset.releases {
-            let entry = ChangelogEntry::new(changeset.category, &changeset.summary);
+        for release in changeset.releases() {
+            let entry = ChangelogEntry::new(changeset.category(), changeset.summary());
             self.entries_by_package
-                .entry(release.name.clone())
+                .entry(release.name().clone())
+                .or_default()
+                .push(entry);
+        }
+    }
+
+    pub(crate) fn add_dependency_update_entries(
+        &mut self,
+        package: &str,
+        upgraded_deps: &[(String, Version)],
+        template: &str,
+    ) {
+        for (dep_name, version) in upgraded_deps {
+            let rendered = template
+                .replace("{dependency}", dep_name)
+                .replace("{version}", &version.to_string());
+            let entry = ChangelogEntry::new(ChangeCategory::Changed, rendered);
+            self.entries_by_package
+                .entry(package.to_string())
                 .or_default()
                 .push(entry);
         }
@@ -72,19 +90,14 @@ mod tests {
     use super::*;
 
     fn make_changeset(packages: &[&str], category: ChangeCategory, summary: &str) -> Changeset {
-        Changeset {
-            summary: summary.to_string(),
-            releases: packages
+        Changeset::new(
+            summary.to_string(),
+            packages
                 .iter()
-                .map(|name| PackageRelease {
-                    name: name.to_string(),
-                    bump_type: BumpType::Patch,
-                })
+                .map(|name| PackageRelease::new(name.to_string(), BumpType::Patch))
                 .collect(),
             category,
-            consumed_for_prerelease: None,
-            graduate: false,
-        }
+        )
     }
 
     fn test_date() -> NaiveDate {
@@ -112,10 +125,10 @@ mod tests {
             .build_package_release("my-crate", &Version::new(1, 0, 0), test_date())
             .expect("release should exist");
 
-        assert_eq!(release.entries.len(), 1);
-        assert_eq!(release.entries[0].category, ChangeCategory::Fixed);
-        assert_eq!(release.entries[0].description, "Fixed a bug");
-        assert!(release.entries[0].package.is_none());
+        assert_eq!(release.entries().len(), 1);
+        assert_eq!(release.entries()[0].category(), ChangeCategory::Fixed);
+        assert_eq!(release.entries()[0].description(), "Fixed a bug");
+        assert!(release.entries()[0].package().is_none());
     }
 
     #[test]
@@ -137,7 +150,7 @@ mod tests {
             .build_package_release("my-crate", &Version::new(1, 0, 0), test_date())
             .expect("release should exist");
 
-        assert_eq!(release.entries.len(), 2);
+        assert_eq!(release.entries().len(), 2);
     }
 
     #[test]
@@ -158,10 +171,10 @@ mod tests {
             .build_package_release("crate-b", &Version::new(2, 0, 0), test_date())
             .expect("release should exist");
 
-        assert_eq!(release_a.entries.len(), 1);
-        assert_eq!(release_b.entries.len(), 1);
-        assert_eq!(release_a.version, Version::new(1, 0, 0));
-        assert_eq!(release_b.version, Version::new(2, 0, 0));
+        assert_eq!(release_a.entries().len(), 1);
+        assert_eq!(release_b.entries().len(), 1);
+        assert_eq!(release_a.version(), &Version::new(1, 0, 0));
+        assert_eq!(release_b.version(), &Version::new(2, 0, 0));
     }
 
     #[test]
@@ -178,7 +191,7 @@ mod tests {
             .build_package_release("my-crate", &Version::new(1, 0, 0), test_date())
             .expect("release should exist");
 
-        assert_eq!(release.entries[0].category, ChangeCategory::Security);
+        assert_eq!(release.entries()[0].category(), ChangeCategory::Security);
     }
 
     #[test]
@@ -205,16 +218,16 @@ mod tests {
             .build_root_release(&Version::new(1, 0, 0), test_date(), &packages)
             .expect("release should exist");
 
-        assert_eq!(release.entries.len(), 2);
+        assert_eq!(release.entries().len(), 2);
 
         let has_crate_a = release
-            .entries
+            .entries()
             .iter()
-            .any(|e| e.package.as_deref() == Some("crate-a"));
+            .any(|e| e.package().map(String::as_str) == Some("crate-a"));
         let has_crate_b = release
-            .entries
+            .entries()
             .iter()
-            .any(|e| e.package.as_deref() == Some("crate-b"));
+            .any(|e| e.package().map(String::as_str) == Some("crate-b"));
 
         assert!(has_crate_a, "Should have crate-a entry");
         assert!(has_crate_b, "Should have crate-b entry");
@@ -228,5 +241,78 @@ mod tests {
         let release = aggregator.build_root_release(&Version::new(1, 0, 0), test_date(), &packages);
 
         assert!(release.is_none());
+    }
+
+    #[test]
+    fn dependency_update_template_rendering() {
+        let mut aggregator = ChangesetAggregator::new();
+        let deps = vec![("dep-a".to_string(), Version::new(2, 0, 0))];
+
+        aggregator.add_dependency_update_entries(
+            "my-crate",
+            &deps,
+            "Updated dependency `{dependency}` to v{version}",
+        );
+
+        let release = aggregator
+            .build_package_release("my-crate", &Version::new(1, 0, 1), test_date())
+            .expect("release should exist");
+
+        assert_eq!(release.entries().len(), 1);
+        assert_eq!(
+            release.entries()[0].description(),
+            "Updated dependency `dep-a` to v2.0.0"
+        );
+    }
+
+    #[test]
+    fn multiple_dependency_updates_produce_multiple_entries() {
+        let mut aggregator = ChangesetAggregator::new();
+        let deps = vec![
+            ("dep-a".to_string(), Version::new(2, 0, 0)),
+            ("dep-b".to_string(), Version::new(3, 1, 0)),
+        ];
+
+        aggregator.add_dependency_update_entries(
+            "my-crate",
+            &deps,
+            "Bumped `{dependency}` to {version}",
+        );
+
+        let release = aggregator
+            .build_package_release("my-crate", &Version::new(1, 0, 1), test_date())
+            .expect("release should exist");
+
+        assert_eq!(release.entries().len(), 2);
+    }
+
+    #[test]
+    fn empty_dependency_updates_adds_no_entries() {
+        let mut aggregator = ChangesetAggregator::new();
+        let deps: Vec<(String, Version)> = vec![];
+
+        aggregator.add_dependency_update_entries("my-crate", &deps, "{dependency} {version}");
+
+        let release =
+            aggregator.build_package_release("my-crate", &Version::new(1, 0, 1), test_date());
+
+        assert!(
+            release.is_none(),
+            "no release should be produced when no dependency updates are added"
+        );
+    }
+
+    #[test]
+    fn dependency_update_entries_use_changed_category() {
+        let mut aggregator = ChangesetAggregator::new();
+        let deps = vec![("dep-a".to_string(), Version::new(1, 0, 0))];
+
+        aggregator.add_dependency_update_entries("my-crate", &deps, "{dependency} {version}");
+
+        let release = aggregator
+            .build_package_release("my-crate", &Version::new(1, 0, 1), test_date())
+            .expect("release should exist");
+
+        assert_eq!(release.entries()[0].category(), ChangeCategory::Changed);
     }
 }

@@ -2,7 +2,10 @@ use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
 use changeset_core::{BumpType, Changeset, PackageInfo};
+use changeset_project::WorkspaceDependencyGraph;
 use changeset_version::max_bump_type;
+use derive_builder::Builder;
+use gset::Getset;
 use indexmap::IndexMap;
 
 use crate::Result;
@@ -12,28 +15,29 @@ use crate::traits::{
 };
 use crate::types::PackageVersion;
 
+#[derive(Builder, Getset, Default)]
+#[builder(default)]
 pub struct StatusOutput {
-    /// All parsed changesets.
-    pub changesets: Vec<Changeset>,
-    /// Paths to changeset files.
-    pub changeset_files: Vec<PathBuf>,
-    /// Calculated releases (same type as `ReleaseOperation` uses).
-    pub projected_releases: Vec<PackageVersion>,
-    /// Raw bump types per package (for verbose display).
-    pub bumps_by_package: IndexMap<String, Vec<BumpType>>,
-    /// Packages with a changeset whose maximum bump type across all changesets is `BumpType::None`.
-    pub none_bump_packages: Vec<String>,
-    /// Packages with no pending changesets.
-    pub unchanged_packages: Vec<PackageInfo>,
-    /// Packages using inherited versions (informational warning).
-    pub packages_with_inherited_versions: Vec<String>,
-    /// Packages referenced in changesets but not in workspace.
-    pub unknown_packages: Vec<String>,
-    /// Changesets consumed for pre-release versions (path, version consumed for).
-    pub consumed_prerelease_changesets: Vec<(PathBuf, String)>,
-    /// Transitive dependents of packages with pending changesets that have no changeset coverage
-    /// themselves.
-    pub uncovered_dependents: Vec<(String, Vec<String>)>,
+    #[getset(get, vis = "pub")]
+    pub(crate) changesets: Vec<Changeset>,
+    #[getset(get, vis = "pub")]
+    pub(crate) changeset_files: Vec<PathBuf>,
+    #[getset(get, vis = "pub")]
+    pub(crate) projected_releases: Vec<PackageVersion>,
+    #[getset(get, vis = "pub")]
+    pub(crate) bumps_by_package: IndexMap<String, Vec<BumpType>>,
+    #[getset(get, vis = "pub")]
+    pub(crate) none_bump_packages: Vec<String>,
+    #[getset(get, vis = "pub")]
+    pub(crate) unchanged_packages: Vec<PackageInfo>,
+    #[getset(get, vis = "pub")]
+    pub(crate) packages_with_inherited_versions: Vec<String>,
+    #[getset(get, vis = "pub")]
+    pub(crate) unknown_packages: Vec<String>,
+    #[getset(get, vis = "pub")]
+    pub(crate) consumed_prerelease_changesets: Vec<(PathBuf, String)>,
+    #[getset(get, vis = "pub")]
+    pub(crate) uncovered_dependents: Vec<(String, Vec<String>)>,
 }
 
 pub struct StatusOperation<P, R, I> {
@@ -73,6 +77,12 @@ where
             changesets.push(changeset);
         }
 
+        let changesets = crate::none_bump::apply_none_bump_behavior(
+            changesets,
+            root_config.none_bump_behavior(),
+            root_config.none_bump_promote_message_template(),
+        )?;
+
         let consumed_changeset_paths = self
             .changeset_reader
             .list_consumed_changesets(&changeset_dir)?;
@@ -85,6 +95,15 @@ where
             &changesets,
             project.packages(),
             None,
+            root_config.zero_version_behavior(),
+        )?;
+
+        let graph = self.project_provider.build_dependency_graph(&project)?;
+
+        let projected_releases = super::release::expand_with_reverse_dependencies(
+            plan.releases().clone(),
+            &graph,
+            project.packages(),
             root_config.zero_version_behavior(),
         )?;
 
@@ -103,33 +122,30 @@ where
         none_bump_packages.sort();
 
         let uncovered_dependents =
-            self.compute_uncovered_dependents(&project, &plan.releases, &none_bump_packages)?;
+            Self::compute_uncovered_dependents(&graph, &projected_releases, &none_bump_packages);
 
         Ok(StatusOutput {
             changesets,
             changeset_files,
-            projected_releases: plan.releases,
+            projected_releases,
             bumps_by_package,
             none_bump_packages,
             unchanged_packages,
             packages_with_inherited_versions,
-            unknown_packages: plan.unknown_packages,
+            unknown_packages: plan.unknown_packages().clone(),
             consumed_prerelease_changesets,
             uncovered_dependents,
         })
     }
 
     fn compute_uncovered_dependents(
-        &self,
-        project: &changeset_project::CargoProject,
+        graph: &WorkspaceDependencyGraph,
         releases: &[PackageVersion],
         none_bump_packages: &[String],
-    ) -> Result<Vec<(String, Vec<String>)>> {
-        let graph = self.project_provider.build_dependency_graph(project)?;
-
+    ) -> Vec<(String, Vec<String>)> {
         let covered: Vec<String> = releases
             .iter()
-            .map(|r| r.name.clone())
+            .map(|r| r.name().clone())
             .chain(none_bump_packages.iter().cloned())
             .collect();
 
@@ -155,7 +171,7 @@ where
         result.retain(|(_, deps)| !deps.is_empty());
         result.sort_by(|(a, _), (b, _)| a.cmp(b));
 
-        Ok(result)
+        result
     }
 
     fn collect_consumed_changesets(
@@ -165,7 +181,7 @@ where
         let mut consumed = Vec::new();
         for path in paths {
             let changeset = reader.read_changeset(path)?;
-            if let Some(version) = changeset.consumed_for_prerelease {
+            if let Some(version) = changeset.consumed_for_prerelease().cloned() {
                 consumed.push((path.clone(), version));
             }
         }
@@ -211,14 +227,14 @@ mod tests {
             .execute(Path::new("/any"))
             .expect("StatusOperation failed for project with no changesets");
 
-        assert!(result.changesets.is_empty());
-        assert!(result.changeset_files.is_empty());
-        assert!(result.projected_releases.is_empty());
-        assert!(result.bumps_by_package.is_empty());
-        assert_eq!(result.unchanged_packages.len(), 1);
-        assert_eq!(result.unchanged_packages[0].name, "my-crate");
-        assert!(result.packages_with_inherited_versions.is_empty());
-        assert!(result.unknown_packages.is_empty());
+        assert!(result.changesets().is_empty());
+        assert!(result.changeset_files().is_empty());
+        assert!(result.projected_releases().is_empty());
+        assert!(result.bumps_by_package().is_empty());
+        assert_eq!(result.unchanged_packages().len(), 1);
+        assert_eq!(result.unchanged_packages()[0].name(), "my-crate");
+        assert!(result.packages_with_inherited_versions().is_empty());
+        assert!(result.unknown_packages().is_empty());
     }
 
     #[test]
@@ -235,18 +251,18 @@ mod tests {
             .execute(Path::new("/any"))
             .expect("StatusOperation failed to collect changesets");
 
-        assert_eq!(result.changesets.len(), 1);
-        assert_eq!(result.changeset_files.len(), 1);
-        assert!(result.bumps_by_package.contains_key("my-crate"));
-        assert_eq!(result.bumps_by_package["my-crate"], vec![BumpType::Minor]);
-        assert!(result.unchanged_packages.is_empty());
+        assert_eq!(result.changesets().len(), 1);
+        assert_eq!(result.changeset_files().len(), 1);
+        assert!(result.bumps_by_package().contains_key("my-crate"));
+        assert_eq!(result.bumps_by_package()["my-crate"], vec![BumpType::Minor]);
+        assert!(result.unchanged_packages().is_empty());
 
-        assert_eq!(result.projected_releases.len(), 1);
-        let release = &result.projected_releases[0];
-        assert_eq!(release.name, "my-crate");
-        assert_eq!(release.current_version, Version::new(1, 0, 0));
-        assert_eq!(release.new_version, Version::new(1, 1, 0));
-        assert_eq!(release.bump_type, BumpType::Minor);
+        assert_eq!(result.projected_releases().len(), 1);
+        let release = &result.projected_releases()[0];
+        assert_eq!(release.name(), "my-crate");
+        assert_eq!(*release.current_version(), Version::new(1, 0, 0));
+        assert_eq!(*release.new_version(), Version::new(1, 1, 0));
+        assert_eq!(release.bump_type(), BumpType::Minor);
     }
 
     #[test]
@@ -270,15 +286,15 @@ mod tests {
             .execute(Path::new("/any"))
             .expect("StatusOperation failed to aggregate multiple changesets");
 
-        assert_eq!(result.changesets.len(), 2);
-        assert_eq!(result.bumps_by_package["my-crate"].len(), 2);
-        assert!(result.bumps_by_package["my-crate"].contains(&BumpType::Patch));
-        assert!(result.bumps_by_package["my-crate"].contains(&BumpType::Minor));
+        assert_eq!(result.changesets().len(), 2);
+        assert_eq!(result.bumps_by_package()["my-crate"].len(), 2);
+        assert!(result.bumps_by_package()["my-crate"].contains(&BumpType::Patch));
+        assert!(result.bumps_by_package()["my-crate"].contains(&BumpType::Minor));
 
-        assert_eq!(result.projected_releases.len(), 1);
-        let release = &result.projected_releases[0];
-        assert_eq!(release.new_version, Version::new(1, 1, 0));
-        assert_eq!(release.bump_type, BumpType::Minor);
+        assert_eq!(result.projected_releases().len(), 1);
+        let release = &result.projected_releases()[0];
+        assert_eq!(*release.new_version(), Version::new(1, 1, 0));
+        assert_eq!(release.bump_type(), BumpType::Minor);
     }
 
     #[test]
@@ -296,8 +312,8 @@ mod tests {
             .execute(Path::new("/any"))
             .expect("StatusOperation failed to identify unchanged packages");
 
-        assert_eq!(result.unchanged_packages.len(), 1);
-        assert_eq!(result.unchanged_packages[0].name, "crate-b");
+        assert_eq!(result.unchanged_packages().len(), 1);
+        assert_eq!(result.unchanged_packages()[0].name(), "crate-b");
     }
 
     #[test]
@@ -316,7 +332,10 @@ mod tests {
             .execute(Path::new("/any"))
             .expect("StatusOperation failed to detect inherited versions");
 
-        assert_eq!(result.packages_with_inherited_versions, vec!["my-crate"]);
+        assert_eq!(
+            result.packages_with_inherited_versions(),
+            &vec!["my-crate".to_string()]
+        );
     }
 
     #[test]
@@ -332,8 +351,11 @@ mod tests {
             .execute(Path::new("/any"))
             .expect("StatusOperation failed to collect unknown packages");
 
-        assert!(result.projected_releases.is_empty());
-        assert_eq!(result.unknown_packages, vec!["unknown-crate"]);
+        assert!(result.projected_releases().is_empty());
+        assert_eq!(
+            result.unknown_packages(),
+            &vec!["unknown-crate".to_string()]
+        );
     }
 
     #[test]
@@ -361,23 +383,23 @@ mod tests {
             .execute(Path::new("/any"))
             .expect("StatusOperation failed");
 
-        assert_eq!(result.projected_releases.len(), 2);
+        assert_eq!(result.projected_releases().len(), 2);
 
         let release_a = result
-            .projected_releases
+            .projected_releases()
             .iter()
-            .find(|r| r.name == "crate-a")
+            .find(|r| r.name() == "crate-a")
             .expect("crate-a should be in releases");
-        assert_eq!(release_a.current_version, Version::new(1, 0, 0));
-        assert_eq!(release_a.new_version, Version::new(1, 1, 0));
+        assert_eq!(*release_a.current_version(), Version::new(1, 0, 0));
+        assert_eq!(*release_a.new_version(), Version::new(1, 1, 0));
 
         let release_b = result
-            .projected_releases
+            .projected_releases()
             .iter()
-            .find(|r| r.name == "crate-b")
+            .find(|r| r.name() == "crate-b")
             .expect("crate-b should be in releases");
-        assert_eq!(release_b.current_version, Version::new(2, 5, 3));
-        assert_eq!(release_b.new_version, Version::new(3, 0, 0));
+        assert_eq!(*release_b.current_version(), Version::new(2, 5, 3));
+        assert_eq!(*release_b.new_version(), Version::new(3, 0, 0));
     }
 
     #[test]
@@ -407,7 +429,7 @@ mod tests {
             .execute(Path::new("/any"))
             .expect("StatusOperation failed");
 
-        assert!(result.consumed_prerelease_changesets.is_empty());
+        assert!(result.consumed_prerelease_changesets().is_empty());
     }
 
     #[test]
@@ -415,7 +437,7 @@ mod tests {
         let project_provider = MockProjectProvider::single_package("my-crate", "1.0.0");
 
         let mut consumed_changeset = make_changeset("my-crate", BumpType::Patch, "Fix bug");
-        consumed_changeset.consumed_for_prerelease = Some("1.0.1-alpha.1".to_string());
+        consumed_changeset.set_consumed_for_prerelease(Some("1.0.1-alpha.1".to_string()));
 
         let changeset_reader = MockChangesetReader::new().with_changeset(
             PathBuf::from(".changeset/changesets/fix-bug.md"),
@@ -428,14 +450,17 @@ mod tests {
             .execute(Path::new("/any"))
             .expect("StatusOperation failed");
 
-        assert!(result.changeset_files.is_empty());
-        assert!(result.changesets.is_empty());
-        assert_eq!(result.consumed_prerelease_changesets.len(), 1);
+        assert!(result.changeset_files().is_empty());
+        assert!(result.changesets().is_empty());
+        assert_eq!(result.consumed_prerelease_changesets().len(), 1);
         assert_eq!(
-            result.consumed_prerelease_changesets[0].0,
+            result.consumed_prerelease_changesets()[0].0,
             PathBuf::from(".changeset/changesets/fix-bug.md")
         );
-        assert_eq!(result.consumed_prerelease_changesets[0].1, "1.0.1-alpha.1");
+        assert_eq!(
+            result.consumed_prerelease_changesets()[0].1,
+            "1.0.1-alpha.1"
+        );
     }
 
     #[test]
@@ -445,7 +470,7 @@ mod tests {
         let pending_changeset = make_changeset("my-crate", BumpType::Minor, "Add feature");
 
         let mut consumed_changeset = make_changeset("my-crate", BumpType::Patch, "Fix bug");
-        consumed_changeset.consumed_for_prerelease = Some("1.0.1-alpha.1".to_string());
+        consumed_changeset.set_consumed_for_prerelease(Some("1.0.1-alpha.1".to_string()));
 
         let changeset_reader = MockChangesetReader::new().with_changesets(vec![
             (
@@ -464,21 +489,24 @@ mod tests {
             .execute(Path::new("/any"))
             .expect("StatusOperation failed");
 
-        assert_eq!(result.changeset_files.len(), 1);
+        assert_eq!(result.changeset_files().len(), 1);
         assert_eq!(
-            result.changeset_files[0],
+            result.changeset_files()[0],
             PathBuf::from(".changeset/changesets/feature.md")
         );
 
-        assert_eq!(result.changesets.len(), 1);
-        assert_eq!(result.changesets[0].summary, "Add feature");
+        assert_eq!(result.changesets().len(), 1);
+        assert_eq!(result.changesets()[0].summary(), "Add feature");
 
-        assert_eq!(result.consumed_prerelease_changesets.len(), 1);
+        assert_eq!(result.consumed_prerelease_changesets().len(), 1);
         assert_eq!(
-            result.consumed_prerelease_changesets[0].0,
+            result.consumed_prerelease_changesets()[0].0,
             PathBuf::from(".changeset/changesets/fix.md")
         );
-        assert_eq!(result.consumed_prerelease_changesets[0].1, "1.0.1-alpha.1");
+        assert_eq!(
+            result.consumed_prerelease_changesets()[0].1,
+            "1.0.1-alpha.1"
+        );
     }
 
     #[test]
@@ -486,10 +514,10 @@ mod tests {
         let project_provider = MockProjectProvider::single_package("my-crate", "1.0.0");
 
         let mut consumed1 = make_changeset("my-crate", BumpType::Patch, "Fix bug 1");
-        consumed1.consumed_for_prerelease = Some("1.0.1-alpha.1".to_string());
+        consumed1.set_consumed_for_prerelease(Some("1.0.1-alpha.1".to_string()));
 
         let mut consumed2 = make_changeset("my-crate", BumpType::Patch, "Fix bug 2");
-        consumed2.consumed_for_prerelease = Some("1.0.1-alpha.2".to_string());
+        consumed2.set_consumed_for_prerelease(Some("1.0.1-alpha.2".to_string()));
 
         let changeset_reader = MockChangesetReader::new().with_changesets(vec![
             (PathBuf::from(".changeset/changesets/fix1.md"), consumed1),
@@ -502,11 +530,11 @@ mod tests {
             .execute(Path::new("/any"))
             .expect("StatusOperation failed");
 
-        assert!(result.changeset_files.is_empty());
-        assert_eq!(result.consumed_prerelease_changesets.len(), 2);
+        assert!(result.changeset_files().is_empty());
+        assert_eq!(result.consumed_prerelease_changesets().len(), 2);
 
         let versions: Vec<&str> = result
-            .consumed_prerelease_changesets
+            .consumed_prerelease_changesets()
             .iter()
             .map(|(_, v)| v.as_str())
             .collect();
@@ -515,7 +543,7 @@ mod tests {
     }
 
     #[test]
-    fn uncovered_dependents_appear_for_workspace_with_dependencies() {
+    fn dependents_auto_bumped_for_workspace_with_dependencies() {
         let project_provider =
             MockProjectProvider::workspace(vec![("core", "1.0.0"), ("app", "1.0.0")])
                 .with_dependency_edges(vec![("app", "core")]);
@@ -530,9 +558,18 @@ mod tests {
             .execute(Path::new("/any"))
             .expect("StatusOperation failed");
 
-        assert_eq!(result.uncovered_dependents.len(), 1);
-        assert_eq!(result.uncovered_dependents[0].0, "app");
-        assert_eq!(result.uncovered_dependents[0].1, vec!["core".to_string()]);
+        assert!(
+            result.uncovered_dependents().is_empty(),
+            "dependents are auto-bumped, none should be uncovered"
+        );
+
+        let app_release = result
+            .projected_releases()
+            .iter()
+            .find(|r| r.name() == "app")
+            .expect("app should be auto-bumped into projected releases");
+        assert!(app_release.auto_bumped());
+        assert_eq!(app_release.bump_type(), BumpType::Patch);
     }
 
     #[test]
@@ -561,7 +598,7 @@ mod tests {
             .expect("StatusOperation failed");
 
         assert!(
-            result.uncovered_dependents.is_empty(),
+            result.uncovered_dependents().is_empty(),
             "all dependents are covered, none should appear"
         );
     }
@@ -580,7 +617,7 @@ mod tests {
             .execute(Path::new("/any"))
             .expect("StatusOperation failed");
 
-        assert!(result.uncovered_dependents.is_empty());
+        assert!(result.uncovered_dependents().is_empty());
     }
 
     #[test]
@@ -597,11 +634,11 @@ mod tests {
             .execute(Path::new("/any"))
             .expect("StatusOperation failed");
 
-        assert!(result.uncovered_dependents.is_empty());
+        assert!(result.uncovered_dependents().is_empty());
     }
 
     #[test]
-    fn uncovered_dependents_sorted_alphabetically() {
+    fn multiple_dependents_auto_bumped() {
         let project_provider = MockProjectProvider::workspace(vec![
             ("core", "1.0.0"),
             ("zebra", "1.0.0"),
@@ -619,13 +656,23 @@ mod tests {
             .execute(Path::new("/any"))
             .expect("StatusOperation failed");
 
-        assert_eq!(result.uncovered_dependents.len(), 2);
-        assert_eq!(result.uncovered_dependents[0].0, "alpha");
-        assert_eq!(result.uncovered_dependents[1].0, "zebra");
+        assert!(
+            result.uncovered_dependents().is_empty(),
+            "all dependents are auto-bumped"
+        );
+
+        let auto_bumped: Vec<&str> = result
+            .projected_releases()
+            .iter()
+            .filter(|r| r.auto_bumped())
+            .map(|r| r.name().as_str())
+            .collect();
+        assert!(auto_bumped.contains(&"alpha"));
+        assert!(auto_bumped.contains(&"zebra"));
     }
 
     #[test]
-    fn transitive_chain_excludes_packages_without_direct_covered_dependency() {
+    fn transitive_chain_auto_bumps_all_dependents() {
         let project_provider =
             MockProjectProvider::workspace(vec![("a", "1.0.0"), ("b", "1.0.0"), ("c", "1.0.0")])
                 .with_dependency_edges(vec![("a", "b"), ("b", "c")]);
@@ -640,13 +687,55 @@ mod tests {
             .execute(Path::new("/any"))
             .expect("StatusOperation failed");
 
-        assert_eq!(
-            result.uncovered_dependents.len(),
-            1,
-            "only b should appear; a has no direct link to a covered package"
+        assert!(
+            result.uncovered_dependents().is_empty(),
+            "all transitive dependents are auto-bumped"
         );
-        assert_eq!(result.uncovered_dependents[0].0, "b");
-        assert_eq!(result.uncovered_dependents[0].1, vec!["c".to_string()]);
+
+        let auto_bumped: Vec<&str> = result
+            .projected_releases()
+            .iter()
+            .filter(|r| r.auto_bumped())
+            .map(|r| r.name().as_str())
+            .collect();
+        assert!(auto_bumped.contains(&"a"));
+        assert!(auto_bumped.contains(&"b"));
+    }
+
+    #[test]
+    fn auto_bumped_dependents_appear_in_projected_releases() {
+        let project_provider =
+            MockProjectProvider::workspace(vec![("core", "1.0.0"), ("app", "1.0.0")])
+                .with_dependency_edges(vec![("app", "core")]);
+
+        let changeset = make_changeset("core", BumpType::Minor, "Add feature to core");
+        let changeset_reader = MockChangesetReader::new()
+            .with_changeset(PathBuf::from(".changeset/changesets/feature.md"), changeset);
+
+        let operation = make_operation(project_provider, changeset_reader);
+
+        let result = operation
+            .execute(Path::new("/any"))
+            .expect("StatusOperation failed");
+
+        assert_eq!(result.projected_releases().len(), 2);
+
+        let core_release = result
+            .projected_releases()
+            .iter()
+            .find(|r| r.name() == "core")
+            .expect("core should be in projected releases");
+        assert_eq!(*core_release.new_version(), Version::new(1, 1, 0));
+        assert!(!core_release.auto_bumped());
+
+        let app_release = result
+            .projected_releases()
+            .iter()
+            .find(|r| r.name() == "app")
+            .expect("app should be auto-bumped into projected releases");
+        assert_eq!(*app_release.new_version(), Version::new(1, 0, 1));
+        assert_eq!(app_release.bump_type(), BumpType::Patch);
+        assert!(app_release.auto_bumped());
     }
 
     #[test]
@@ -675,8 +764,98 @@ mod tests {
             .expect("StatusOperation failed");
 
         assert!(
-            result.uncovered_dependents.is_empty(),
+            result.uncovered_dependents().is_empty(),
             "app is covered by a none-bump changeset and should not appear as uncovered"
+        );
+    }
+
+    #[test]
+    fn promote_to_patch_shows_patch_not_none() {
+        use changeset_core::NoneBumpBehavior;
+        use changeset_project::RootChangesetConfig;
+
+        let custom_config = RootChangesetConfig::default()
+            .with_none_bump_behavior(NoneBumpBehavior::PromoteToPatch);
+        let project_provider = MockProjectProvider::single_package("my-crate", "1.0.0")
+            .with_root_config(custom_config);
+
+        let changeset = make_changeset("my-crate", BumpType::None, "Internal refactor");
+        let changeset_reader = MockChangesetReader::new().with_changeset(
+            PathBuf::from(".changeset/changesets/refactor.md"),
+            changeset,
+        );
+
+        let operation = make_operation(project_provider, changeset_reader);
+
+        let result = operation
+            .execute(Path::new("/any"))
+            .expect("StatusOperation failed");
+
+        assert!(
+            result.none_bump_packages().is_empty(),
+            "promoted None bumps should not appear in none_bump_packages"
+        );
+        assert_eq!(result.projected_releases().len(), 1);
+        assert_eq!(result.projected_releases()[0].bump_type(), BumpType::Patch);
+    }
+
+    #[test]
+    fn disallow_errors_in_status() {
+        use changeset_core::NoneBumpBehavior;
+        use changeset_project::RootChangesetConfig;
+
+        let custom_config =
+            RootChangesetConfig::default().with_none_bump_behavior(NoneBumpBehavior::Disallow);
+        let project_provider = MockProjectProvider::single_package("my-crate", "1.0.0")
+            .with_root_config(custom_config);
+
+        let changeset = make_changeset("my-crate", BumpType::None, "Internal refactor");
+        let changeset_reader = MockChangesetReader::new().with_changeset(
+            PathBuf::from(".changeset/changesets/refactor.md"),
+            changeset,
+        );
+
+        let operation = make_operation(project_provider, changeset_reader);
+
+        let result = operation.execute(Path::new("/any"));
+
+        assert!(matches!(
+            result,
+            Err(crate::error::OperationError::NoneBumpDisallowed { .. })
+        ));
+    }
+
+    #[test]
+    fn allow_passes_none_bumps_through() {
+        use changeset_core::NoneBumpBehavior;
+        use changeset_project::RootChangesetConfig;
+
+        let custom_config =
+            RootChangesetConfig::default().with_none_bump_behavior(NoneBumpBehavior::Allow);
+        let project_provider = MockProjectProvider::single_package("my-crate", "1.0.0")
+            .with_root_config(custom_config);
+
+        let changeset = make_changeset("my-crate", BumpType::None, "Internal refactor");
+        let changeset_reader = MockChangesetReader::new().with_changeset(
+            PathBuf::from(".changeset/changesets/refactor.md"),
+            changeset,
+        );
+
+        let operation = make_operation(project_provider, changeset_reader);
+
+        let result = operation
+            .execute(Path::new("/any"))
+            .expect("StatusOperation failed");
+
+        assert!(
+            result
+                .none_bump_packages()
+                .contains(&"my-crate".to_string()),
+            "my-crate should appear in none_bump_packages with Allow behavior"
+        );
+        assert!(
+            result.projected_releases().is_empty(),
+            "None bump with Allow should not produce projected releases"
         );
     }
 }

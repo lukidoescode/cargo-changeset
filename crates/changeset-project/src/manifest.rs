@@ -8,18 +8,6 @@ use serde::de::IgnoredAny;
 
 use crate::error::ProjectError;
 
-pub(crate) fn read_manifest(path: &Path) -> Result<CargoManifest, ProjectError> {
-    let content = std::fs::read_to_string(path).map_err(|source| ProjectError::ManifestRead {
-        path: path.to_path_buf(),
-        source,
-    })?;
-
-    toml::from_str(&content).map_err(|source| ProjectError::ManifestParse {
-        path: path.to_path_buf(),
-        source,
-    })
-}
-
 #[derive(Debug, Deserialize)]
 pub(crate) struct CargoManifest {
     pub(crate) package: Option<Package>,
@@ -111,6 +99,14 @@ pub(crate) struct ChangesetMetadata {
     pub(crate) changes_in_body: Option<bool>,
     #[serde(default)]
     pub(crate) zero_version_behavior: Option<ZeroVersionBehavior>,
+    #[serde(default)]
+    pub(crate) dependency_bump_changelog_template: Option<String>,
+    #[serde(default)]
+    pub(crate) base_branch: Option<String>,
+    #[serde(default)]
+    pub(crate) none_bump_behavior: Option<changeset_core::NoneBumpBehavior>,
+    #[serde(default)]
+    pub(crate) none_bump_promote_message_template: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Clone, Copy)]
@@ -118,4 +114,16 @@ pub(crate) struct ChangesetMetadata {
 pub(crate) enum TagFormatValue {
     VersionOnly,
     CratePrefixed,
+}
+
+pub(crate) fn read_manifest(path: &Path) -> Result<CargoManifest, ProjectError> {
+    let content = std::fs::read_to_string(path).map_err(|source| ProjectError::ManifestRead {
+        path: path.to_path_buf(),
+        source,
+    })?;
+
+    toml::from_str(&content).map_err(|source| ProjectError::ManifestParse {
+        path: path.to_path_buf(),
+        source,
+    })
 }

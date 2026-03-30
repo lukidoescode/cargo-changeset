@@ -1,5 +1,3 @@
-use std::collections::HashSet;
-
 use super::rules::VerificationRule;
 use super::{VerificationContext, VerificationResult};
 use crate::Result;
@@ -22,15 +20,12 @@ impl<'a> VerificationEngine<'a> {
     ///
     /// Returns an error if any verification rule fails.
     pub fn verify(&self, context: &VerificationContext) -> Result<VerificationResult> {
-        let mut result = VerificationResult {
-            affected_packages: context.affected_packages.clone(),
-            transitive_dependents: context.transitive_dependents.clone(),
-            covered_packages: HashSet::new(),
-            uncovered_packages: Vec::new(),
-            deleted_changesets: Vec::new(),
-            project_files: context.project_files.clone(),
-            ignored_files: context.ignored_files.clone(),
-        };
+        let mut result = VerificationResult::new(
+            context.affected_packages().clone(),
+            context.transitive_dependents().clone(),
+            context.project_files().clone(),
+            context.ignored_files().clone(),
+        );
 
         for rule in &self.rules {
             rule.check(context, &mut result)?;

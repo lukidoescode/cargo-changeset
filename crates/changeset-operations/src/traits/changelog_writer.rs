@@ -1,13 +1,23 @@
 use std::path::{Path, PathBuf};
 
 use changeset_changelog::{RepositoryInfo, VersionRelease};
+use gset::Getset;
 
 use crate::Result;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Getset)]
 pub struct ChangelogWriteResult {
-    pub path: PathBuf,
-    pub created: bool,
+    #[getset(get, vis = "pub")]
+    path: PathBuf,
+    #[getset(get_copy, vis = "pub")]
+    created: bool,
+}
+
+impl ChangelogWriteResult {
+    #[must_use]
+    pub fn new(path: PathBuf, created: bool) -> Self {
+        Self { path, created }
+    }
 }
 
 pub trait ChangelogWriter: Send + Sync {

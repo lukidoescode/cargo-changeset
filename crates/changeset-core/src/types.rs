@@ -1,7 +1,9 @@
 use std::fmt;
+use std::path::PathBuf;
 use std::str::FromStr;
 
 use clap::ValueEnum;
+use gset::Getset;
 use semver::Version;
 use serde::{Deserialize, Serialize};
 
@@ -34,11 +36,209 @@ impl fmt::Display for BumpType {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[non_exhaustive]
 #[serde(rename_all = "kebab-case")]
 pub enum ZeroVersionBehavior {
     #[default]
     EffectiveMinor,
     AutoPromoteOnMajor,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[non_exhaustive]
+#[serde(rename_all = "kebab-case")]
+pub enum NoneBumpBehavior {
+    #[default]
+    PromoteToPatch,
+    Allow,
+    Disallow,
+}
+
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
+    Serialize,
+    Deserialize,
+    Default,
+    ValueEnum,
+)]
+#[serde(rename_all = "lowercase")]
+pub enum ChangeCategory {
+    Added,
+    #[default]
+    Changed,
+    Deprecated,
+    Removed,
+    Fixed,
+    Security,
+}
+
+impl fmt::Display for ChangeCategory {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let s = match self {
+            Self::Added => "Added",
+            Self::Changed => "Changed",
+            Self::Deprecated => "Deprecated",
+            Self::Removed => "Removed",
+            Self::Fixed => "Fixed",
+            Self::Security => "Security",
+        };
+        write!(f, "{s}")
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Getset)]
+pub struct PackageRelease {
+    #[getset(get, vis = "pub")]
+    name: String,
+    #[getset(get_copy, vis = "pub")]
+    bump_type: BumpType,
+}
+
+impl PackageRelease {
+    #[must_use]
+    pub fn new(name: String, bump_type: BumpType) -> Self {
+        Self { name, bump_type }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Getset)]
+pub struct Changeset {
+    #[getset(get, vis = "pub")]
+    summary: String,
+    #[getset(get, vis = "pub")]
+    releases: Vec<PackageRelease>,
+    #[serde(default)]
+    #[getset(get_copy, vis = "pub")]
+    category: ChangeCategory,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        rename = "consumedForPrerelease"
+    )]
+    #[getset(get_as_ref, vis = "pub", ty = "Option<&String>")]
+    consumed_for_prerelease: Option<String>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    #[getset(get_copy, vis = "pub")]
+    graduate: bool,
+}
+
+impl Changeset {
+    #[must_use]
+    pub fn new(summary: String, releases: Vec<PackageRelease>, category: ChangeCategory) -> Self {
+        Self {
+            summary,
+            releases,
+            category,
+            consumed_for_prerelease: None,
+            graduate: false,
+        }
+    }
+
+    #[must_use]
+    pub fn with_consumed_for_prerelease(mut self, v: Option<String>) -> Self {
+        self.consumed_for_prerelease = v;
+        self
+    }
+
+    #[must_use]
+    pub fn with_graduate(mut self, v: bool) -> Self {
+        self.graduate = v;
+        self
+    }
+
+    pub fn set_consumed_for_prerelease(&mut self, v: Option<String>) {
+        self.consumed_for_prerelease = v;
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Getset)]
+pub struct PackageInfo {
+    #[getset(get, vis = "pub")]
+    name: String,
+    #[getset(get, vis = "pub")]
+    version: Version,
+    #[getset(get, vis = "pub")]
+    path: PathBuf,
+}
+
+impl PackageInfo {
+    #[must_use]
+    pub fn new(name: String, version: Version, path: PathBuf) -> Self {
+        Self {
+            name,
+            version,
+            path,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum PrereleaseSpec {
+    Alpha,
+    Beta,
+    Rc,
+    Custom(String),
+}
+
+impl PrereleaseSpec {
+    #[must_use]
+    pub fn identifier(&self) -> &str {
+        match self {
+            Self::Alpha => "alpha",
+            Self::Beta => "beta",
+            Self::Rc => "rc",
+            Self::Custom(s) => s,
+        }
+    }
+}
+
+impl fmt::Display for PrereleaseSpec {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.identifier())
+    }
+}
+
+impl FromStr for PrereleaseSpec {
+    type Err = crate::error::PrereleaseSpecParseError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        if s.is_empty() {
+            return Err(Self::Err::Empty);
+        }
+
+        if let Some(invalid_char) = s.chars().find(|c| !c.is_ascii_alphanumeric() && *c != '-') {
+            return Err(Self::Err::InvalidCharacter(s.to_string(), invalid_char));
+        }
+
+        Ok(match s.to_lowercase().as_str() {
+            "alpha" => Self::Alpha,
+            "beta" => Self::Beta,
+            "rc" => Self::Rc,
+            _ => Self::Custom(s.to_string()),
+        })
+    }
+}
+
+impl ValueEnum for PrereleaseSpec {
+    fn value_variants<'a>() -> &'a [Self] {
+        &[Self::Alpha, Self::Beta, Self::Rc]
+    }
+
+    fn to_possible_value(&self) -> Option<clap::builder::PossibleValue> {
+        match self {
+            Self::Alpha => Some(clap::builder::PossibleValue::new("alpha")),
+            Self::Beta => Some(clap::builder::PossibleValue::new("beta")),
+            Self::Rc => Some(clap::builder::PossibleValue::new("rc")),
+            Self::Custom(_) => None,
+        }
+    }
 }
 
 #[cfg(test)]
@@ -106,154 +306,38 @@ mod tests {
         assert_eq!(format!("{}", BumpType::Minor), "minor");
         assert_eq!(format!("{}", BumpType::Major), "major");
     }
-}
 
-#[derive(
-    Debug,
-    Clone,
-    Copy,
-    PartialEq,
-    Eq,
-    PartialOrd,
-    Ord,
-    Hash,
-    Serialize,
-    Deserialize,
-    Default,
-    ValueEnum,
-)]
-#[serde(rename_all = "lowercase")]
-pub enum ChangeCategory {
-    Added,
-    #[default]
-    Changed,
-    Deprecated,
-    Removed,
-    Fixed,
-    Security,
-}
-
-impl fmt::Display for ChangeCategory {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let s = match self {
-            Self::Added => "Added",
-            Self::Changed => "Changed",
-            Self::Deprecated => "Deprecated",
-            Self::Removed => "Removed",
-            Self::Fixed => "Fixed",
-            Self::Security => "Security",
-        };
-        write!(f, "{s}")
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct PackageRelease {
-    pub name: String,
-    pub bump_type: BumpType,
-}
-
-/// A changeset represents a single unit of change affecting one or more packages.
-///
-/// Changesets capture the intent to release: which packages are affected, what type of
-/// version bump each requires, and a human-readable summary of the change.
-///
-/// # Prerelease Consumption
-///
-/// The `consumed_for_prerelease` field tracks whether this changeset has been included
-/// in a prerelease. When set, it contains the prerelease version string (e.g., "1.0.1-alpha.1").
-/// Consumed changesets are excluded from subsequent prereleases but are aggregated into
-/// the changelog when graduating to a stable release.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Changeset {
-    pub summary: String,
-    pub releases: Vec<PackageRelease>,
-    #[serde(default)]
-    pub category: ChangeCategory,
-    /// Version string of the prerelease that consumed this changeset, if any.
-    /// Set during prerelease creation, cleared during graduation to stable.
-    #[serde(
-        default,
-        skip_serializing_if = "Option::is_none",
-        rename = "consumedForPrerelease"
-    )]
-    pub consumed_for_prerelease: Option<String>,
-    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
-    pub graduate: bool,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct PackageInfo {
-    pub name: String,
-    pub version: Version,
-    pub path: std::path::PathBuf,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub enum PrereleaseSpec {
-    Alpha,
-    Beta,
-    Rc,
-    Custom(String),
-}
-
-impl PrereleaseSpec {
-    #[must_use]
-    pub fn identifier(&self) -> &str {
-        match self {
-            Self::Alpha => "alpha",
-            Self::Beta => "beta",
-            Self::Rc => "rc",
-            Self::Custom(s) => s,
-        }
-    }
-}
-
-impl fmt::Display for PrereleaseSpec {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.identifier())
-    }
-}
-
-impl FromStr for PrereleaseSpec {
-    type Err = crate::error::PrereleaseSpecParseError;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        if s.is_empty() {
-            return Err(Self::Err::Empty);
-        }
-
-        if let Some(invalid_char) = s.chars().find(|c| !c.is_ascii_alphanumeric() && *c != '-') {
-            return Err(Self::Err::InvalidCharacter(s.to_string(), invalid_char));
-        }
-
-        Ok(match s.to_lowercase().as_str() {
-            "alpha" => Self::Alpha,
-            "beta" => Self::Beta,
-            "rc" => Self::Rc,
-            _ => Self::Custom(s.to_string()),
-        })
-    }
-}
-
-impl ValueEnum for PrereleaseSpec {
-    fn value_variants<'a>() -> &'a [Self] {
-        &[Self::Alpha, Self::Beta, Self::Rc]
+    #[test]
+    fn none_bump_behavior_default_is_promote_to_patch() {
+        assert_eq!(
+            NoneBumpBehavior::default(),
+            NoneBumpBehavior::PromoteToPatch
+        );
     }
 
-    fn to_possible_value(&self) -> Option<clap::builder::PossibleValue> {
-        match self {
-            Self::Alpha => Some(clap::builder::PossibleValue::new("alpha")),
-            Self::Beta => Some(clap::builder::PossibleValue::new("beta")),
-            Self::Rc => Some(clap::builder::PossibleValue::new("rc")),
-            Self::Custom(_) => None,
-        }
+    #[test]
+    fn none_bump_behavior_serde_round_trip_promote_to_patch() {
+        let serialized = serde_json::to_string(&NoneBumpBehavior::PromoteToPatch).unwrap();
+        assert_eq!(serialized, r#""promote-to-patch""#);
+        let deserialized: NoneBumpBehavior = serde_json::from_str(&serialized).unwrap();
+        assert_eq!(deserialized, NoneBumpBehavior::PromoteToPatch);
     }
-}
 
-#[cfg(test)]
-mod change_category_tests {
-    use super::*;
+    #[test]
+    fn none_bump_behavior_serde_round_trip_allow() {
+        let serialized = serde_json::to_string(&NoneBumpBehavior::Allow).unwrap();
+        assert_eq!(serialized, r#""allow""#);
+        let deserialized: NoneBumpBehavior = serde_json::from_str(&serialized).unwrap();
+        assert_eq!(deserialized, NoneBumpBehavior::Allow);
+    }
+
+    #[test]
+    fn none_bump_behavior_serde_round_trip_disallow() {
+        let serialized = serde_json::to_string(&NoneBumpBehavior::Disallow).unwrap();
+        assert_eq!(serialized, r#""disallow""#);
+        let deserialized: NoneBumpBehavior = serde_json::from_str(&serialized).unwrap();
+        assert_eq!(deserialized, NoneBumpBehavior::Disallow);
+    }
 
     #[test]
     fn ordering_matches_keep_a_changelog_convention() {
@@ -263,11 +347,6 @@ mod change_category_tests {
         assert!(ChangeCategory::Removed < ChangeCategory::Fixed);
         assert!(ChangeCategory::Fixed < ChangeCategory::Security);
     }
-}
-
-#[cfg(test)]
-mod prerelease_spec_tests {
-    use super::*;
 
     #[test]
     fn identifier_returns_correct_string() {

@@ -10,19 +10,6 @@ pub struct ReleaseSagaContext<G, M, RW, S, C> {
     changelog_writer: Arc<C>,
 }
 
-impl<G, M, RW, S, C> Clone for ReleaseSagaContext<G, M, RW, S, C> {
-    fn clone(&self) -> Self {
-        Self {
-            project_root: self.project_root.clone(),
-            git_provider: Arc::clone(&self.git_provider),
-            manifest_writer: Arc::clone(&self.manifest_writer),
-            changeset_rw: Arc::clone(&self.changeset_rw),
-            release_state_io: Arc::clone(&self.release_state_io),
-            changelog_writer: Arc::clone(&self.changelog_writer),
-        }
-    }
-}
-
 impl<G, M, RW, S, C> ReleaseSagaContext<G, M, RW, S, C> {
     pub(crate) fn new(
         project_root: PathBuf,
@@ -70,5 +57,18 @@ impl<G, M, RW, S, C> ReleaseSagaContext<G, M, RW, S, C> {
     #[must_use]
     pub(crate) fn changelog_writer(&self) -> &C {
         &self.changelog_writer
+    }
+}
+
+impl<G, M, RW, S, C> Clone for ReleaseSagaContext<G, M, RW, S, C> {
+    fn clone(&self) -> Self {
+        Self {
+            project_root: self.project_root.clone(),
+            git_provider: Arc::clone(&self.git_provider),
+            manifest_writer: Arc::clone(&self.manifest_writer),
+            changeset_rw: Arc::clone(&self.changeset_rw),
+            release_state_io: Arc::clone(&self.release_state_io),
+            changelog_writer: Arc::clone(&self.changelog_writer),
+        }
     }
 }

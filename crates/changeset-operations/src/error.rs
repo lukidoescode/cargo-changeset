@@ -108,6 +108,9 @@ pub enum OperationError {
     #[error("packages with inherited versions require --convert flag: {}", packages.join(", "))]
     InheritedVersionsRequireConvert { packages: Vec<String> },
 
+    #[error("changesets with bump type 'none' are disallowed; affected packages: {}", packages.join(", "))]
+    NoneBumpDisallowed { packages: Vec<String> },
+
     #[error("comparison links enabled but no repository URL available")]
     ComparisonLinksRequired,
 
@@ -236,17 +239,6 @@ pub enum OperationError {
 
 pub type Result<T> = std::result::Result<T, OperationError>;
 
-/// # Errors
-///
-/// Returns [`OperationError::InvalidPrereleaseTag`] when `tag` cannot be parsed.
-pub fn parse_prerelease_tag(tag: &str) -> Result<changeset_core::PrereleaseSpec> {
-    tag.parse()
-        .map_err(|source| OperationError::InvalidPrereleaseTag {
-            tag: tag.to_string(),
-            source,
-        })
-}
-
 impl From<SagaError<OperationError>> for OperationError {
     fn from(err: SagaError<OperationError>) -> Self {
         match err {
@@ -279,6 +271,17 @@ impl From<SagaError<OperationError>> for OperationError {
             },
         }
     }
+}
+
+/// # Errors
+///
+/// Returns [`OperationError::InvalidPrereleaseTag`] when `tag` cannot be parsed.
+pub fn parse_prerelease_tag(tag: &str) -> Result<changeset_core::PrereleaseSpec> {
+    tag.parse()
+        .map_err(|source| OperationError::InvalidPrereleaseTag {
+            tag: tag.to_string(),
+            source,
+        })
 }
 
 #[cfg(test)]

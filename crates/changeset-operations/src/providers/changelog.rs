@@ -40,10 +40,10 @@ impl ChangelogWriter for FileSystemChangelogWriter {
         changelog.add_release(release, repo_info, previous_version);
         changelog.write_to_file(changelog_path)?;
 
-        Ok(ChangelogWriteResult {
-            path: changelog_path.to_path_buf(),
+        Ok(ChangelogWriteResult::new(
+            changelog_path.to_path_buf(),
             created,
-        })
+        ))
     }
 
     fn changelog_exists(&self, path: &Path) -> bool {
@@ -93,7 +93,7 @@ mod tests {
         let release = create_test_release();
         let result = writer.write_release(&changelog_path, &release, None, None)?;
 
-        assert!(result.created);
+        assert!(result.created());
         assert!(changelog_path.exists());
 
         let content = std::fs::read_to_string(&changelog_path)?;
@@ -120,7 +120,7 @@ mod tests {
         );
         let result = writer.write_release(&changelog_path, &release2, None, Some("1.0.0"))?;
 
-        assert!(!result.created);
+        assert!(!result.created());
 
         let content = std::fs::read_to_string(&changelog_path)?;
         assert!(content.contains("## [1.1.0] - 2025-02-01"));

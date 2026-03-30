@@ -3,11 +3,16 @@ use std::path::{Path, PathBuf};
 
 use changeset_changelog::{ChangelogConfig, ChangelogLocation, ComparisonLinksSetting};
 use changeset_core::ZeroVersionBehavior;
+use changeset_git::DEFAULT_BASE_BRANCH;
 use globset::{Glob, GlobSet, GlobSetBuilder};
 
 use crate::error::ProjectError;
 use crate::manifest::{ChangesetMetadata, TagFormatValue, read_manifest};
 use crate::project::{CargoProject, ProjectKind};
+
+const DEFAULT_DEPENDENCY_BUMP_CHANGELOG_TEMPLATE: &str =
+    "Updated dependency `{dependency}` to v{version}";
+const DEFAULT_NONE_BUMP_PROMOTE_MESSAGE_TEMPLATE: &str = "Internal architectural changes";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum TagFormat {
@@ -25,19 +30,6 @@ pub struct GitConfig {
     tag_format: TagFormat,
     commit_title_template: String,
     changes_in_body: bool,
-}
-
-impl Default for GitConfig {
-    fn default() -> Self {
-        Self {
-            commit: true,
-            tags: true,
-            keep_changesets: false,
-            tag_format: TagFormat::default(),
-            commit_title_template: String::from("{new-version}"),
-            changes_in_body: true,
-        }
-    }
 }
 
 impl GitConfig {
@@ -79,6 +71,19 @@ impl GitConfig {
     }
 }
 
+impl Default for GitConfig {
+    fn default() -> Self {
+        Self {
+            commit: true,
+            tags: true,
+            keep_changesets: false,
+            tag_format: TagFormat::default(),
+            commit_title_template: String::from("{new-version}"),
+            changes_in_body: true,
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct RootChangesetConfig {
     ignored_files: GlobSet,
@@ -86,18 +91,10 @@ pub struct RootChangesetConfig {
     changelog_config: ChangelogConfig,
     git_config: GitConfig,
     zero_version_behavior: ZeroVersionBehavior,
-}
-
-impl Default for RootChangesetConfig {
-    fn default() -> Self {
-        Self {
-            ignored_files: GlobSet::empty(),
-            changeset_dir: PathBuf::from(crate::DEFAULT_CHANGESET_DIR),
-            changelog_config: ChangelogConfig::default(),
-            git_config: GitConfig::default(),
-            zero_version_behavior: ZeroVersionBehavior::default(),
-        }
-    }
+    dependency_bump_changelog_template: String,
+    base_branch: String,
+    none_bump_behavior: changeset_core::NoneBumpBehavior,
+    none_bump_promote_message_template: String,
 }
 
 impl RootChangesetConfig {
@@ -131,11 +128,58 @@ impl RootChangesetConfig {
         self.zero_version_behavior
     }
 
+    #[must_use]
+    pub fn dependency_bump_changelog_template(&self) -> &str {
+        &self.dependency_bump_changelog_template
+    }
+
+    #[must_use]
+    pub fn base_branch(&self) -> &str {
+        &self.base_branch
+    }
+
+    #[must_use]
+    pub fn none_bump_behavior(&self) -> changeset_core::NoneBumpBehavior {
+        self.none_bump_behavior
+    }
+
+    #[must_use]
+    pub fn none_bump_promote_message_template(&self) -> &str {
+        &self.none_bump_promote_message_template
+    }
+
     #[cfg(any(test, feature = "testing"))]
     #[must_use]
     pub fn with_git_config(mut self, git_config: GitConfig) -> Self {
         self.git_config = git_config;
         self
+    }
+
+    #[cfg(any(test, feature = "testing"))]
+    #[must_use]
+    pub fn with_none_bump_behavior(mut self, behavior: changeset_core::NoneBumpBehavior) -> Self {
+        self.none_bump_behavior = behavior;
+        self
+    }
+}
+
+impl Default for RootChangesetConfig {
+    fn default() -> Self {
+        Self {
+            ignored_files: GlobSet::empty(),
+            changeset_dir: PathBuf::from(crate::DEFAULT_CHANGESET_DIR),
+            changelog_config: ChangelogConfig::default(),
+            git_config: GitConfig::default(),
+            zero_version_behavior: ZeroVersionBehavior::default(),
+            dependency_bump_changelog_template: String::from(
+                DEFAULT_DEPENDENCY_BUMP_CHANGELOG_TEMPLATE,
+            ),
+            base_branch: String::from(DEFAULT_BASE_BRANCH),
+            none_bump_behavior: changeset_core::NoneBumpBehavior::default(),
+            none_bump_promote_message_template: String::from(
+                DEFAULT_NONE_BUMP_PROMOTE_MESSAGE_TEMPLATE,
+            ),
+        }
     }
 }
 
@@ -154,6 +198,66 @@ impl PackageChangesetConfig {
     pub fn is_ignored(&self, path: &Path) -> bool {
         self.ignored_files.is_match(path)
     }
+}
+
+enum CargoRootConfigType {
+    Workspace,
+    Package,
+}
+
+/// Parses the root changeset configuration based on project kind.
+///
+/// For single-package projects, reads from `[package.metadata.changeset]`.
+/// For workspaces, reads from `[workspace.metadata.changeset]`.
+///
+/// # Errors
+///
+/// Returns `ProjectError` if the manifest cannot be read or parsed, or if glob patterns are invalid.
+pub fn parse_root_config(project: &CargoProject) -> Result<RootChangesetConfig, ProjectError> {
+    match project.kind() {
+        ProjectKind::SinglePackage => {
+            parse_cargo_root_config(project.root(), CargoRootConfigType::Package)
+        }
+        ProjectKind::VirtualWorkspace | ProjectKind::WorkspaceWithRoot => {
+            parse_cargo_root_config(project.root(), CargoRootConfigType::Workspace)
+        }
+    }
+}
+
+/// # Errors
+///
+/// Returns `ProjectError` if the manifest cannot be read or parsed, or if glob patterns are invalid.
+pub fn parse_package_config(package_path: &Path) -> Result<PackageChangesetConfig, ProjectError> {
+    let manifest_path = package_path.join("Cargo.toml");
+    let manifest = read_manifest(&manifest_path)?;
+
+    let patterns = manifest
+        .package
+        .and_then(|pkg| pkg.metadata)
+        .and_then(|meta| meta.changeset)
+        .map(|cs| cs.ignored_files)
+        .unwrap_or_default();
+
+    let ignored_files = build_glob_set(&patterns)?;
+
+    Ok(PackageChangesetConfig { ignored_files })
+}
+
+/// # Errors
+///
+/// Returns an error if any manifest cannot be read or parsed, or if glob patterns are invalid.
+pub fn load_changeset_configs(
+    project: &CargoProject,
+) -> Result<(RootChangesetConfig, HashMap<String, PackageChangesetConfig>), ProjectError> {
+    let root_config = parse_root_config(project)?;
+
+    let mut package_configs = HashMap::new();
+    for package in project.packages() {
+        let config = parse_package_config(package.path())?;
+        package_configs.insert(package.name().clone(), config);
+    }
+
+    Ok((root_config, package_configs))
 }
 
 fn build_glob_set(patterns: &[String]) -> Result<GlobSet, ProjectError> {
@@ -204,19 +308,23 @@ fn build_git_config(metadata: Option<&ChangesetMetadata>) -> GitConfig {
     }
 }
 
-/// Parses root configuration from workspace metadata.
-///
-/// # Errors
-///
-/// Returns an error if the manifest cannot be read or parsed, or if glob patterns are invalid.
-fn parse_workspace_root_config(project_root: &Path) -> Result<RootChangesetConfig, ProjectError> {
+fn parse_cargo_root_config(
+    project_root: &Path,
+    config_type: CargoRootConfigType,
+) -> Result<RootChangesetConfig, ProjectError> {
     let manifest_path = project_root.join("Cargo.toml");
     let manifest = read_manifest(&manifest_path)?;
 
-    let changeset_metadata = manifest
-        .workspace
-        .and_then(|ws| ws.metadata)
-        .and_then(|meta| meta.changeset);
+    let changeset_metadata = match config_type {
+        CargoRootConfigType::Workspace => manifest
+            .workspace
+            .and_then(|ws| ws.metadata)
+            .and_then(|meta| meta.changeset),
+        CargoRootConfigType::Package => manifest
+            .package
+            .and_then(|pkg| pkg.metadata)
+            .and_then(|meta| meta.changeset),
+    };
 
     let patterns = changeset_metadata
         .as_ref()
@@ -247,57 +355,25 @@ fn parse_workspace_root_config(project_root: &Path) -> Result<RootChangesetConfi
         .and_then(|cs| cs.zero_version_behavior)
         .unwrap_or_default();
 
-    Ok(RootChangesetConfig {
-        ignored_files,
-        changeset_dir: PathBuf::from(changeset_dir),
-        changelog_config,
-        git_config,
-        zero_version_behavior,
-    })
-}
-
-/// Parses root configuration from package metadata (for single-package projects).
-///
-/// # Errors
-///
-/// Returns an error if the manifest cannot be read or parsed, or if glob patterns are invalid.
-fn parse_package_root_config(project_root: &Path) -> Result<RootChangesetConfig, ProjectError> {
-    let manifest_path = project_root.join("Cargo.toml");
-    let manifest = read_manifest(&manifest_path)?;
-
-    let changeset_metadata = manifest
-        .package
-        .and_then(|pkg| pkg.metadata)
-        .and_then(|meta| meta.changeset);
-
-    let patterns = changeset_metadata
+    let dependency_bump_changelog_template = changeset_metadata
         .as_ref()
-        .map(|cs| cs.ignored_files.clone())
+        .and_then(|cs| cs.dependency_bump_changelog_template.clone())
+        .unwrap_or_else(|| String::from(DEFAULT_DEPENDENCY_BUMP_CHANGELOG_TEMPLATE));
+
+    let base_branch = changeset_metadata
+        .as_ref()
+        .and_then(|cs| cs.base_branch.clone())
+        .unwrap_or_else(|| String::from(DEFAULT_BASE_BRANCH));
+
+    let none_bump_behavior = changeset_metadata
+        .as_ref()
+        .and_then(|cs| cs.none_bump_behavior)
         .unwrap_or_default();
 
-    let changeset_dir = changeset_metadata
+    let none_bump_promote_message_template = changeset_metadata
         .as_ref()
-        .and_then(|cs| cs.changeset_dir.clone())
-        .unwrap_or_else(|| crate::DEFAULT_CHANGESET_DIR.to_string());
-
-    let ignored_files = build_glob_set(&patterns)?;
-
-    let changelog_config = build_changelog_config(
-        changeset_metadata.as_ref().and_then(|cs| cs.changelog),
-        changeset_metadata
-            .as_ref()
-            .and_then(|cs| cs.comparison_links),
-        changeset_metadata
-            .as_ref()
-            .and_then(|cs| cs.comparison_links_template.clone()),
-    );
-
-    let git_config = build_git_config(changeset_metadata.as_ref());
-
-    let zero_version_behavior = changeset_metadata
-        .as_ref()
-        .and_then(|cs| cs.zero_version_behavior)
-        .unwrap_or_default();
+        .and_then(|cs| cs.none_bump_promote_message_template.clone())
+        .unwrap_or_else(|| String::from(DEFAULT_NONE_BUMP_PROMOTE_MESSAGE_TEMPLATE));
 
     Ok(RootChangesetConfig {
         ignored_files,
@@ -305,60 +381,11 @@ fn parse_package_root_config(project_root: &Path) -> Result<RootChangesetConfig,
         changelog_config,
         git_config,
         zero_version_behavior,
+        dependency_bump_changelog_template,
+        base_branch,
+        none_bump_behavior,
+        none_bump_promote_message_template,
     })
-}
-
-/// Parses the root changeset configuration based on project kind.
-///
-/// For single-package projects, reads from `[package.metadata.changeset]`.
-/// For workspaces, reads from `[workspace.metadata.changeset]`.
-///
-/// # Errors
-///
-/// Returns an error if the manifest cannot be read or parsed, or if glob patterns are invalid.
-pub fn parse_root_config(project: &CargoProject) -> Result<RootChangesetConfig, ProjectError> {
-    match project.kind() {
-        ProjectKind::SinglePackage => parse_package_root_config(project.root()),
-        ProjectKind::VirtualWorkspace | ProjectKind::WorkspaceWithRoot => {
-            parse_workspace_root_config(project.root())
-        }
-    }
-}
-
-/// # Errors
-///
-/// Returns an error if the manifest cannot be read or parsed, or if glob patterns are invalid.
-pub fn parse_package_config(package_path: &Path) -> Result<PackageChangesetConfig, ProjectError> {
-    let manifest_path = package_path.join("Cargo.toml");
-    let manifest = read_manifest(&manifest_path)?;
-
-    let patterns = manifest
-        .package
-        .and_then(|pkg| pkg.metadata)
-        .and_then(|meta| meta.changeset)
-        .map(|cs| cs.ignored_files)
-        .unwrap_or_default();
-
-    let ignored_files = build_glob_set(&patterns)?;
-
-    Ok(PackageChangesetConfig { ignored_files })
-}
-
-/// # Errors
-///
-/// Returns an error if any manifest cannot be read or parsed, or if glob patterns are invalid.
-pub fn load_changeset_configs(
-    project: &CargoProject,
-) -> Result<(RootChangesetConfig, HashMap<String, PackageChangesetConfig>), ProjectError> {
-    let root_config = parse_root_config(project)?;
-
-    let mut package_configs = HashMap::new();
-    for package in project.packages() {
-        let config = parse_package_config(&package.path)?;
-        package_configs.insert(package.name.clone(), config);
-    }
-
-    Ok((root_config, package_configs))
 }
 
 #[cfg(test)]
@@ -384,7 +411,7 @@ ignored-files = ["*.md", "docs/**"]
 "#;
         let dir = setup_with_config(toml)?;
 
-        let config = parse_workspace_root_config(dir.path())?;
+        let config = parse_cargo_root_config(dir.path(), CargoRootConfigType::Workspace)?;
 
         assert!(config.is_ignored(Path::new("README.md")));
         assert!(config.is_ignored(Path::new("docs/guide.md")));
@@ -401,7 +428,7 @@ members = ["crates/*"]
 "#;
         let dir = setup_with_config(toml)?;
 
-        let config = parse_workspace_root_config(dir.path())?;
+        let config = parse_cargo_root_config(dir.path(), CargoRootConfigType::Workspace)?;
 
         assert!(!config.is_ignored(Path::new("README.md")));
         assert!(!config.is_ignored(Path::new("src/lib.rs")));
@@ -420,7 +447,7 @@ changeset-dir = "changes"
 "#;
         let dir = setup_with_config(toml)?;
 
-        let config = parse_workspace_root_config(dir.path())?;
+        let config = parse_cargo_root_config(dir.path(), CargoRootConfigType::Workspace)?;
 
         assert_eq!(config.changeset_dir(), Path::new("changes"));
 
@@ -435,7 +462,7 @@ members = ["crates/*"]
 "#;
         let dir = setup_with_config(toml)?;
 
-        let config = parse_workspace_root_config(dir.path())?;
+        let config = parse_cargo_root_config(dir.path(), CargoRootConfigType::Workspace)?;
 
         assert_eq!(config.changeset_dir(), Path::new(".changeset"));
 
@@ -492,7 +519,7 @@ changeset-dir = "my-changesets"
 "#;
         let dir = setup_with_config(toml)?;
 
-        let config = parse_package_root_config(dir.path())?;
+        let config = parse_cargo_root_config(dir.path(), CargoRootConfigType::Package)?;
 
         assert!(config.is_ignored(Path::new("README.md")));
         assert_eq!(config.changeset_dir(), Path::new("my-changesets"));
@@ -511,7 +538,7 @@ ignored-files = ["[invalid"]
 "#;
         let dir = setup_with_config(toml)?;
 
-        let result = parse_workspace_root_config(dir.path());
+        let result = parse_cargo_root_config(dir.path(), CargoRootConfigType::Workspace);
 
         assert!(result.is_err());
         let err = result.expect_err("should fail on invalid glob");
@@ -531,7 +558,7 @@ ignored-files = []
 "#;
         let dir = setup_with_config(toml)?;
 
-        let config = parse_workspace_root_config(dir.path())?;
+        let config = parse_cargo_root_config(dir.path(), CargoRootConfigType::Workspace)?;
 
         assert!(!config.is_ignored(Path::new("anything.txt")));
 
@@ -551,7 +578,7 @@ comparison-links-template = "https://example.com/{repository}/compare/{base}...{
 "#;
         let dir = setup_with_config(toml)?;
 
-        let config = parse_workspace_root_config(dir.path())?;
+        let config = parse_cargo_root_config(dir.path(), CargoRootConfigType::Workspace)?;
         let changelog_config = config.changelog_config();
 
         assert_eq!(changelog_config.changelog(), ChangelogLocation::PerPackage);
@@ -575,7 +602,7 @@ members = ["crates/*"]
 "#;
         let dir = setup_with_config(toml)?;
 
-        let config = parse_workspace_root_config(dir.path())?;
+        let config = parse_cargo_root_config(dir.path(), CargoRootConfigType::Workspace)?;
         let changelog_config = config.changelog_config();
 
         assert_eq!(changelog_config.changelog(), ChangelogLocation::Root);
@@ -601,7 +628,7 @@ comparison-links = "disabled"
 "#;
         let dir = setup_with_config(toml)?;
 
-        let config = parse_package_root_config(dir.path())?;
+        let config = parse_cargo_root_config(dir.path(), CargoRootConfigType::Package)?;
         let changelog_config = config.changelog_config();
 
         assert_eq!(changelog_config.changelog(), ChangelogLocation::Root);
@@ -621,7 +648,7 @@ members = ["crates/*"]
 "#;
         let dir = setup_with_config(toml)?;
 
-        let config = parse_workspace_root_config(dir.path())?;
+        let config = parse_cargo_root_config(dir.path(), CargoRootConfigType::Workspace)?;
         let git_config = config.git_config();
 
         assert!(git_config.commit());
@@ -650,7 +677,7 @@ changes-in-body = false
 "#;
         let dir = setup_with_config(toml)?;
 
-        let config = parse_workspace_root_config(dir.path())?;
+        let config = parse_cargo_root_config(dir.path(), CargoRootConfigType::Workspace)?;
         let git_config = config.git_config();
 
         assert!(!git_config.commit());
@@ -677,7 +704,7 @@ tag-format = "version-only"
 "#;
         let dir = setup_with_config(toml)?;
 
-        let config = parse_workspace_root_config(dir.path())?;
+        let config = parse_cargo_root_config(dir.path(), CargoRootConfigType::Workspace)?;
         let git_config = config.git_config();
 
         assert_eq!(git_config.tag_format(), TagFormat::VersionOnly);
@@ -699,7 +726,7 @@ keep-changesets = true
 "#;
         let dir = setup_with_config(toml)?;
 
-        let config = parse_package_root_config(dir.path())?;
+        let config = parse_cargo_root_config(dir.path(), CargoRootConfigType::Package)?;
         let git_config = config.git_config();
 
         assert!(!git_config.commit());
@@ -717,7 +744,7 @@ members = ["crates/*"]
 "#;
         let dir = setup_with_config(toml)?;
 
-        let config = parse_workspace_root_config(dir.path())?;
+        let config = parse_cargo_root_config(dir.path(), CargoRootConfigType::Workspace)?;
 
         assert_eq!(
             config.zero_version_behavior(),
@@ -738,7 +765,7 @@ zero-version-behavior = "effective-minor"
 "#;
         let dir = setup_with_config(toml)?;
 
-        let config = parse_workspace_root_config(dir.path())?;
+        let config = parse_cargo_root_config(dir.path(), CargoRootConfigType::Workspace)?;
 
         assert_eq!(
             config.zero_version_behavior(),
@@ -759,7 +786,7 @@ zero-version-behavior = "auto-promote-on-major"
 "#;
         let dir = setup_with_config(toml)?;
 
-        let config = parse_workspace_root_config(dir.path())?;
+        let config = parse_cargo_root_config(dir.path(), CargoRootConfigType::Workspace)?;
 
         assert_eq!(
             config.zero_version_behavior(),
@@ -781,11 +808,223 @@ zero-version-behavior = "auto-promote-on-major"
 "#;
         let dir = setup_with_config(toml)?;
 
-        let config = parse_package_root_config(dir.path())?;
+        let config = parse_cargo_root_config(dir.path(), CargoRootConfigType::Package)?;
 
         assert_eq!(
             config.zero_version_behavior(),
             ZeroVersionBehavior::AutoPromoteOnMajor
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn parse_dependency_bump_changelog_template_from_workspace_metadata() -> anyhow::Result<()> {
+        let toml = r#"
+[workspace]
+members = ["crates/*"]
+
+[workspace.metadata.changeset]
+dependency-bump-changelog-template = "Upgraded `{dependency}` to {version}"
+"#;
+        let dir = setup_with_config(toml)?;
+
+        let config = parse_cargo_root_config(dir.path(), CargoRootConfigType::Workspace)?;
+
+        assert_eq!(
+            config.dependency_bump_changelog_template(),
+            "Upgraded `{dependency}` to {version}"
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn parse_dependency_bump_changelog_template_from_package_metadata() -> anyhow::Result<()> {
+        let toml = r#"
+[package]
+name = "my-crate"
+version = "0.1.0"
+
+[package.metadata.changeset]
+dependency-bump-changelog-template = "Bumped `{dependency}` to {version}"
+"#;
+        let dir = setup_with_config(toml)?;
+
+        let config = parse_cargo_root_config(dir.path(), CargoRootConfigType::Package)?;
+
+        assert_eq!(
+            config.dependency_bump_changelog_template(),
+            "Bumped `{dependency}` to {version}"
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn dependency_bump_changelog_template_defaults_when_not_specified() -> anyhow::Result<()> {
+        let toml = r#"
+[workspace]
+members = ["crates/*"]
+"#;
+        let dir = setup_with_config(toml)?;
+
+        let config = parse_cargo_root_config(dir.path(), CargoRootConfigType::Workspace)?;
+
+        assert_eq!(
+            config.dependency_bump_changelog_template(),
+            "Updated dependency `{dependency}` to v{version}"
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn parse_workspace_root_config_base_branch_defaults_to_main() -> anyhow::Result<()> {
+        let toml = r#"
+[workspace]
+members = ["crates/*"]
+"#;
+        let dir = setup_with_config(toml)?;
+
+        let config = parse_cargo_root_config(dir.path(), CargoRootConfigType::Workspace)?;
+
+        assert_eq!(config.base_branch(), "main");
+
+        Ok(())
+    }
+
+    #[test]
+    fn parse_workspace_root_config_with_base_branch() -> anyhow::Result<()> {
+        let toml = r#"
+[workspace]
+members = ["crates/*"]
+
+[workspace.metadata.changeset]
+base-branch = "develop"
+"#;
+        let dir = setup_with_config(toml)?;
+
+        let config = parse_cargo_root_config(dir.path(), CargoRootConfigType::Workspace)?;
+
+        assert_eq!(config.base_branch(), "develop");
+
+        Ok(())
+    }
+
+    #[test]
+    fn parse_single_package_root_config_with_base_branch() -> anyhow::Result<()> {
+        let toml = r#"
+[package]
+name = "my-crate"
+version = "0.1.0"
+
+[package.metadata.changeset]
+base-branch = "master"
+"#;
+        let dir = setup_with_config(toml)?;
+
+        let config = parse_cargo_root_config(dir.path(), CargoRootConfigType::Package)?;
+
+        assert_eq!(config.base_branch(), "master");
+
+        Ok(())
+    }
+
+    #[test]
+    fn parse_none_bump_behavior_default() -> anyhow::Result<()> {
+        let toml = r#"
+[workspace]
+members = ["crates/*"]
+"#;
+        let dir = setup_with_config(toml)?;
+
+        let config = parse_cargo_root_config(dir.path(), CargoRootConfigType::Workspace)?;
+
+        assert_eq!(
+            config.none_bump_behavior(),
+            changeset_core::NoneBumpBehavior::PromoteToPatch
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn parse_none_bump_behavior_allow() -> anyhow::Result<()> {
+        let toml = r#"
+[workspace]
+members = ["crates/*"]
+
+[workspace.metadata.changeset]
+none-bump-behavior = "allow"
+"#;
+        let dir = setup_with_config(toml)?;
+
+        let config = parse_cargo_root_config(dir.path(), CargoRootConfigType::Workspace)?;
+
+        assert_eq!(
+            config.none_bump_behavior(),
+            changeset_core::NoneBumpBehavior::Allow
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn parse_none_bump_behavior_disallow() -> anyhow::Result<()> {
+        let toml = r#"
+[workspace]
+members = ["crates/*"]
+
+[workspace.metadata.changeset]
+none-bump-behavior = "disallow"
+"#;
+        let dir = setup_with_config(toml)?;
+
+        let config = parse_cargo_root_config(dir.path(), CargoRootConfigType::Workspace)?;
+
+        assert_eq!(
+            config.none_bump_behavior(),
+            changeset_core::NoneBumpBehavior::Disallow
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn parse_none_bump_promote_message_template_custom() -> anyhow::Result<()> {
+        let toml = r#"
+[workspace]
+members = ["crates/*"]
+
+[workspace.metadata.changeset]
+none-bump-promote-message-template = "chore: internal refactor"
+"#;
+        let dir = setup_with_config(toml)?;
+
+        let config = parse_cargo_root_config(dir.path(), CargoRootConfigType::Workspace)?;
+
+        assert_eq!(
+            config.none_bump_promote_message_template(),
+            "chore: internal refactor"
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn parse_none_bump_promote_message_template_default() -> anyhow::Result<()> {
+        let toml = r#"
+[workspace]
+members = ["crates/*"]
+"#;
+        let dir = setup_with_config(toml)?;
+
+        let config = parse_cargo_root_config(dir.path(), CargoRootConfigType::Workspace)?;
+
+        assert_eq!(
+            config.none_bump_promote_message_template(),
+            "Internal architectural changes"
         );
 
         Ok(())

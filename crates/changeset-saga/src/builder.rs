@@ -78,15 +78,7 @@ impl<Ctx, Err> SagaBuilder<(), (), Ctx, Err, Empty> {
             _phantom: PhantomData,
         }
     }
-}
 
-impl<Ctx, Err> Default for SagaBuilder<(), (), Ctx, Err, Empty> {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl<Ctx, Err> SagaBuilder<(), (), Ctx, Err, Empty> {
     /// Add the first step to the saga.
     ///
     /// This establishes the saga's input type from the step's input type.
@@ -104,6 +96,12 @@ impl<Ctx, Err> SagaBuilder<(), (), Ctx, Err, Empty> {
             steps,
             _phantom: PhantomData,
         }
+    }
+}
+
+impl<Ctx, Err> Default for SagaBuilder<(), (), Ctx, Err, Empty> {
+    fn default() -> Self {
+        Self::new()
     }
 }
 

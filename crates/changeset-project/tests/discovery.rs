@@ -28,7 +28,11 @@ fn discovers_virtual_workspace_from_root() {
     assert_eq!(project.root(), fixture.canonicalize().expect("path exists"));
     assert_eq!(project.packages().len(), 2);
 
-    let names: Vec<_> = project.packages().iter().map(|p| p.name.as_str()).collect();
+    let names: Vec<_> = project
+        .packages()
+        .iter()
+        .map(|p| p.name().as_str())
+        .collect();
     assert!(names.contains(&"crate-a"));
     assert!(names.contains(&"crate-b"));
 }
@@ -60,16 +64,16 @@ fn discovers_workspace_with_root_package() {
     let root_pkg = project
         .packages()
         .iter()
-        .find(|p| p.name == "root-pkg")
+        .find(|p| p.name() == "root-pkg")
         .expect("should have root package");
-    assert_eq!(root_pkg.version.to_string(), "0.1.0");
+    assert_eq!(root_pkg.version().to_string(), "0.1.0");
 
     let member = project
         .packages()
         .iter()
-        .find(|p| p.name == "member")
+        .find(|p| p.name() == "member")
         .expect("should have member package");
-    assert_eq!(member.version.to_string(), "0.2.0");
+    assert_eq!(member.version().to_string(), "0.2.0");
 }
 
 #[test]
@@ -79,8 +83,8 @@ fn discovers_single_package() {
 
     assert_eq!(*project.kind(), ProjectKind::SinglePackage);
     assert_eq!(project.packages().len(), 1);
-    assert_eq!(project.packages()[0].name, "single");
-    assert_eq!(project.packages()[0].version.to_string(), "3.0.0");
+    assert_eq!(project.packages()[0].name(), "single");
+    assert_eq!(project.packages()[0].version().to_string(), "3.0.0");
 }
 
 #[test]
@@ -106,16 +110,16 @@ fn version_inheritance_works() {
     let crate_a = project
         .packages()
         .iter()
-        .find(|p| p.name == "crate-a")
+        .find(|p| p.name() == "crate-a")
         .expect("should have crate-a");
-    assert_eq!(crate_a.version.to_string(), "1.0.0");
+    assert_eq!(crate_a.version().to_string(), "1.0.0");
 
     let crate_b = project
         .packages()
         .iter()
-        .find(|p| p.name == "crate-b")
+        .find(|p| p.name() == "crate-b")
         .expect("should have crate-b");
-    assert_eq!(crate_b.version.to_string(), "2.0.0");
+    assert_eq!(crate_b.version().to_string(), "2.0.0");
 }
 
 #[test]
@@ -210,7 +214,7 @@ members = ["[invalid"]
 
     let result = discover_project(temp_dir.path());
     assert!(
-        matches!(result, Err(ProjectError::GlobPattern { pattern, .. }) if pattern == "[invalid")
+        matches!(result, Err(ProjectError::GlobPatternParse { pattern, .. }) if pattern == "[invalid")
     );
 }
 
@@ -222,7 +226,11 @@ fn workspace_exclude_patterns_work() {
     assert_eq!(*project.kind(), ProjectKind::VirtualWorkspace);
     assert_eq!(project.packages().len(), 1);
 
-    let names: Vec<_> = project.packages().iter().map(|p| p.name.as_str()).collect();
+    let names: Vec<_> = project
+        .packages()
+        .iter()
+        .map(|p| p.name().as_str())
+        .collect();
     assert!(names.contains(&"included"));
     assert!(!names.contains(&"excluded"));
 }

@@ -2,7 +2,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use changeset_core::PackageInfo;
-use changeset_project::{ProjectKind, TagFormat};
+use changeset_project::{ProjectKind, TagFormat, WorkspaceDependencyGraph};
 use changeset_saga::SagaBuilder;
 use chrono::Local;
 use indexmap::IndexMap;
@@ -23,11 +23,12 @@ use super::types::{
 use super::validator::{ReleaseCliInput, ReleaseValidator};
 use crate::Result;
 use crate::error::OperationError;
+use crate::none_bump;
 use crate::operations::changelog_aggregation::ChangesetAggregator;
 use crate::planner::VersionPlanner;
 use crate::traits::{
-    ChangelogWriter, ChangesetReader, ChangesetWriter, FullGitProvider, FullManifestWriter,
-    ProjectProvider, ReleaseStateIO,
+    ChangelogWriter, ChangesetReader, ChangesetWriter, DependencyGraphProvider, FullGitProvider,
+    FullManifestWriter, ProjectProvider, ReleaseStateIO,
 };
 use crate::types::PackageVersion;
 
@@ -40,20 +41,9 @@ pub struct ReleaseOperation<P, RW, M, C, G, S> {
     release_state_io: Arc<S>,
 }
 
-#[cfg(test)]
-impl<P, RW, M, C, G, S> ReleaseOperation<P, RW, M, C, G, S> {
-    pub(crate) fn manifest_writer(&self) -> &M {
-        &self.manifest_writer
-    }
-
-    pub(crate) fn git_provider(&self) -> &G {
-        &self.git_provider
-    }
-}
-
 impl<P, RW, M, C, G, S> ReleaseOperation<P, RW, M, C, G, S>
 where
-    P: ProjectProvider,
+    P: ProjectProvider + DependencyGraphProvider,
     RW: ChangesetReader + ChangesetWriter + Send + Sync + 'static,
     M: FullManifestWriter + Send + Sync + 'static,
     C: ChangelogWriter + Send + Sync + 'static,
@@ -158,7 +148,7 @@ where
     /// planning, changelog generation, and git operations.
     pub fn execute(&self, start_path: &Path, input: &ReleaseInput) -> Result<ReleaseOutcome> {
         let context = match self.prepare_release_context(start_path, input)? {
-            PrepareResult::Ready(ctx) => ctx,
+            PrepareResult::Ready(ctx) => *ctx,
             PrepareResult::EarlyReturn(outcome) => return Ok(outcome),
         };
 
@@ -234,7 +224,7 @@ where
         let inherited_packages =
             self.check_inherited_versions(project.packages(), input.convert_inherited())?;
 
-        Ok(PrepareResult::Ready(ReleaseContext {
+        Ok(PrepareResult::Ready(Box::new(ReleaseContext {
             project,
             root_config,
             changeset_dir,
@@ -249,33 +239,74 @@ where
             },
             git_options,
             inherited_packages,
-        }))
+        })))
     }
 
     fn plan_release(&self, context: &ReleaseContext, dry_run: bool) -> Result<ReleasePlan> {
-        let (changesets, aggregator) = super::loading::load_changesets(
+        let (changesets, mut aggregator) = super::loading::load_changesets(
             self.changeset_io.as_ref(),
             &context.changeset_dir,
             &context.changeset_files,
         )?;
 
         let planned_releases = if context.classification.is_prerelease_graduation {
-            VersionPlanner::plan_graduation(context.project.packages())?.releases
+            VersionPlanner::plan_graduation(context.project.packages())?
+                .releases()
+                .clone()
         } else {
-            VersionPlanner::plan_releases_per_package(
+            let changesets = none_bump::apply_none_bump_behavior(
+                changesets,
+                context.root_config.none_bump_behavior(),
+                context.root_config.none_bump_promote_message_template(),
+            )?;
+
+            aggregator = ChangesetAggregator::new();
+            for cs in &changesets {
+                aggregator.add_changeset(cs);
+            }
+
+            let consumed_paths = self
+                .changeset_io
+                .list_consumed_changesets(&context.changeset_dir)?;
+            for path in &consumed_paths {
+                let consumed_cs = self.changeset_io.read_changeset(path)?;
+                aggregator.add_changeset(&consumed_cs);
+            }
+
+            let base_releases = VersionPlanner::plan_releases_per_package(
                 &changesets,
                 context.project.packages(),
                 &context.per_package_config,
                 context.root_config.zero_version_behavior(),
             )?
-            .releases
+            .releases()
+            .clone();
+
+            let graph = self
+                .project_provider
+                .build_dependency_graph(&context.project)?;
+            let expanded = super::dependency_expansion::expand_with_reverse_dependencies(
+                base_releases,
+                &graph,
+                context.project.packages(),
+                context.root_config.zero_version_behavior(),
+            )?;
+
+            populate_dependency_update_entries(
+                &expanded,
+                &graph,
+                context.root_config.dependency_bump_changelog_template(),
+                &mut aggregator,
+            );
+
+            expanded
         };
 
         let package_lookup: IndexMap<_, _> = context
             .project
             .packages()
             .iter()
-            .map(|p| (p.name.clone(), p.clone()))
+            .map(|p| (p.name().clone(), p.clone()))
             .collect();
 
         let unchanged_packages =
@@ -304,13 +335,13 @@ where
             (updates, backups)
         };
 
-        let output = ReleaseOutput {
+        let output = ReleaseOutput::new(
             planned_releases,
             unchanged_packages,
-            changesets_consumed: context.changeset_files.clone(),
+            context.changeset_files.clone(),
             changelog_updates,
-            git_result: None,
-        };
+            None,
+        );
 
         Ok(ReleasePlan {
             output,
@@ -327,15 +358,15 @@ where
         let package_paths: IndexMap<String, PathBuf> = plan
             .package_lookup
             .iter()
-            .map(|(name, info)| (name.clone(), info.path.clone()))
+            .map(|(name, info)| (name.clone(), info.path().clone()))
             .collect();
 
         let saga_data = ReleaseSagaData::new(
             context.changeset_dir.clone(),
             context.project.root().join("Cargo.toml"),
-            plan.output.planned_releases.clone(),
+            plan.output.planned_releases().clone(),
             package_paths,
-            plan.output.changelog_updates.clone(),
+            plan.output.changelog_updates().clone(),
             context.changeset_files.clone(),
         )
         .with_options(SagaReleaseOptions {
@@ -353,10 +384,9 @@ where
 
         let result = self.execute_release_saga(context, saga_data)?;
 
-        Ok(ReleaseOutcome::Executed(ReleaseOutput {
-            git_result: Some(result.into_git_result()),
-            ..plan.output
-        }))
+        Ok(ReleaseOutcome::Executed(
+            plan.output.with_git_result(result.into_git_result()),
+        ))
     }
 
     fn execute_release_saga(
@@ -421,21 +451,53 @@ where
 }
 
 #[cfg(test)]
+impl<P, RW, M, C, G, S> ReleaseOperation<P, RW, M, C, G, S> {
+    pub(crate) fn manifest_writer(&self) -> &M {
+        &self.manifest_writer
+    }
+
+    pub(crate) fn git_provider(&self) -> &G {
+        &self.git_provider
+    }
+}
+
+fn populate_dependency_update_entries(
+    releases: &[PackageVersion],
+    graph: &WorkspaceDependencyGraph,
+    template: &str,
+    aggregator: &mut ChangesetAggregator,
+) {
+    for release in releases.iter().filter(|r| r.auto_bumped()) {
+        let direct_deps = graph.direct_dependencies(release.name());
+        let upgraded_deps: Vec<(String, semver::Version)> = releases
+            .iter()
+            .filter(|r| direct_deps.contains(r.name().as_str()))
+            .map(|r| (r.name().clone(), r.new_version().clone()))
+            .collect();
+        if !upgraded_deps.is_empty() {
+            aggregator.add_dependency_update_entries(release.name(), &upgraded_deps, template);
+        }
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use crate::mocks::{
         MockChangelogWriter, MockChangesetReader, MockGitProvider, MockManifestWriter,
         MockProjectProvider, MockReleaseStateIO, make_changeset,
     };
+    use crate::operations::ReleaseInputBuilder;
     use changeset_core::{BumpType, PrereleaseSpec};
 
     fn default_input() -> ReleaseInput {
-        ReleaseInput::builder()
+        ReleaseInputBuilder::default()
             .dry_run(true)
             .no_commit(true)
             .no_tags(true)
             .keep_changesets(true)
             .build()
+            .expect("all fields have defaults")
     }
 
     fn make_operation<P, RW, M>(
@@ -444,7 +506,7 @@ mod tests {
         manifest_writer: M,
     ) -> ReleaseOperation<P, RW, M, MockChangelogWriter, MockGitProvider, MockReleaseStateIO>
     where
-        P: ProjectProvider,
+        P: ProjectProvider + DependencyGraphProvider,
         RW: ChangesetReader + ChangesetWriter + Send + Sync + 'static,
         M: FullManifestWriter + Send + Sync + 'static,
     {
@@ -491,12 +553,12 @@ mod tests {
             panic!("expected DryRun outcome");
         };
 
-        assert_eq!(output.planned_releases.len(), 1);
-        let release = &output.planned_releases[0];
-        assert_eq!(release.name, "my-crate");
-        assert_eq!(release.current_version.to_string(), "1.0.0");
-        assert_eq!(release.new_version.to_string(), "1.0.1");
-        assert_eq!(release.bump_type, BumpType::Patch);
+        assert_eq!(output.planned_releases().len(), 1);
+        let release = &output.planned_releases()[0];
+        assert_eq!(release.name(), "my-crate");
+        assert_eq!(release.current_version().to_string(), "1.0.0");
+        assert_eq!(release.new_version().to_string(), "1.0.1");
+        assert_eq!(release.bump_type(), BumpType::Patch);
     }
 
     #[test]
@@ -524,10 +586,10 @@ mod tests {
             panic!("expected DryRun outcome");
         };
 
-        assert_eq!(output.planned_releases.len(), 1);
-        let release = &output.planned_releases[0];
-        assert_eq!(release.new_version.to_string(), "1.3.0");
-        assert_eq!(release.bump_type, BumpType::Minor);
+        assert_eq!(output.planned_releases().len(), 1);
+        let release = &output.planned_releases()[0];
+        assert_eq!(release.new_version().to_string(), "1.3.0");
+        assert_eq!(release.bump_type(), BumpType::Minor);
     }
 
     #[test]
@@ -560,22 +622,22 @@ mod tests {
             panic!("expected DryRun outcome");
         };
 
-        assert_eq!(output.planned_releases.len(), 2);
-        assert!(output.unchanged_packages.is_empty());
+        assert_eq!(output.planned_releases().len(), 2);
+        assert!(output.unchanged_packages().is_empty());
 
         let crate_a = output
-            .planned_releases
+            .planned_releases()
             .iter()
-            .find(|r| r.name == "crate-a")
+            .find(|r| r.name() == "crate-a")
             .expect("crate-a should be in releases");
-        assert_eq!(crate_a.new_version.to_string(), "1.1.0");
+        assert_eq!(crate_a.new_version().to_string(), "1.1.0");
 
         let crate_b = output
-            .planned_releases
+            .planned_releases()
             .iter()
-            .find(|r| r.name == "crate-b")
+            .find(|r| r.name() == "crate-b")
             .expect("crate-b should be in releases");
-        assert_eq!(crate_b.new_version.to_string(), "3.0.0");
+        assert_eq!(crate_b.new_version().to_string(), "3.0.0");
     }
 
     #[test]
@@ -601,10 +663,10 @@ mod tests {
             panic!("expected DryRun outcome");
         };
 
-        assert_eq!(output.planned_releases.len(), 1);
-        assert_eq!(output.unchanged_packages.len(), 2);
-        assert!(output.unchanged_packages.contains(&"crate-b".to_string()));
-        assert!(output.unchanged_packages.contains(&"crate-c".to_string()));
+        assert_eq!(output.planned_releases().len(), 1);
+        assert_eq!(output.unchanged_packages().len(), 2);
+        assert!(output.unchanged_packages().contains(&"crate-b".to_string()));
+        assert!(output.unchanged_packages().contains(&"crate-c".to_string()));
     }
 
     #[test]
@@ -629,7 +691,7 @@ mod tests {
             panic!("expected DryRun outcome");
         };
 
-        assert_eq!(output.changesets_consumed.len(), 2);
+        assert_eq!(output.changesets_consumed().len(), 2);
     }
 
     #[test]
@@ -641,11 +703,12 @@ mod tests {
         let manifest_writer = MockManifestWriter::new();
 
         let operation = make_operation(project_provider, changeset_reader, manifest_writer);
-        let input = ReleaseInput::builder()
+        let input = ReleaseInputBuilder::default()
             .no_commit(true)
             .no_tags(true)
             .keep_changesets(true)
-            .build();
+            .build()
+            .expect("all fields have defaults");
 
         let result = operation
             .execute(Path::new("/any"), &input)
@@ -672,11 +735,12 @@ mod tests {
             MockGitProvider::new(),
             MockReleaseStateIO::new(),
         );
-        let input = ReleaseInput::builder()
+        let input = ReleaseInputBuilder::default()
             .no_commit(true)
             .no_tags(true)
             .keep_changesets(true)
-            .build();
+            .build()
+            .expect("all fields have defaults");
 
         let ReleaseOutcome::Executed(output) = operation
             .execute(Path::new("/any"), &input)
@@ -685,8 +749,11 @@ mod tests {
             panic!("expected Executed outcome");
         };
 
-        assert_eq!(output.planned_releases.len(), 1);
-        assert_eq!(output.planned_releases[0].new_version.to_string(), "1.1.0");
+        assert_eq!(output.planned_releases().len(), 1);
+        assert_eq!(
+            output.planned_releases()[0].new_version().to_string(),
+            "1.1.0"
+        );
 
         let written = manifest_writer.written_versions();
         assert_eq!(written.len(), 1);
@@ -704,11 +771,12 @@ mod tests {
             .with_inherited(vec![PathBuf::from("/mock/project/Cargo.toml")]);
 
         let operation = make_operation(project_provider, changeset_reader, manifest_writer);
-        let input = ReleaseInput::builder()
+        let input = ReleaseInputBuilder::default()
             .no_commit(true)
             .no_tags(true)
             .keep_changesets(true)
-            .build();
+            .build()
+            .expect("all fields have defaults");
 
         let result = operation.execute(Path::new("/any"), &input);
 
@@ -728,12 +796,13 @@ mod tests {
             .with_inherited(vec![PathBuf::from("/mock/project/Cargo.toml")]);
 
         let operation = make_operation(project_provider, changeset_reader, manifest_writer);
-        let input = ReleaseInput::builder()
+        let input = ReleaseInputBuilder::default()
             .convert_inherited(true)
             .no_commit(true)
             .no_tags(true)
             .keep_changesets(true)
-            .build();
+            .build()
+            .expect("all fields have defaults");
 
         let result = operation.execute(Path::new("/any"), &input);
 
@@ -761,12 +830,13 @@ mod tests {
             MockGitProvider::new(),
             MockReleaseStateIO::new(),
         );
-        let input = ReleaseInput::builder()
+        let input = ReleaseInputBuilder::default()
             .convert_inherited(true)
             .no_commit(true)
             .no_tags(true)
             .keep_changesets(true)
-            .build();
+            .build()
+            .expect("all fields have defaults");
 
         let ReleaseOutcome::Executed(_) = operation
             .execute(Path::new("/any"), &input)
@@ -798,10 +868,11 @@ mod tests {
             git_provider,
             MockReleaseStateIO::new(),
         );
-        let input = ReleaseInput::builder()
+        let input = ReleaseInputBuilder::default()
             .no_tags(true)
             .keep_changesets(true)
-            .build();
+            .build()
+            .expect("all fields have defaults");
 
         let result = operation.execute(Path::new("/any"), &input);
 
@@ -825,11 +896,12 @@ mod tests {
             git_provider,
             MockReleaseStateIO::new(),
         );
-        let input = ReleaseInput::builder()
+        let input = ReleaseInputBuilder::default()
             .no_commit(true)
             .no_tags(true)
             .keep_changesets(true)
-            .build();
+            .build()
+            .expect("all fields have defaults");
 
         let result = operation.execute(Path::new("/any"), &input);
 
@@ -853,7 +925,10 @@ mod tests {
             git_provider,
             MockReleaseStateIO::new(),
         );
-        let input = ReleaseInput::builder().dry_run(true).build();
+        let input = ReleaseInputBuilder::default()
+            .dry_run(true)
+            .build()
+            .expect("all fields have defaults");
 
         let result = operation.execute(Path::new("/any"), &input);
 
@@ -879,10 +954,11 @@ mod tests {
             Arc::clone(&git_provider),
             MockReleaseStateIO::new(),
         );
-        let input = ReleaseInput::builder()
+        let input = ReleaseInputBuilder::default()
             .no_tags(true)
             .keep_changesets(true)
-            .build();
+            .build()
+            .expect("all fields have defaults");
 
         let ReleaseOutcome::Executed(output) = operation
             .execute(Path::new("/any"), &input)
@@ -891,10 +967,10 @@ mod tests {
             panic!("expected Executed outcome");
         };
 
-        let git_result = output.git_result.expect("should have git result");
-        let commit = git_result.commit.expect("should have commit");
-        assert!(commit.message.contains("my-crate@v1.1.0"));
-        assert!(commit.message.contains("my-crate 1.0.0 -> 1.1.0"));
+        let git_result = output.git_result().expect("should have git result");
+        let commit = git_result.commit().expect("should have commit");
+        assert!(commit.message().contains("my-crate@v1.1.0"));
+        assert!(commit.message().contains("my-crate 1.0.0 -> 1.1.0"));
     }
 
     #[test]
@@ -920,7 +996,10 @@ mod tests {
             Arc::clone(&git_provider),
             MockReleaseStateIO::new(),
         );
-        let input = ReleaseInput::builder().keep_changesets(true).build();
+        let input = ReleaseInputBuilder::default()
+            .keep_changesets(true)
+            .build()
+            .expect("all fields have defaults");
 
         let ReleaseOutcome::Executed(output) = operation
             .execute(Path::new("/any"), &input)
@@ -929,12 +1008,16 @@ mod tests {
             panic!("expected Executed outcome");
         };
 
-        let git_result = output.git_result.expect("should have git result");
-        assert_eq!(git_result.tags_created.len(), 2);
+        let git_result = output.git_result().expect("should have git result");
+        assert_eq!(git_result.tags_created().len(), 2);
 
-        let tag_names: Vec<_> = git_result.tags_created.iter().map(|t| &t.name).collect();
-        assert!(tag_names.contains(&&"crate-a@v1.0.1".to_string()));
-        assert!(tag_names.contains(&&"crate-b@v2.0.1".to_string()));
+        let tag_names: Vec<_> = git_result
+            .tags_created()
+            .iter()
+            .map(|t| t.name().as_str())
+            .collect();
+        assert!(tag_names.contains(&"crate-a@v1.0.1"));
+        assert!(tag_names.contains(&"crate-b@v2.0.1"));
     }
 
     #[test]
@@ -956,10 +1039,11 @@ mod tests {
             Arc::clone(&git_provider),
             MockReleaseStateIO::new(),
         );
-        let input = ReleaseInput::builder()
+        let input = ReleaseInputBuilder::default()
             .no_tags(true)
             .keep_changesets(true)
-            .build();
+            .build()
+            .expect("all fields have defaults");
 
         let ReleaseOutcome::Executed(output) = operation
             .execute(Path::new("/any"), &input)
@@ -968,9 +1052,9 @@ mod tests {
             panic!("expected Executed outcome");
         };
 
-        let git_result = output.git_result.expect("should have git result");
-        assert!(git_result.tags_created.is_empty());
-        assert!(git_result.commit.is_some());
+        let git_result = output.git_result().expect("should have git result");
+        assert!(git_result.tags_created().is_empty());
+        assert!(git_result.commit().is_some());
     }
 
     #[test]
@@ -992,7 +1076,10 @@ mod tests {
             Arc::clone(&git_provider),
             MockReleaseStateIO::new(),
         );
-        let input = ReleaseInput::builder().keep_changesets(true).build();
+        let input = ReleaseInputBuilder::default()
+            .keep_changesets(true)
+            .build()
+            .expect("all fields have defaults");
 
         let ReleaseOutcome::Executed(output) = operation
             .execute(Path::new("/any"), &input)
@@ -1001,10 +1088,11 @@ mod tests {
             panic!("expected Executed outcome");
         };
 
-        let git_result = output.git_result.expect("should have git result");
-        assert_eq!(git_result.tags_created.len(), 1);
+        let git_result = output.git_result().expect("should have git result");
+        assert_eq!(git_result.tags_created().len(), 1);
         assert_eq!(
-            git_result.tags_created[0].name, "v1.0.1",
+            git_result.tags_created()[0].name(),
+            "v1.0.1",
             "single package should use version-only tag format without crate prefix"
         );
     }
@@ -1028,10 +1116,11 @@ mod tests {
             Arc::clone(&git_provider),
             MockReleaseStateIO::new(),
         );
-        let input = ReleaseInput::builder()
+        let input = ReleaseInputBuilder::default()
             .no_commit(true)
             .no_tags(true)
-            .build();
+            .build()
+            .expect("all fields have defaults");
 
         let ReleaseOutcome::Executed(output) = operation
             .execute(Path::new("/any"), &input)
@@ -1040,10 +1129,10 @@ mod tests {
             panic!("expected Executed outcome");
         };
 
-        let git_result = output.git_result.expect("should have git result");
-        assert_eq!(git_result.changesets_deleted.len(), 1);
+        let git_result = output.git_result().expect("should have git result");
+        assert_eq!(git_result.changesets_deleted().len(), 1);
         assert_eq!(
-            git_result.changesets_deleted[0],
+            git_result.changesets_deleted()[0],
             PathBuf::from(".changeset/changesets/fix.md")
         );
     }
@@ -1067,11 +1156,12 @@ mod tests {
             Arc::clone(&git_provider),
             MockReleaseStateIO::new(),
         );
-        let input = ReleaseInput::builder()
+        let input = ReleaseInputBuilder::default()
             .no_commit(true)
             .no_tags(true)
             .keep_changesets(true)
-            .build();
+            .build()
+            .expect("all fields have defaults");
 
         let ReleaseOutcome::Executed(output) = operation
             .execute(Path::new("/any"), &input)
@@ -1080,9 +1170,9 @@ mod tests {
             panic!("expected Executed outcome");
         };
 
-        let git_result = output.git_result.expect("should have git result");
+        let git_result = output.git_result().expect("should have git result");
         assert!(
-            git_result.changesets_deleted.is_empty(),
+            git_result.changesets_deleted().is_empty(),
             "changesets_deleted should be empty when keep_changesets is true"
         );
     }
@@ -1109,7 +1199,10 @@ mod tests {
             Arc::clone(&git_provider),
             MockReleaseStateIO::new(),
         );
-        let input = ReleaseInput::builder().no_tags(true).build();
+        let input = ReleaseInputBuilder::default()
+            .no_tags(true)
+            .build()
+            .expect("all fields have defaults");
 
         let _ = operation
             .execute(Path::new("/any"), &input)
@@ -1149,10 +1242,11 @@ mod tests {
             Arc::clone(&git_provider),
             MockReleaseStateIO::new(),
         );
-        let input = ReleaseInput::builder()
+        let input = ReleaseInputBuilder::default()
             .no_tags(true)
             .keep_changesets(true)
-            .build();
+            .build()
+            .expect("all fields have defaults");
 
         let ReleaseOutcome::Executed(output) = operation
             .execute(Path::new("/any"), &input)
@@ -1161,15 +1255,15 @@ mod tests {
             panic!("expected Executed outcome");
         };
 
-        let git_result = output.git_result.expect("should have git result");
-        let commit = git_result.commit.expect("should have commit");
+        let git_result = output.git_result().expect("should have git result");
+        let commit = git_result.commit().expect("should have commit");
         assert!(
-            !commit.message.contains('\n'),
+            !commit.message().contains('\n'),
             "commit message should be title-only without newlines, got: {}",
-            commit.message
+            commit.message()
         );
         assert!(
-            commit.message.contains("my-crate@v1.1.0"),
+            commit.message().contains("my-crate@v1.1.0"),
             "commit message should contain version info"
         );
     }
@@ -1193,12 +1287,13 @@ mod tests {
             MockGitProvider::new(),
             MockReleaseStateIO::new(),
         );
-        let input = ReleaseInput::builder()
+        let input = ReleaseInputBuilder::default()
             .no_commit(true)
             .no_tags(true)
             .keep_changesets(true)
             .global_prerelease(Some(PrereleaseSpec::Alpha))
-            .build();
+            .build()
+            .expect("all fields have defaults");
 
         let result = operation
             .execute(Path::new("/any"), &input)
@@ -1224,12 +1319,13 @@ mod tests {
         let manifest_writer = MockManifestWriter::new();
 
         let operation = make_operation(project_provider, changeset_reader, manifest_writer);
-        let input = ReleaseInput::builder()
+        let input = ReleaseInputBuilder::default()
             .no_commit(true)
             .no_tags(true)
             .keep_changesets(true)
             .global_prerelease(Some(PrereleaseSpec::Alpha))
-            .build();
+            .build()
+            .expect("all fields have defaults");
 
         let result = operation.execute(Path::new("/any"), &input);
 
@@ -1246,13 +1342,14 @@ mod tests {
         let manifest_writer = MockManifestWriter::new();
 
         let operation = make_operation(project_provider, changeset_reader, manifest_writer);
-        let input = ReleaseInput::builder()
+        let input = ReleaseInputBuilder::default()
             .no_commit(true)
             .no_tags(true)
             .keep_changesets(true)
             .force(true)
             .global_prerelease(Some(PrereleaseSpec::Alpha))
-            .build();
+            .build()
+            .expect("all fields have defaults");
 
         let result = operation
             .execute(Path::new("/any"), &input)
@@ -1286,11 +1383,12 @@ mod tests {
             MockGitProvider::new(),
             MockReleaseStateIO::new(),
         );
-        let input = ReleaseInput::builder()
+        let input = ReleaseInputBuilder::default()
             .no_commit(true)
             .no_tags(true)
             .keep_changesets(true)
-            .build();
+            .build()
+            .expect("all fields have defaults");
 
         let result = operation
             .execute(Path::new("/any"), &input)
@@ -1331,11 +1429,12 @@ mod tests {
             MockGitProvider::new(),
             MockReleaseStateIO::new(),
         );
-        let input = ReleaseInput::builder()
+        let input = ReleaseInputBuilder::default()
             .no_commit(true)
             .no_tags(true)
             .keep_changesets(true)
-            .build();
+            .build()
+            .expect("all fields have defaults");
 
         let result = operation
             .execute(Path::new("/any"), &input)
@@ -1348,7 +1447,7 @@ mod tests {
 
         let (_, release) = &written[0];
         assert_eq!(
-            release.entries.len(),
+            release.entries().len(),
             2,
             "changelog should contain entries from both consumed changesets"
         );
@@ -1383,11 +1482,12 @@ mod tests {
             MockGitProvider::new(),
             MockReleaseStateIO::new(),
         );
-        let input = ReleaseInput::builder()
+        let input = ReleaseInputBuilder::default()
             .no_commit(true)
             .no_tags(true)
             .keep_changesets(true)
-            .build();
+            .build()
+            .expect("all fields have defaults");
 
         let result = operation
             .execute(Path::new("/any"), &input)
@@ -1397,20 +1497,20 @@ mod tests {
             panic!("expected Executed outcome");
         };
 
-        assert_eq!(output.planned_releases.len(), 1);
+        assert_eq!(output.planned_releases().len(), 1);
         assert_eq!(
-            output.planned_releases[0].new_version.to_string(),
+            output.planned_releases()[0].new_version().to_string(),
             "1.1.0",
             "should apply minor bump from unconsumed changeset only"
         );
 
         assert_eq!(
-            output.changesets_consumed.len(),
+            output.changesets_consumed().len(),
             1,
             "only unconsumed changeset should be in consumed list"
         );
         assert!(
-            output.changesets_consumed.contains(&unconsumed_path),
+            output.changesets_consumed().contains(&unconsumed_path),
             "unconsumed changeset should be processed"
         );
     }
@@ -1434,12 +1534,13 @@ mod tests {
             MockGitProvider::new(),
             MockReleaseStateIO::new(),
         );
-        let input = ReleaseInput::builder()
+        let input = ReleaseInputBuilder::default()
             .no_commit(true)
             .no_tags(true)
             .keep_changesets(true)
             .global_prerelease(Some(PrereleaseSpec::Beta))
-            .build();
+            .build()
+            .expect("all fields have defaults");
 
         let result = operation
             .execute(Path::new("/any"), &input)
@@ -1449,9 +1550,9 @@ mod tests {
             panic!("expected Executed outcome");
         };
 
-        assert_eq!(output.planned_releases.len(), 1);
+        assert_eq!(output.planned_releases().len(), 1);
         assert_eq!(
-            output.planned_releases[0].new_version.to_string(),
+            output.planned_releases()[0].new_version().to_string(),
             "1.0.1-beta.1",
             "switching prerelease tag should reset number to 1"
         );
@@ -1477,11 +1578,12 @@ mod tests {
             Arc::clone(&git_provider),
             MockReleaseStateIO::new(),
         );
-        let input = ReleaseInput::builder()
+        let input = ReleaseInputBuilder::default()
             .no_commit(true)
             .no_tags(true)
             .graduate_all(true)
-            .build();
+            .build()
+            .expect("all fields have defaults");
 
         let ReleaseOutcome::Executed(output) = operation
             .execute(Path::new("/any"), &input)
@@ -1491,19 +1593,19 @@ mod tests {
         };
 
         assert_eq!(
-            output.planned_releases[0].new_version.to_string(),
+            output.planned_releases()[0].new_version().to_string(),
             "1.0.0",
             "zero graduation should bump to 1.0.0"
         );
 
-        let git_result = output.git_result.expect("should have git result");
+        let git_result = output.git_result().expect("should have git result");
         assert_eq!(
-            git_result.changesets_deleted.len(),
+            git_result.changesets_deleted().len(),
             1,
             "zero graduation should delete changesets"
         );
         assert!(
-            git_result.changesets_deleted.contains(&changeset_path),
+            git_result.changesets_deleted().contains(&changeset_path),
             "deleted list should contain the changeset file"
         );
 
@@ -1537,10 +1639,11 @@ mod tests {
             Arc::clone(&git_provider),
             MockReleaseStateIO::new(),
         );
-        let input = ReleaseInput::builder()
+        let input = ReleaseInputBuilder::default()
             .no_commit(true)
             .no_tags(true)
-            .build();
+            .build()
+            .expect("all fields have defaults");
 
         let ReleaseOutcome::Executed(output) = operation
             .execute(Path::new("/any"), &input)
@@ -1550,14 +1653,14 @@ mod tests {
         };
 
         assert_eq!(
-            output.planned_releases[0].new_version.to_string(),
+            output.planned_releases()[0].new_version().to_string(),
             "1.0.1",
             "prerelease graduation should remove prerelease suffix"
         );
 
-        let git_result = output.git_result.expect("should have git result");
+        let git_result = output.git_result().expect("should have git result");
         assert!(
-            git_result.changesets_deleted.is_empty(),
+            git_result.changesets_deleted().is_empty(),
             "prerelease graduation should NOT delete changesets (they were already consumed)"
         );
 
@@ -1592,11 +1695,12 @@ mod tests {
             MockGitProvider::new(),
             Arc::clone(&release_state_io),
         );
-        let input = ReleaseInput::builder()
+        let input = ReleaseInputBuilder::default()
             .no_commit(true)
             .no_tags(true)
             .keep_changesets(true)
-            .build();
+            .build()
+            .expect("all fields have defaults");
 
         let ReleaseOutcome::Executed(output) = operation
             .execute(Path::new("/any"), &input)
@@ -1605,9 +1709,9 @@ mod tests {
             panic!("expected Executed outcome");
         };
 
-        assert_eq!(output.planned_releases.len(), 1);
+        assert_eq!(output.planned_releases().len(), 1);
         assert_eq!(
-            output.planned_releases[0].new_version.to_string(),
+            output.planned_releases()[0].new_version().to_string(),
             "1.0.1-alpha.1",
             "should apply prerelease from TOML state"
         );
@@ -1637,12 +1741,13 @@ mod tests {
             MockGitProvider::new(),
             Arc::clone(&release_state_io),
         );
-        let input = ReleaseInput::builder()
+        let input = ReleaseInputBuilder::default()
             .no_commit(true)
             .no_tags(true)
             .keep_changesets(true)
             .global_prerelease(Some(PrereleaseSpec::Beta))
-            .build();
+            .build()
+            .expect("all fields have defaults");
 
         let ReleaseOutcome::Executed(output) = operation
             .execute(Path::new("/any"), &input)
@@ -1651,9 +1756,9 @@ mod tests {
             panic!("expected Executed outcome");
         };
 
-        assert_eq!(output.planned_releases.len(), 1);
+        assert_eq!(output.planned_releases().len(), 1);
         assert_eq!(
-            output.planned_releases[0].new_version.to_string(),
+            output.planned_releases()[0].new_version().to_string(),
             "1.0.1-beta.1",
             "CLI prerelease should override TOML state"
         );
@@ -1683,11 +1788,12 @@ mod tests {
             MockGitProvider::new(),
             Arc::clone(&release_state_io),
         );
-        let input = ReleaseInput::builder()
+        let input = ReleaseInputBuilder::default()
             .no_commit(true)
             .no_tags(true)
             .keep_changesets(true)
-            .build();
+            .build()
+            .expect("all fields have defaults");
 
         let ReleaseOutcome::Executed(output) = operation
             .execute(Path::new("/any"), &input)
@@ -1696,9 +1802,9 @@ mod tests {
             panic!("expected Executed outcome");
         };
 
-        assert_eq!(output.planned_releases.len(), 1);
+        assert_eq!(output.planned_releases().len(), 1);
         assert_eq!(
-            output.planned_releases[0].new_version.to_string(),
+            output.planned_releases()[0].new_version().to_string(),
             "1.0.0",
             "should graduate from 0.x to 1.0.0"
         );
@@ -1719,12 +1825,13 @@ mod tests {
         let manifest_writer = MockManifestWriter::new();
 
         let operation = make_operation(project_provider, changeset_reader, manifest_writer);
-        let input = ReleaseInput::builder()
+        let input = ReleaseInputBuilder::default()
             .no_commit(true)
             .no_tags(true)
             .keep_changesets(true)
             .graduate_all(true)
-            .build();
+            .build()
+            .expect("all fields have defaults");
 
         let ReleaseOutcome::Executed(output) = operation
             .execute(Path::new("/any"), &input)
@@ -1733,9 +1840,9 @@ mod tests {
             panic!("expected Executed outcome");
         };
 
-        assert_eq!(output.planned_releases.len(), 1);
+        assert_eq!(output.planned_releases().len(), 1);
         assert_eq!(
-            output.planned_releases[0].new_version.to_string(),
+            output.planned_releases()[0].new_version().to_string(),
             "1.0.0",
             "graduate_all should promote 0.x to 1.0.0"
         );
@@ -1766,11 +1873,12 @@ mod tests {
             MockGitProvider::new(),
             Arc::clone(&release_state_io),
         );
-        let input = ReleaseInput::builder()
+        let input = ReleaseInputBuilder::default()
             .no_commit(true)
             .no_tags(true)
             .keep_changesets(true)
-            .build();
+            .build()
+            .expect("all fields have defaults");
 
         let ReleaseOutcome::Executed(output) = operation
             .execute(Path::new("/any"), &input)
@@ -1779,9 +1887,9 @@ mod tests {
             panic!("expected Executed outcome");
         };
 
-        assert_eq!(output.planned_releases.len(), 1);
+        assert_eq!(output.planned_releases().len(), 1);
         assert_eq!(
-            output.planned_releases[0].new_version.to_string(),
+            output.planned_releases()[0].new_version().to_string(),
             "1.0.1",
             "should bump patch version"
         );
@@ -1819,11 +1927,12 @@ mod tests {
             MockGitProvider::new(),
             Arc::clone(&release_state_io),
         );
-        let input = ReleaseInput::builder()
+        let input = ReleaseInputBuilder::default()
             .no_commit(true)
             .no_tags(true)
             .keep_changesets(true)
-            .build();
+            .build()
+            .expect("all fields have defaults");
 
         let ReleaseOutcome::Executed(output) = operation
             .execute(Path::new("/any"), &input)
@@ -1832,18 +1941,18 @@ mod tests {
             panic!("expected Executed outcome");
         };
 
-        assert_eq!(output.planned_releases.len(), 1);
+        assert_eq!(output.planned_releases().len(), 1);
         assert_eq!(
-            output.planned_releases[0].new_version.to_string(),
+            output.planned_releases()[0].new_version().to_string(),
             "1.0.0",
             "should graduate from prerelease to stable"
         );
         assert!(
-            changeset_version::is_prerelease(&output.planned_releases[0].current_version),
+            changeset_version::is_prerelease(output.planned_releases()[0].current_version()),
             "current version should have been a prerelease"
         );
         assert!(
-            !changeset_version::is_prerelease(&output.planned_releases[0].new_version),
+            !changeset_version::is_prerelease(output.planned_releases()[0].new_version()),
             "new version should be stable"
         );
 
@@ -1872,10 +1981,11 @@ mod tests {
             git_provider,
             MockReleaseStateIO::new(),
         );
-        let input = ReleaseInput::builder()
+        let input = ReleaseInputBuilder::default()
             .no_tags(true)
             .keep_changesets(true)
-            .build();
+            .build()
+            .expect("all fields have defaults");
 
         let result = operation.execute(Path::new("/any"), &input);
 
@@ -1923,7 +2033,10 @@ mod tests {
             Arc::clone(&git_provider),
             Arc::new(MockReleaseStateIO::new()),
         );
-        let input = ReleaseInput::builder().keep_changesets(true).build();
+        let input = ReleaseInputBuilder::default()
+            .keep_changesets(true)
+            .build()
+            .expect("all fields have defaults");
 
         let result = operation.execute(Path::new("/any"), &input);
         assert!(result.is_ok(), "release should succeed");
@@ -1950,7 +2063,10 @@ mod tests {
             git_provider,
             MockReleaseStateIO::new(),
         );
-        let input = ReleaseInput::builder().keep_changesets(true).build();
+        let input = ReleaseInputBuilder::default()
+            .keep_changesets(true)
+            .build()
+            .expect("all fields have defaults");
 
         let result = operation.execute(Path::new("/any"), &input);
 
@@ -1978,5 +2094,299 @@ mod tests {
             "1.0.0",
             "manifest version should be restored to original"
         );
+    }
+
+    #[test]
+    fn auto_bumps_transitive_dependents() {
+        let project_provider = MockProjectProvider::workspace(vec![
+            ("core", "1.0.0"),
+            ("lib", "1.0.0"),
+            ("app", "1.0.0"),
+        ])
+        .with_dependency_edges(vec![("lib", "core"), ("app", "lib")]);
+
+        let changeset = make_changeset("core", BumpType::Minor, "Add feature to core");
+        let changeset_reader = MockChangesetReader::new()
+            .with_changeset(PathBuf::from(".changeset/changesets/feature.md"), changeset);
+        let manifest_writer = MockManifestWriter::new();
+
+        let operation = make_operation(project_provider, changeset_reader, manifest_writer);
+
+        let result = operation
+            .execute(Path::new("/any"), &default_input())
+            .expect("execute failed");
+
+        let ReleaseOutcome::DryRun(output) = result else {
+            panic!("expected DryRun outcome");
+        };
+
+        assert_eq!(output.planned_releases().len(), 3);
+
+        let core_release = output
+            .planned_releases()
+            .iter()
+            .find(|r| r.name() == "core")
+            .expect("core should be in releases");
+        assert_eq!(core_release.bump_type(), BumpType::Minor);
+        assert!(!core_release.auto_bumped());
+
+        let lib_release = output
+            .planned_releases()
+            .iter()
+            .find(|r| r.name() == "lib")
+            .expect("lib should be auto-bumped");
+        assert_eq!(lib_release.bump_type(), BumpType::Patch);
+        assert!(lib_release.auto_bumped());
+
+        let app_release = output
+            .planned_releases()
+            .iter()
+            .find(|r| r.name() == "app")
+            .expect("app should be auto-bumped");
+        assert_eq!(app_release.bump_type(), BumpType::Patch);
+        assert!(app_release.auto_bumped());
+    }
+
+    #[test]
+    fn explicit_changeset_takes_precedence_over_auto_bump() {
+        let project_provider =
+            MockProjectProvider::workspace(vec![("core", "1.0.0"), ("lib", "1.0.0")])
+                .with_dependency_edges(vec![("lib", "core")]);
+
+        let changeset1 = make_changeset("core", BumpType::Minor, "Add feature to core");
+        let changeset2 = make_changeset("lib", BumpType::Patch, "Fix lib");
+        let changeset_reader = MockChangesetReader::new().with_changesets(vec![
+            (
+                PathBuf::from(".changeset/changesets/feature.md"),
+                changeset1,
+            ),
+            (PathBuf::from(".changeset/changesets/fix.md"), changeset2),
+        ]);
+        let manifest_writer = MockManifestWriter::new();
+
+        let operation = make_operation(project_provider, changeset_reader, manifest_writer);
+
+        let result = operation
+            .execute(Path::new("/any"), &default_input())
+            .expect("execute failed");
+
+        let ReleaseOutcome::DryRun(output) = result else {
+            panic!("expected DryRun outcome");
+        };
+
+        assert_eq!(output.planned_releases().len(), 2);
+
+        let lib_release = output
+            .planned_releases()
+            .iter()
+            .find(|r| r.name() == "lib")
+            .expect("lib should be in releases");
+        assert_eq!(lib_release.bump_type(), BumpType::Patch);
+        assert!(
+            !lib_release.auto_bumped(),
+            "explicit changeset should take precedence over auto-bump"
+        );
+
+        let lib_count = output
+            .planned_releases()
+            .iter()
+            .filter(|r| r.name() == "lib")
+            .count();
+        assert_eq!(lib_count, 1, "lib should appear exactly once");
+    }
+
+    #[test]
+    fn no_auto_bump_for_single_package_projects() {
+        let project_provider = MockProjectProvider::single_package("my-crate", "1.0.0");
+
+        let changeset = make_changeset("my-crate", BumpType::Minor, "Add feature");
+        let changeset_reader = MockChangesetReader::new()
+            .with_changeset(PathBuf::from(".changeset/changesets/feature.md"), changeset);
+        let manifest_writer = MockManifestWriter::new();
+
+        let operation = make_operation(project_provider, changeset_reader, manifest_writer);
+
+        let result = operation
+            .execute(Path::new("/any"), &default_input())
+            .expect("execute failed");
+
+        let ReleaseOutcome::DryRun(output) = result else {
+            panic!("expected DryRun outcome");
+        };
+
+        assert_eq!(output.planned_releases().len(), 1);
+        assert!(!output.planned_releases()[0].auto_bumped());
+    }
+
+    #[test]
+    fn no_auto_bump_when_no_dependency_edges() {
+        let project_provider = MockProjectProvider::workspace(vec![
+            ("crate-a", "1.0.0"),
+            ("crate-b", "2.0.0"),
+            ("crate-c", "3.0.0"),
+        ]);
+
+        let changeset = make_changeset("crate-a", BumpType::Patch, "Fix crate-a");
+        let changeset_reader = MockChangesetReader::new()
+            .with_changeset(PathBuf::from(".changeset/changesets/fix.md"), changeset);
+        let manifest_writer = MockManifestWriter::new();
+
+        let operation = make_operation(project_provider, changeset_reader, manifest_writer);
+
+        let result = operation
+            .execute(Path::new("/any"), &default_input())
+            .expect("execute failed");
+
+        let ReleaseOutcome::DryRun(output) = result else {
+            panic!("expected DryRun outcome");
+        };
+
+        assert_eq!(
+            output.planned_releases().len(),
+            1,
+            "only the explicitly changed crate should be released"
+        );
+        assert_eq!(output.planned_releases()[0].name(), "crate-a");
+    }
+
+    #[test]
+    fn release_with_promote_to_patch_promotes_none_bump() {
+        use changeset_core::NoneBumpBehavior;
+        use changeset_project::RootChangesetConfig;
+
+        let root_config = RootChangesetConfig::default()
+            .with_none_bump_behavior(NoneBumpBehavior::PromoteToPatch);
+        let project_provider =
+            MockProjectProvider::single_package("my-crate", "1.0.0").with_root_config(root_config);
+        let changeset = make_changeset("my-crate", BumpType::None, "Internal refactor");
+        let changeset_reader = MockChangesetReader::new().with_changeset(
+            PathBuf::from(".changeset/changesets/refactor.md"),
+            changeset,
+        );
+        let manifest_writer = MockManifestWriter::new();
+
+        let operation = make_operation(project_provider, changeset_reader, manifest_writer);
+
+        let result = operation
+            .execute(Path::new("/any"), &default_input())
+            .expect("execute failed");
+
+        let ReleaseOutcome::DryRun(output) = result else {
+            panic!("expected DryRun outcome");
+        };
+
+        assert_eq!(output.planned_releases().len(), 1);
+        let release = &output.planned_releases()[0];
+        assert_eq!(release.name(), "my-crate");
+        assert_eq!(release.bump_type(), BumpType::Patch);
+        assert_eq!(release.new_version().to_string(), "1.0.1");
+    }
+
+    #[test]
+    fn release_with_disallow_errors_on_none_bump() {
+        use changeset_core::NoneBumpBehavior;
+        use changeset_project::RootChangesetConfig;
+
+        let root_config =
+            RootChangesetConfig::default().with_none_bump_behavior(NoneBumpBehavior::Disallow);
+        let project_provider =
+            MockProjectProvider::single_package("my-crate", "1.0.0").with_root_config(root_config);
+        let changeset = make_changeset("my-crate", BumpType::None, "Internal refactor");
+        let changeset_reader = MockChangesetReader::new().with_changeset(
+            PathBuf::from(".changeset/changesets/refactor.md"),
+            changeset,
+        );
+        let manifest_writer = MockManifestWriter::new();
+
+        let operation = make_operation(project_provider, changeset_reader, manifest_writer);
+
+        let result = operation.execute(Path::new("/any"), &default_input());
+
+        assert!(matches!(
+            result,
+            Err(crate::error::OperationError::NoneBumpDisallowed { .. })
+        ));
+    }
+
+    #[test]
+    fn release_with_allow_excludes_none_bump_from_releases() {
+        use changeset_core::NoneBumpBehavior;
+        use changeset_project::RootChangesetConfig;
+
+        let root_config =
+            RootChangesetConfig::default().with_none_bump_behavior(NoneBumpBehavior::Allow);
+        let project_provider =
+            MockProjectProvider::single_package("my-crate", "1.0.0").with_root_config(root_config);
+        let changeset = make_changeset("my-crate", BumpType::None, "Internal refactor");
+        let changeset_reader = MockChangesetReader::new().with_changeset(
+            PathBuf::from(".changeset/changesets/refactor.md"),
+            changeset,
+        );
+        let manifest_writer = MockManifestWriter::new();
+
+        let operation = make_operation(project_provider, changeset_reader, manifest_writer);
+
+        let result = operation
+            .execute(Path::new("/any"), &default_input())
+            .expect("execute failed");
+
+        let ReleaseOutcome::DryRun(output) = result else {
+            panic!("expected DryRun outcome");
+        };
+
+        assert!(
+            output.planned_releases().is_empty(),
+            "None bump with Allow should not produce any planned releases"
+        );
+    }
+
+    #[test]
+    fn release_with_promote_handles_mixed_bumps() {
+        use changeset_core::NoneBumpBehavior;
+        use changeset_project::RootChangesetConfig;
+
+        let root_config = RootChangesetConfig::default()
+            .with_none_bump_behavior(NoneBumpBehavior::PromoteToPatch);
+        let project_provider =
+            MockProjectProvider::workspace(vec![("crate-a", "1.0.0"), ("crate-b", "2.0.0")])
+                .with_root_config(root_config);
+
+        let changeset = changeset_core::Changeset::new(
+            "mixed change".to_string(),
+            vec![
+                changeset_core::PackageRelease::new("crate-a".to_string(), BumpType::Patch),
+                changeset_core::PackageRelease::new("crate-b".to_string(), BumpType::None),
+            ],
+            changeset_core::ChangeCategory::Fixed,
+        );
+        let changeset_reader = MockChangesetReader::new()
+            .with_changeset(PathBuf::from(".changeset/changesets/mixed.md"), changeset);
+        let manifest_writer = MockManifestWriter::new();
+
+        let operation = make_operation(project_provider, changeset_reader, manifest_writer);
+
+        let result = operation
+            .execute(Path::new("/any"), &default_input())
+            .expect("execute failed");
+
+        let ReleaseOutcome::DryRun(output) = result else {
+            panic!("expected DryRun outcome");
+        };
+
+        assert_eq!(output.planned_releases().len(), 2);
+
+        let release_a = output
+            .planned_releases()
+            .iter()
+            .find(|r| r.name() == "crate-a")
+            .expect("crate-a should be in planned releases");
+        assert_eq!(release_a.bump_type(), BumpType::Patch);
+
+        let release_b = output
+            .planned_releases()
+            .iter()
+            .find(|r| r.name() == "crate-b")
+            .expect("crate-b should be in planned releases");
+        assert_eq!(release_b.bump_type(), BumpType::Patch);
     }
 }

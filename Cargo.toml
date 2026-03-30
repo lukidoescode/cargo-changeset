@@ -30,15 +30,15 @@ zero_version_behavior = "effective-minor"
 
 [workspace.dependencies]
 # Internal crates - versions managed independently in each crate
-changeset-core = { path = "crates/changeset-core", version = "0.0.2" }
-changeset-parse = { path = "crates/changeset-parse", version = "0.0.2" }
-changeset-git = { path = "crates/changeset-git", version = "0.0.3" }
-changeset-version = { path = "crates/changeset-version", version = "0.0.2" }
-changeset-project = { path = "crates/changeset-project", version = "0.1.1" }
-changeset-changelog = { path = "crates/changeset-changelog", version = "0.0.2" }
-changeset-operations = { path = "crates/changeset-operations", version = "0.1.1" }
-changeset-manifest = { path = "crates/changeset-manifest", version = "0.0.2" }
-changeset-saga = { path = "crates/changeset-saga", version = "0.0.1" }
+changeset-core = { path = "crates/changeset-core", version = "0.0.3" }
+changeset-parse = { path = "crates/changeset-parse", version = "0.0.3" }
+changeset-git = { path = "crates/changeset-git", version = "0.0.4" }
+changeset-version = { path = "crates/changeset-version", version = "0.0.3" }
+changeset-project = { path = "crates/changeset-project", version = "0.1.2" }
+changeset-changelog = { path = "crates/changeset-changelog", version = "0.0.3" }
+changeset-operations = { path = "crates/changeset-operations", version = "0.1.2" }
+changeset-manifest = { path = "crates/changeset-manifest", version = "0.0.3" }
+changeset-saga = { path = "crates/changeset-saga", version = "0.0.2" }
 
 # External dependencies
 indexmap = { version = "2.7.1", features = ["serde"] }
@@ -50,8 +50,10 @@ clap = { version = "4.5.57", features = ["derive"] }
 toml = "0.9.11"
 semver = "1.0.27"
 glob = "0.3.3"
-git2 = "0.20"
+git2 = { version = "0.20", default-features = false }
 dialoguer = "0.12.0"
 petname = "2.0.2"
 toml_edit = "0.25.0"
 tracing = "0.1.44"
+gset = "1.1.0"
+derive_builder = "0.20.2"
