@@ -5,4 +5,6 @@ rules:
         actions/*: any
         docker/*: any
         dtolnay/*: any
+        schneegans/*: any
+        taiki-e/*: any
         zizmorcore/*: any
