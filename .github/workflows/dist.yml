@@ -82,7 +82,7 @@ jobs:
 
       - name: Upload artifact (Unix)
         if: ${{ matrix.archive_ext == 'tar.gz' }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: binary-${{ matrix.target }}
           path: cargo-changeset-${{ steps.version.outputs.version }}-${{ matrix.target
@@ -90,7 +90,7 @@ jobs:
 
       - name: Upload artifact (Windows)
         if: ${{ matrix.archive_ext == 'zip' }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: binary-${{ matrix.target }}
           path: cargo-changeset-${{ steps.version.outputs.version }}-${{ matrix.target
@@ -108,7 +108,7 @@ jobs:
         run: echo "version=${GITHUB_REF_NAME#cargo-changeset@v}" >> "$GITHUB_OUTPUT"
 
       - name: Download all artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           pattern: binary-*
           merge-multiple: true
