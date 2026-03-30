@@ -4,7 +4,7 @@ A composite GitHub Action that runs `cargo changeset verify` using the `cargo-ch
 
 ## Prerequisites
 
-- **Checkout**: Use `actions/checkout@v4` so the repository is available.
+- **Checkout**: Use `actions/checkout@v6` so the repository is available.
 - **Git fetch**: The action automatically fetches the base branch from `origin` and compares against `origin/<base>`. No manual fetch step is needed.
 
 ## Inputs
@@ -30,7 +30,7 @@ jobs:
   verify:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 0
 

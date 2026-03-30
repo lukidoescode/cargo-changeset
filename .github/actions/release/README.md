@@ -6,7 +6,7 @@ This action does **not** push commits or tags. You are responsible for pushing a
 
 ## Prerequisites
 
-- **Checkout with full history**: Use `actions/checkout@v4` with `fetch-depth: 0` so that git tags are available for version detection.
+- **Checkout with full history**: Use `actions/checkout@v6` with `fetch-depth: 0` so that git tags are available for version detection.
 - **Git identity**: Configure `user.name` and `user.email` before running this action. The action will fail with an error if they are not set.
 
 ## Inputs
@@ -43,7 +43,7 @@ jobs:
   release:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 0
 
