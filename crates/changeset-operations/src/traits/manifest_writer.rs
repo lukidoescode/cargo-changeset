@@ -70,8 +70,8 @@ pub trait WorkspaceVersionManager: Send + Sync {
 pub trait LockfileUpdater: Send + Sync {
     /// # Errors
     ///
-    /// Returns an error if the `cargo generate-lockfile` command fails.
-    fn generate_lockfile(&self, project_root: &Path) -> Result<()>;
+    /// Returns an error if the `cargo update --workspace` command fails.
+    fn update_lockfile(&self, project_root: &Path) -> Result<()>;
 
     /// # Errors
     ///

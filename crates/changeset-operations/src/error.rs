@@ -217,7 +217,7 @@ pub enum OperationError {
         source: std::io::Error,
     },
 
-    #[error("cargo generate-lockfile failed: {stderr}")]
+    #[error("cargo update --workspace failed: {stderr}")]
     LockfileCommandFailed { stderr: String },
 
     #[error("release saga failed at step '{step}'")]
