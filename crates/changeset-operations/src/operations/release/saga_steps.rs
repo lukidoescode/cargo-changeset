@@ -291,8 +291,7 @@ where
         }
 
         input.lockfile_backup = ctx.manifest_writer().read_lockfile(ctx.project_root())?;
-        ctx.manifest_writer()
-            .generate_lockfile(ctx.project_root())?;
+        ctx.manifest_writer().update_lockfile(ctx.project_root())?;
         input.lockfile_path = Some(ctx.project_root().join("Cargo.lock"));
 
         Ok(input)
@@ -1245,7 +1244,7 @@ mod tests {
     }
 
     #[test]
-    fn update_lockfile_generates_lockfile_when_committing() -> anyhow::Result<()> {
+    fn update_lockfile_updates_when_committing() -> anyhow::Result<()> {
         let ctx = make_test_context(
             Arc::new(MockGitProvider::new()),
             Arc::new(MockManifestWriter::new()),
