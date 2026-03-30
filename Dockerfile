@@ -26,7 +26,10 @@ RUN cargo build --release --package cargo-changeset
 
 FROM alpine:3.21
 
-RUN apk add --no-cache git
+RUN apk add --no-cache git su-exec
+
+RUN addgroup -g 1000 changeset && \
+    adduser -u 1000 -G changeset -h /home/changeset -s /bin/sh -D changeset
 
 COPY --from=builder /build/target/release/cargo-changeset /usr/local/bin/cargo-changeset
 COPY docker/entrypoint.sh /entrypoint.sh
