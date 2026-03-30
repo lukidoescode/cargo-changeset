@@ -25,12 +25,12 @@ if [ "$TARGET_UID" = "0" ]; then
 fi
 
 # Ensure writable home directory for git config
-export HOME="/home/changeset"
-mkdir -p "$HOME"
-chown "$TARGET_UID:$TARGET_GID" "$HOME"
+USER_HOME="/home/changeset"
+mkdir -p "$USER_HOME"
+chown "$TARGET_UID:$TARGET_GID" "$USER_HOME"
 
 # Configure git safe.directory
-su-exec "$TARGET_UID:$TARGET_GID" git config --global --add safe.directory "$WORK_DIR"
+su-exec "$TARGET_UID:$TARGET_GID" env HOME="$USER_HOME" git config --global --add safe.directory "$WORK_DIR"
 
 # Run as the target user
-exec su-exec "$TARGET_UID:$TARGET_GID" cargo-changeset "$@"
+exec su-exec "$TARGET_UID:$TARGET_GID" env HOME="$USER_HOME" cargo-changeset "$@"
