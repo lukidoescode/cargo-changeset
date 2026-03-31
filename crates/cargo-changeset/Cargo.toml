@@ -9,7 +9,7 @@ homepage.workspace = true
 authors.workspace = true
 description = "A cargo subcommand for managing changesets"
 readme = "../../README.md"
-keywords = ["cargo", "changeset", "release", "changelog", "versioning"]
+keywords = ["cargo", "release-management", "release", "changelog", "semver"]
 categories = ["command-line-utilities", "development-tools::cargo-plugins"]
 
 [[bin]]
