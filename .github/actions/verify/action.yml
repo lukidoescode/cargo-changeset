@@ -1,21 +1,23 @@
-name: "Verify Changeset Coverage"
-description: "Verify that all changed crates have changeset coverage using cargo-changeset"
+---
+name: Verify Changeset Coverage
+description: Verify that all changed crates have changeset coverage using cargo-changeset
+
 branding:
-  icon: "check-circle"
-  color: "green"
+  icon: check-circle
+  color: green
 
 inputs:
   base:
-    description: "Base branch to compare against"
+    description: Base branch to compare against
     required: false
-    default: "main"
+    default: main
   cargo-changeset-version:
-    description: "Docker image tag for cargo-changeset"
+    description: Docker image tag for cargo-changeset
     required: false
-    default: "latest"
+    default: latest
 
 runs:
-  using: "composite"
+  using: composite
   steps:
     - name: Fetch base ref
       shell: bash
@@ -28,8 +30,8 @@ runs:
       env:
         INPUT_BASE: ${{ inputs.base }}
         INPUT_VERSION: ${{ inputs.cargo-changeset-version }}
-      run: |
+      run: |-
         docker run --rm \
           -v "$(pwd):/workspace" -w /workspace \
           "ghcr.io/lukidoescode/cargo-changeset:${INPUT_VERSION}" \
-          verify --base "origin/$INPUT_BASE" --quiet
+          verify --base "origin/$INPUT_BASE"

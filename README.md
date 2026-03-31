@@ -51,7 +51,7 @@ Each file lists one or more crates with a bump type (`major`, `minor`, `patch`, 
 | **Dependency-aware releases** | Automatically bumps workspace crates that depend on a released crate and generates changelog entries for the update. |
 | **Keep a Changelog** | Generates [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.1.0/) entries grouped by category. Supports root or per-package changelogs with optional comparison links for GitHub, GitLab, Bitbucket, Gitea, Codeberg, and SourceHut. |
 | **Git integration** | Creates commits and annotated tags automatically. Supports `version-only` (`v1.0.0`) and `crate-prefixed` (`crate@v1.0.0`) tag formats. |
-| **CI-ready** | Auto-detects GitHub Actions, GitLab CI, CircleCI, Travis, Jenkins, Buildkite, and Azure DevOps. Ships as Docker images and pre-built binaries. Provides GitHub Actions for verify and release. |
+| **CI-ready** | Supports GitHub Actions, GitLab CI, CircleCI, Travis, Jenkins, Buildkite, and Azure DevOps. Ships as Docker images and pre-built binaries. Provides GitHub Actions for verify and release. |
 
 <details>
 <summary><strong>Instructions for AI Coding Agents 🤖</strong></summary>

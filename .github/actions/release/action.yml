@@ -1,49 +1,53 @@
-name: "Release with Changesets"
-description: "Run cargo-changeset release to bump versions, update changelogs, and commit"
+---
+name: Release with Changesets
+description: Run cargo-changeset release to bump versions, update changelogs, and
+  commit
+
 branding:
-  icon: "package"
-  color: "blue"
+  icon: package
+  color: blue
 
 inputs:
   dry-run:
-    description: "Preview without modifying files"
+    description: Preview without modifying files
     required: false
-    default: "false"
+    default: 'false'
   convert:
-    description: "Convert pre-release versions to stable"
+    description: Convert pre-release versions to stable
     required: false
-    default: "false"
+    default: 'false'
   no-commit:
-    description: "Skip creating a release commit"
+    description: Skip creating a release commit
     required: false
-    default: "false"
+    default: 'false'
   no-tags:
-    description: "Skip creating git tags"
+    description: Skip creating git tags
     required: false
-    default: "false"
+    default: 'false'
   keep-changesets:
-    description: "Keep changeset files after release"
+    description: Keep changeset files after release
     required: false
-    default: "false"
+    default: 'false'
   force:
-    description: "Force release even without changesets"
+    description: Force release even without changesets
     required: false
-    default: "false"
+    default: 'false'
   prerelease:
-    description: "Pre-release identifiers (space-separated, e.g. 'foo:alpha bar:beta')"
+    description: Pre-release identifiers (space-separated, e.g. 'foo:alpha bar:beta')
     required: false
-    default: ""
+    default: ''
   graduate:
-    description: "Graduate pre-releases to stable (space-separated crate names, e.g. 'foo bar')"
+    description: Graduate pre-releases to stable (space-separated crate names, e.g.
+      'foo bar')
     required: false
-    default: ""
+    default: ''
   cargo-changeset-version:
-    description: "Docker image tag for cargo-changeset"
+    description: Docker image tag for cargo-changeset
     required: false
-    default: "latest"
+    default: latest
 
 runs:
-  using: "composite"
+  using: composite
   steps:
     - name: Verify git identity is configured
       shell: bash
@@ -71,7 +75,7 @@ runs:
         INPUT_PRERELEASE: ${{ inputs.prerelease }}
         INPUT_GRADUATE: ${{ inputs.graduate }}
         INPUT_VERSION: ${{ inputs.cargo-changeset-version }}
-      run: |
+      run: |-
         FLAGS=""
 
         if [ "$INPUT_DRY_RUN" = "true" ]; then
