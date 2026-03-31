@@ -14,9 +14,12 @@ on:
         type: string
         required: false
       graduate:
-        description: Graduate pre-releases to stable
-        type: boolean
-        default: false
+        description: >-
+          Space-separated crate names to graduate to 1.0.0
+          (e.g. "crate-a crate-b")
+        type: string
+        required: false
+        default: ""
       keep_changesets:
         description: Keep changeset files after release
         type: boolean
@@ -41,38 +44,21 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
-      - name: Cache cargo-changeset binary
-        id: cache
-        uses: actions/cache@v5
-        with:
-          path: ~/.cargo/bin/cargo-changeset
-          key: cargo-changeset-${{ runner.os }}-0.1.4
-
-      - name: Install cargo-changeset
-        if: steps.cache.outputs.cache-hit != 'true'
-        run: cargo install cargo-changeset --version 0.1.4
-
-      - name: Build release flags
-        id: flags
-        run: |
-          FLAGS=""
-          if [ -n "${{ inputs.pre_release }}" ]; then
-            FLAGS="$FLAGS --prerelease ${{ inputs.pre_release }}"
-          fi
-          if [ "${{ inputs.graduate }}" = "true" ]; then
-            FLAGS="$FLAGS --graduate"
-          fi
-          if [ "${{ inputs.keep_changesets }}" = "true" ]; then
-            FLAGS="$FLAGS --keep-changesets"
-          fi
-          echo "flags=$FLAGS" >> "$GITHUB_OUTPUT"
-
       - name: Dry run release
-        run: cargo changeset release --dry-run ${{ steps.flags.outputs.flags }}
+        uses: ./.github/actions/release
+        with:
+          dry-run: "true"
+          prerelease: ${{ inputs.pre_release }}
+          graduate: ${{ inputs.graduate }}
+          keep-changesets: ${{ inputs.keep_changesets && 'true' || 'false' }}
 
       - name: Execute release
         if: ${{ inputs.dry_run == false }}
-        run: cargo changeset release ${{ steps.flags.outputs.flags }}
+        uses: ./.github/actions/release
+        with:
+          prerelease: ${{ inputs.pre_release }}
+          graduate: ${{ inputs.graduate }}
+          keep-changesets: ${{ inputs.keep_changesets && 'true' || 'false' }}
 
       - name: Push release commit and tags
         if: ${{ inputs.dry_run == false }}
