@@ -34,11 +34,11 @@ pub(super) fn run(args: AddArgs, start_path: &Path) -> Result<()> {
     let result = if is_interactive() {
         let interaction_provider = TerminalInteractionProvider::new(args.editor);
         let operation = AddOperation::new(project_provider, changeset_writer, interaction_provider);
-        operation.execute(start_path, input)?
+        operation.execute(start_path, &input)?
     } else {
         let interaction_provider = NonInteractiveProvider;
         let operation = AddOperation::new(project_provider, changeset_writer, interaction_provider);
-        operation.execute(start_path, input)?
+        operation.execute(start_path, &input)?
     };
 
     match result {

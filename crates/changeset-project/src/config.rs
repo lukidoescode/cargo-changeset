@@ -21,11 +21,24 @@ pub enum TagFormat {
     CratePrefixed,
 }
 
-#[derive(Debug, Clone)]
-#[allow(clippy::struct_excessive_bools)]
-pub struct GitConfig {
+#[derive(Debug, Clone, Copy)]
+struct GitOperationFlags {
     commit: bool,
     tags: bool,
+}
+
+impl Default for GitOperationFlags {
+    fn default() -> Self {
+        Self {
+            commit: true,
+            tags: true,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct GitConfig {
+    operations: GitOperationFlags,
     keep_changesets: bool,
     tag_format: TagFormat,
     commit_title_template: String,
@@ -35,12 +48,12 @@ pub struct GitConfig {
 impl GitConfig {
     #[must_use]
     pub fn commit(&self) -> bool {
-        self.commit
+        self.operations.commit
     }
 
     #[must_use]
     pub fn tags(&self) -> bool {
-        self.tags
+        self.operations.tags
     }
 
     #[must_use]
@@ -74,8 +87,7 @@ impl GitConfig {
 impl Default for GitConfig {
     fn default() -> Self {
         Self {
-            commit: true,
-            tags: true,
+            operations: GitOperationFlags::default(),
             keep_changesets: false,
             tag_format: TagFormat::default(),
             commit_title_template: String::from("{new-version}"),
@@ -200,6 +212,7 @@ impl PackageChangesetConfig {
     }
 }
 
+#[derive(Copy, Clone)]
 enum CargoRootConfigType {
     Workspace,
     Package,
@@ -292,8 +305,10 @@ fn build_git_config(metadata: Option<&ChangesetMetadata>) -> GitConfig {
     match metadata {
         None => defaults,
         Some(cs) => GitConfig {
-            commit: cs.commit.unwrap_or(defaults.commit),
-            tags: cs.tags.unwrap_or(defaults.tags),
+            operations: GitOperationFlags {
+                commit: cs.commit.unwrap_or(defaults.operations.commit),
+                tags: cs.tags.unwrap_or(defaults.operations.tags),
+            },
             keep_changesets: cs.keep_changesets.unwrap_or(defaults.keep_changesets),
             tag_format: cs.tag_format.map_or(defaults.tag_format, |tf| match tf {
                 TagFormatValue::VersionOnly => TagFormat::VersionOnly,

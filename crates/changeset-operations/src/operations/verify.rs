@@ -58,6 +58,13 @@ impl VerifyResult {
     }
 }
 
+struct CollectedChanges {
+    is_dirty: bool,
+    changeset_files: Vec<PathBuf>,
+    deleted_changesets: Vec<PathBuf>,
+    code_changes: Vec<PathBuf>,
+}
+
 pub struct VerifyOperation<P, G, R> {
     project_provider: P,
     git_provider: G,
@@ -85,8 +92,11 @@ where
         let project = self.project_provider.discover_project(start_path)?;
         let (root_config, package_configs) = self.project_provider.load_configs(&project)?;
 
-        let (is_dirty, changeset_files, deleted_changesets, changed_paths) =
-            self.collect_changes(&project, root_config.changeset_dir(), input)?;
+        let collected = self.collect_changes(&project, root_config.changeset_dir(), input)?;
+        let is_dirty = collected.is_dirty;
+        let changeset_files = collected.changeset_files;
+        let deleted_changesets = collected.deleted_changesets;
+        let changed_paths = collected.code_changes;
 
         let has_code_changes = !changed_paths.is_empty();
         let has_deleted_changesets = !deleted_changesets.is_empty();
@@ -140,7 +150,7 @@ where
         project: &changeset_project::CargoProject,
         changeset_dir: &Path,
         input: &VerifyInput,
-    ) -> Result<(bool, Vec<PathBuf>, Vec<PathBuf>, Vec<PathBuf>)> {
+    ) -> Result<CollectedChanges> {
         let working_tree_dirty = if input.ignore_dirty() {
             false
         } else {
@@ -163,12 +173,17 @@ where
 
         let deleted_changesets = extract_deleted_changesets(&changeset_changes, changeset_dir);
         let changeset_files = extract_active_changesets(&changeset_changes);
-        let changed_paths = code_changes
+        let code_changes = code_changes
             .into_iter()
             .map(|change| change.path().clone())
             .collect();
 
-        Ok((is_dirty, changeset_files, deleted_changesets, changed_paths))
+        Ok(CollectedChanges {
+            is_dirty,
+            changeset_files,
+            deleted_changesets,
+            code_changes,
+        })
     }
 
     fn resolve_affected_packages(

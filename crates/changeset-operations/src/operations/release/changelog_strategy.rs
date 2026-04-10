@@ -86,7 +86,7 @@ impl ChangelogHandler for RootChangelogStrategy {
                     previous_tag.as_deref(),
                 )?;
 
-                changelog_updates.push(build_changelog_update(result, version, None));
+                changelog_updates.push(build_changelog_update(&result, version, None));
             }
         }
 
@@ -141,7 +141,7 @@ impl ChangelogHandler for PerPackageChangelogStrategy {
                     )?;
 
                     changelog_updates.push(build_changelog_update(
-                        result,
+                        &result,
                         release.new_version().clone(),
                         Some(release.name().clone()),
                     ));
@@ -168,7 +168,7 @@ fn read_changelog_content(path: &Path) -> Result<String> {
 }
 
 fn build_changelog_update(
-    result: ChangelogWriteResult,
+    result: &ChangelogWriteResult,
     version: Version,
     package: Option<String>,
 ) -> ChangelogUpdate {

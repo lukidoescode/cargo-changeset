@@ -63,7 +63,7 @@ impl WorkspaceDependencyGraph {
 
     #[cfg(any(test, feature = "testing"))]
     #[must_use]
-    pub fn from_edges(member_names: HashSet<String>, edges: &[(String, String)]) -> Self {
+    pub fn from_edges(member_names: &HashSet<String>, edges: &[(String, String)]) -> Self {
         let mut depended_on_by: HashMap<String, HashSet<String>> = member_names
             .iter()
             .map(|name| (name.clone(), HashSet::new()))
@@ -169,7 +169,7 @@ mod tests {
 
     #[test]
     fn empty_graph_has_no_dependents() {
-        let graph = WorkspaceDependencyGraph::from_edges(member_set(&["a", "b"]), &[]);
+        let graph = WorkspaceDependencyGraph::from_edges(&member_set(&["a", "b"]), &[]);
 
         assert!(graph.transitive_dependents("a").is_empty());
         assert!(graph.transitive_dependents("b").is_empty());
@@ -177,7 +177,7 @@ mod tests {
 
     #[test]
     fn single_package_no_edges() {
-        let graph = WorkspaceDependencyGraph::from_edges(member_set(&["solo"]), &[]);
+        let graph = WorkspaceDependencyGraph::from_edges(&member_set(&["solo"]), &[]);
 
         assert!(graph.transitive_dependents("solo").is_empty());
         assert!(graph.direct_dependencies("solo").is_empty());
@@ -186,7 +186,7 @@ mod tests {
     #[test]
     fn direct_dependency_detection() {
         let graph = WorkspaceDependencyGraph::from_edges(
-            member_set(&["app", "lib"]),
+            &member_set(&["app", "lib"]),
             &edges(&[("app", "lib")]),
         );
 
@@ -198,7 +198,7 @@ mod tests {
     #[test]
     fn transitive_dependents_chain() {
         let graph = WorkspaceDependencyGraph::from_edges(
-            member_set(&["a", "b", "c"]),
+            &member_set(&["a", "b", "c"]),
             &edges(&[("b", "a"), ("c", "b")]),
         );
 
@@ -211,7 +211,7 @@ mod tests {
     #[test]
     fn transitive_dependents_diamond() {
         let graph = WorkspaceDependencyGraph::from_edges(
-            member_set(&["core", "left", "right", "top"]),
+            &member_set(&["core", "left", "right", "top"]),
             &edges(&[
                 ("left", "core"),
                 ("right", "core"),
@@ -230,7 +230,7 @@ mod tests {
     #[test]
     fn transitive_dependents_of_set_excludes_input() {
         let graph = WorkspaceDependencyGraph::from_edges(
-            member_set(&["a", "b", "c", "d"]),
+            &member_set(&["a", "b", "c", "d"]),
             &edges(&[("b", "a"), ("c", "b"), ("d", "c")]),
         );
 
@@ -244,7 +244,7 @@ mod tests {
     #[test]
     fn transitive_dependents_of_set_deduplicates_shared_dependent() {
         let graph = WorkspaceDependencyGraph::from_edges(
-            member_set(&["a", "b", "shared"]),
+            &member_set(&["a", "b", "shared"]),
             &edges(&[("shared", "a"), ("shared", "b")]),
         );
 
@@ -256,7 +256,7 @@ mod tests {
     #[test]
     fn cycle_handling_terminates() {
         let graph = WorkspaceDependencyGraph::from_edges(
-            member_set(&["a", "b"]),
+            &member_set(&["a", "b"]),
             &edges(&[("a", "b"), ("b", "a")]),
         );
 
@@ -272,7 +272,7 @@ mod tests {
     #[test]
     fn cycle_three_nodes() {
         let graph = WorkspaceDependencyGraph::from_edges(
-            member_set(&["a", "b", "c"]),
+            &member_set(&["a", "b", "c"]),
             &edges(&[("a", "b"), ("b", "c"), ("c", "a")]),
         );
 
@@ -283,7 +283,7 @@ mod tests {
 
     #[test]
     fn unknown_package_returns_empty() {
-        let graph = WorkspaceDependencyGraph::from_edges(member_set(&["a"]), &[]);
+        let graph = WorkspaceDependencyGraph::from_edges(&member_set(&["a"]), &[]);
 
         assert!(graph.transitive_dependents("nonexistent").is_empty());
         assert!(graph.direct_dependencies("nonexistent").is_empty());
@@ -292,7 +292,7 @@ mod tests {
     #[test]
     fn from_edges_ignores_non_member_edges() {
         let graph = WorkspaceDependencyGraph::from_edges(
-            member_set(&["a", "b"]),
+            &member_set(&["a", "b"]),
             &edges(&[("a", "external"), ("external", "b")]),
         );
 

@@ -68,7 +68,7 @@ where
     ///
     /// Returns an error if the project cannot be discovered, has no packages, or
     /// if the changeset cannot be written.
-    pub fn execute(&self, start_path: &Path, input: AddInput) -> Result<AddResult> {
+    pub fn execute(&self, start_path: &Path, input: &AddInput) -> Result<AddResult> {
         let project = self.project_provider.discover_project(start_path)?;
 
         if project.packages().is_empty() {
@@ -104,7 +104,7 @@ where
         });
 
         let packages =
-            match self.select_packages(project.packages(), &input, display_labels.as_deref())? {
+            match self.select_packages(project.packages(), input, display_labels.as_deref())? {
                 Some(packages) if packages.is_empty() => return Ok(AddResult::NoPackages),
                 Some(packages) => packages,
                 None => return Ok(AddResult::Cancelled),
@@ -120,15 +120,15 @@ where
             Vec::new()
         };
 
-        let Some(releases) = self.collect_releases(&packages, &input)? else {
+        let Some(releases) = self.collect_releases(&packages, input)? else {
             return Ok(AddResult::Cancelled);
         };
 
-        let Some(category) = self.select_category(&input)? else {
+        let Some(category) = self.select_category(input)? else {
             return Ok(AddResult::Cancelled);
         };
 
-        let Some(desc) = self.get_description(&input)? else {
+        let Some(desc) = self.get_description(input)? else {
             return Ok(AddResult::Cancelled);
         };
 
@@ -354,7 +354,7 @@ mod tests {
         };
 
         let result = operation
-            .execute(Path::new("/any"), input)
+            .execute(Path::new("/any"), &input)
             .expect("AddOperation failed with valid single-package input");
 
         match result {
@@ -393,7 +393,7 @@ mod tests {
         };
 
         let result = operation
-            .execute(Path::new("/any"), input)
+            .execute(Path::new("/any"), &input)
             .expect("AddOperation failed with valid multi-package input");
 
         match result {
@@ -420,7 +420,7 @@ mod tests {
         let operation = AddOperation::new(project_provider, writer, interaction);
 
         let result = operation
-            .execute(Path::new("/any"), AddInput::default())
+            .execute(Path::new("/any"), &AddInput::default())
             .expect("AddOperation should not fail when interaction is cancelled");
 
         assert!(matches!(result, AddResult::Cancelled));
@@ -441,7 +441,7 @@ mod tests {
         let operation = AddOperation::new(project_provider, writer, interaction);
 
         let result = operation
-            .execute(Path::new("/any"), AddInput::default())
+            .execute(Path::new("/any"), &AddInput::default())
             .expect("AddOperation should not fail when bump selection is cancelled");
 
         assert!(matches!(result, AddResult::Cancelled));
@@ -462,7 +462,7 @@ mod tests {
             ..Default::default()
         };
 
-        let result = operation.execute(Path::new("/any"), input);
+        let result = operation.execute(Path::new("/any"), &input);
 
         assert!(result.is_err());
         let err = result.expect_err("AddOperation should fail for unknown package");
@@ -484,7 +484,7 @@ mod tests {
             ..Default::default()
         };
 
-        let result = operation.execute(Path::new("/any"), input);
+        let result = operation.execute(Path::new("/any"), &input);
 
         assert!(result.is_err());
         let err = result.expect_err("AddOperation should fail for empty description");
@@ -507,7 +507,7 @@ mod tests {
         let operation = AddOperation::new(project_provider, writer, interaction);
 
         let result = operation
-            .execute(Path::new("/any"), AddInput::default())
+            .execute(Path::new("/any"), &AddInput::default())
             .expect("AddOperation failed with interactive workspace selection");
 
         match result {
@@ -538,7 +538,7 @@ mod tests {
         };
 
         let result = operation
-            .execute(Path::new("/any"), input)
+            .execute(Path::new("/any"), &input)
             .expect("AddOperation failed for single-package auto-selection");
 
         match result {
@@ -568,7 +568,7 @@ mod tests {
         };
 
         let result = operation
-            .execute(Path::new("/any"), input)
+            .execute(Path::new("/any"), &input)
             .expect("AddOperation failed with explicit category");
 
         match result {
@@ -595,7 +595,7 @@ mod tests {
         };
 
         let result = operation
-            .execute(Path::new("/any"), input)
+            .execute(Path::new("/any"), &input)
             .expect("AddOperation failed to create changeset file");
 
         match result {
@@ -621,7 +621,7 @@ mod tests {
             ..Default::default()
         };
 
-        let result = operation.execute(Path::new("/any"), input);
+        let result = operation.execute(Path::new("/any"), &input);
 
         assert!(result.is_err());
         let err = result.expect_err("AddOperation should fail for none bump without description");
@@ -644,7 +644,7 @@ mod tests {
         };
 
         let result = operation
-            .execute(Path::new("/any"), input)
+            .execute(Path::new("/any"), &input)
             .expect("AddOperation should succeed for none bump with description");
 
         match result {
@@ -677,7 +677,7 @@ mod tests {
         };
 
         let result = operation
-            .execute(Path::new("/any"), input)
+            .execute(Path::new("/any"), &input)
             .expect("AddOperation should succeed with interactive description for none bump");
 
         match result {
@@ -710,7 +710,7 @@ mod tests {
         };
 
         let result = operation
-            .execute(Path::new("/any"), input)
+            .execute(Path::new("/any"), &input)
             .expect("AddOperation should succeed for mixed none/patch bumps with description");
 
         match result {
@@ -756,7 +756,7 @@ mod tests {
         };
 
         let result = operation
-            .execute(Path::new("/any"), input)
+            .execute(Path::new("/any"), &input)
             .expect("AddOperation should succeed with exclude_dependents");
 
         match result {
@@ -791,7 +791,7 @@ mod tests {
         };
 
         let result = operation
-            .execute(Path::new("/any"), input)
+            .execute(Path::new("/any"), &input)
             .expect("AddOperation should succeed and report uncovered dependents");
 
         match result {
@@ -823,7 +823,7 @@ mod tests {
         };
 
         let result = operation
-            .execute(Path::new("/any"), input)
+            .execute(Path::new("/any"), &input)
             .expect("AddOperation should succeed for single-package project");
 
         match result {

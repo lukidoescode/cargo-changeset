@@ -80,7 +80,7 @@ mod tests {
             .iter()
             .map(|&(a, b)| (a.to_string(), b.to_string()))
             .collect();
-        WorkspaceDependencyGraph::from_edges(member_set, &edge_vec)
+        WorkspaceDependencyGraph::from_edges(&member_set, &edge_vec)
     }
 
     #[test]

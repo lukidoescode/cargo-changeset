@@ -3,34 +3,162 @@ use std::path::PathBuf;
 
 use changeset_core::{Changeset, PackageInfo, PrereleaseSpec};
 use changeset_project::GraduationState;
-use derive_builder::Builder;
 use gset::Getset;
 use indexmap::IndexMap;
 use semver::Version;
 
 use crate::types::{PackageReleaseConfig, PackageVersion};
 
-#[derive(Builder, Getset, Default)]
-#[builder(default)]
-pub struct ReleaseInput {
-    #[getset(get_copy, vis = "pub")]
-    dry_run: bool,
-    #[getset(get_copy, vis = "pub")]
-    convert_inherited: bool,
-    #[getset(get_copy, vis = "pub")]
+#[derive(Default)]
+struct GitOverrideOptions {
     no_commit: bool,
-    #[getset(get_copy, vis = "pub")]
     no_tags: bool,
-    #[getset(get_copy, vis = "pub")]
+}
+
+#[derive(Default)]
+struct ChangesetHandlingOptions {
     keep_changesets: bool,
-    #[getset(get_copy, vis = "pub")]
+    convert_inherited: bool,
+}
+
+#[derive(Default)]
+pub struct ReleaseInput {
+    dry_run: bool,
     force: bool,
-    #[getset(get, vis = "pub")]
-    per_package_config: HashMap<String, PackageReleaseConfig>,
-    #[getset(get_as_ref, vis = "pub", ty = "Option<&PrereleaseSpec>")]
-    global_prerelease: Option<PrereleaseSpec>,
-    #[getset(get_copy, vis = "pub")]
     graduate_all: bool,
+    git_overrides: GitOverrideOptions,
+    changeset_handling: ChangesetHandlingOptions,
+    per_package_config: HashMap<String, PackageReleaseConfig>,
+    global_prerelease: Option<PrereleaseSpec>,
+}
+
+impl ReleaseInput {
+    #[must_use]
+    pub fn dry_run(&self) -> bool {
+        self.dry_run
+    }
+
+    #[must_use]
+    pub fn force(&self) -> bool {
+        self.force
+    }
+
+    #[must_use]
+    pub fn graduate_all(&self) -> bool {
+        self.graduate_all
+    }
+
+    #[must_use]
+    pub fn no_commit(&self) -> bool {
+        self.git_overrides.no_commit
+    }
+
+    #[must_use]
+    pub fn no_tags(&self) -> bool {
+        self.git_overrides.no_tags
+    }
+
+    #[must_use]
+    pub fn keep_changesets(&self) -> bool {
+        self.changeset_handling.keep_changesets
+    }
+
+    #[must_use]
+    pub fn convert_inherited(&self) -> bool {
+        self.changeset_handling.convert_inherited
+    }
+
+    #[must_use]
+    pub fn per_package_config(&self) -> &HashMap<String, PackageReleaseConfig> {
+        &self.per_package_config
+    }
+
+    #[must_use]
+    pub fn global_prerelease(&self) -> Option<&PrereleaseSpec> {
+        self.global_prerelease.as_ref()
+    }
+}
+
+#[derive(Default)]
+pub struct ReleaseInputBuilder {
+    dry_run: bool,
+    force: bool,
+    graduate_all: bool,
+    git_overrides: GitOverrideOptions,
+    changeset_handling: ChangesetHandlingOptions,
+    per_package_config: HashMap<String, PackageReleaseConfig>,
+    global_prerelease: Option<PrereleaseSpec>,
+}
+
+impl ReleaseInputBuilder {
+    #[must_use]
+    pub fn dry_run(mut self, value: bool) -> Self {
+        self.dry_run = value;
+        self
+    }
+
+    #[must_use]
+    pub fn force(mut self, value: bool) -> Self {
+        self.force = value;
+        self
+    }
+
+    #[must_use]
+    pub fn graduate_all(mut self, value: bool) -> Self {
+        self.graduate_all = value;
+        self
+    }
+
+    #[must_use]
+    pub fn no_commit(mut self, value: bool) -> Self {
+        self.git_overrides.no_commit = value;
+        self
+    }
+
+    #[must_use]
+    pub fn no_tags(mut self, value: bool) -> Self {
+        self.git_overrides.no_tags = value;
+        self
+    }
+
+    #[must_use]
+    pub fn keep_changesets(mut self, value: bool) -> Self {
+        self.changeset_handling.keep_changesets = value;
+        self
+    }
+
+    #[must_use]
+    pub fn convert_inherited(mut self, value: bool) -> Self {
+        self.changeset_handling.convert_inherited = value;
+        self
+    }
+
+    #[must_use]
+    pub fn per_package_config(mut self, value: HashMap<String, PackageReleaseConfig>) -> Self {
+        self.per_package_config = value;
+        self
+    }
+
+    #[must_use]
+    pub fn global_prerelease(mut self, value: Option<PrereleaseSpec>) -> Self {
+        self.global_prerelease = value;
+        self
+    }
+
+    /// # Errors
+    ///
+    /// Currently infallible; returns `Err` only for API compatibility.
+    pub fn build(self) -> Result<ReleaseInput, String> {
+        Ok(ReleaseInput {
+            dry_run: self.dry_run,
+            force: self.force,
+            graduate_all: self.graduate_all,
+            git_overrides: self.git_overrides,
+            changeset_handling: self.changeset_handling,
+            per_package_config: self.per_package_config,
+            global_prerelease: self.global_prerelease,
+        })
+    }
 }
 
 #[derive(Debug, Clone, Getset)]
@@ -161,10 +289,11 @@ pub enum ReleaseOutcome {
     NoChangesets,
 }
 
-pub(super) struct GitOptions {
-    pub(super) should_commit: bool,
-    pub(super) should_create_tags: bool,
-    pub(super) should_delete_changesets: bool,
+#[derive(Debug, Clone, Copy, Default)]
+pub(crate) struct GitOptions {
+    pub(crate) should_commit: bool,
+    pub(crate) should_create_tags: bool,
+    pub(crate) should_delete_changesets: bool,
 }
 
 pub(super) enum PrepareResult {
@@ -172,11 +301,11 @@ pub(super) enum PrepareResult {
     EarlyReturn(ReleaseOutcome),
 }
 
-#[derive(Debug, Clone, Copy)]
-pub(super) struct ReleaseClassification {
-    pub(super) is_prerelease_graduation: bool,
-    pub(super) is_graduating: bool,
-    pub(super) is_prerelease_release: bool,
+#[derive(Debug, Clone, Copy, Default)]
+pub(crate) struct ReleaseClassification {
+    pub(crate) is_prerelease_graduation: bool,
+    pub(crate) is_graduating: bool,
+    pub(crate) is_prerelease_release: bool,
 }
 
 pub(super) struct ReleaseContext {
