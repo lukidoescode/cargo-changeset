@@ -286,7 +286,7 @@ where
         ctx: &Self::Context,
         mut input: Self::Input,
     ) -> Result<Self::Output, Self::Error> {
-        if !input.should_commit {
+        if !input.git_options.should_commit {
             return Ok(input);
         }
 
@@ -336,7 +336,7 @@ where
         ctx: &Self::Context,
         mut input: Self::Input,
     ) -> Result<Self::Output, Self::Error> {
-        if input.is_prerelease_release && !input.changeset_files.is_empty() {
+        if input.classification.is_prerelease_release && !input.changeset_files.is_empty() {
             if let Some(first_release) = input.planned_releases.first() {
                 let paths_refs: Vec<&Path> = input
                     .changeset_files
@@ -348,7 +348,7 @@ where
                     &paths_refs,
                     first_release.new_version(),
                 )?;
-                input.changesets_consumed = true;
+                input.consumed_state = super::saga_data::ChangesetConsumedState::Consumed;
             }
         }
         Ok(input)
@@ -356,9 +356,9 @@ where
 
     fn compensate(&self, ctx: &Self::Context, input: Self::Input) -> Result<(), Self::Error> {
         // Check the same conditions as execute() to determine if we would have marked
-        // changesets as consumed. We cannot rely on input.changesets_consumed because
+        // changesets as consumed. We cannot rely on input.consumed_state because
         // compensate receives the original input, not the modified output.
-        if input.is_prerelease_release && !input.changeset_files.is_empty() {
+        if input.classification.is_prerelease_release && !input.changeset_files.is_empty() {
             let files_to_clear: Vec<&Path> = input
                 .changeset_files
                 .iter()
@@ -403,7 +403,7 @@ where
         ctx: &Self::Context,
         mut input: Self::Input,
     ) -> Result<Self::Output, Self::Error> {
-        if input.is_graduating {
+        if input.classification.is_graduating {
             let consumed_paths = ctx
                 .changeset_rw()
                 .list_consumed_changesets(&input.changeset_dir)?;
@@ -422,7 +422,7 @@ where
                 let paths_refs: Vec<&Path> = consumed_paths.iter().map(AsRef::as_ref).collect();
                 ctx.changeset_rw()
                     .clear_consumed_for_prerelease(&input.changeset_dir, &paths_refs)?;
-                input.consumed_cleared = true;
+                input.consumed_state = super::saga_data::ChangesetConsumedState::Cleared;
                 input.consumed_files_cleared = consumed_files;
             }
         }
@@ -479,9 +479,9 @@ where
         ctx: &Self::Context,
         mut input: Self::Input,
     ) -> Result<Self::Output, Self::Error> {
-        let should_delete = input.should_delete_changesets
-            && !input.is_prerelease_release
-            && !input.is_prerelease_graduation;
+        let should_delete = input.git_options.should_delete_changesets
+            && !input.classification.is_prerelease_release
+            && !input.classification.is_prerelease_graduation;
 
         if should_delete && !input.changeset_files.is_empty() {
             for file_state in &mut input.changeset_files {
@@ -543,7 +543,7 @@ where
         ctx: &Self::Context,
         mut input: Self::Input,
     ) -> Result<Self::Output, Self::Error> {
-        if !input.should_commit {
+        if !input.git_options.should_commit {
             return Ok(input);
         }
 
@@ -665,7 +665,7 @@ where
         ctx: &Self::Context,
         mut input: Self::Input,
     ) -> Result<Self::Output, Self::Error> {
-        if !input.should_commit || !input.files_were_staged {
+        if !input.git_options.should_commit || !input.files_were_staged {
             return Ok(input);
         }
 
@@ -681,7 +681,7 @@ where
     }
 
     fn compensate(&self, ctx: &Self::Context, input: Self::Input) -> Result<(), Self::Error> {
-        if input.should_commit {
+        if input.git_options.should_commit {
             ctx.git_provider().reset_to_parent(ctx.project_root())?;
         }
         Ok(())
@@ -740,7 +740,7 @@ where
         ctx: &Self::Context,
         mut input: Self::Input,
     ) -> Result<Self::Output, Self::Error> {
-        if !input.should_create_tags || input.commit_result.is_none() {
+        if !input.git_options.should_create_tags || input.commit_result.is_none() {
             return Ok(input);
         }
 
@@ -779,7 +779,7 @@ where
     }
 
     fn compensate(&self, ctx: &Self::Context, input: Self::Input) -> Result<(), Self::Error> {
-        if !input.should_create_tags {
+        if !input.git_options.should_create_tags {
             return Ok(());
         }
 
@@ -928,6 +928,7 @@ mod tests {
         MockReleaseStateIO,
     };
     use crate::operations::release::saga_data::SagaReleaseOptions;
+    use crate::operations::release::types::{GitOptions, ReleaseClassification};
     use crate::types::PackageVersion;
 
     type TestContext = ReleaseSagaContext<
@@ -980,12 +981,16 @@ mod tests {
             Vec::new(),
         )
         .with_options(SagaReleaseOptions {
-            is_prerelease_release: false,
-            is_graduating: false,
-            is_prerelease_graduation: false,
-            should_commit: true,
-            should_create_tags: true,
-            should_delete_changesets: true,
+            classification: ReleaseClassification {
+                is_prerelease_release: false,
+                is_graduating: false,
+                is_prerelease_graduation: false,
+            },
+            git_options: GitOptions {
+                should_commit: true,
+                should_create_tags: true,
+                should_delete_changesets: true,
+            },
         })
     }
 
@@ -1288,7 +1293,7 @@ mod tests {
             MockChangelogWriter,
         > = UpdateLockfileStep::new();
         let mut input = make_test_data();
-        input.should_commit = false;
+        input.git_options.should_commit = false;
 
         let result = SagaStep::execute(&step, &ctx, input)?;
 
@@ -1578,12 +1583,16 @@ mod tests {
             Vec::new(),
         )
         .with_options(SagaReleaseOptions {
-            is_prerelease_release: false,
-            is_graduating: false,
-            is_prerelease_graduation: false,
-            should_commit: true,
-            should_create_tags: true,
-            should_delete_changesets: true,
+            classification: ReleaseClassification {
+                is_prerelease_release: false,
+                is_graduating: false,
+                is_prerelease_graduation: false,
+            },
+            git_options: GitOptions {
+                should_commit: true,
+                should_create_tags: true,
+                should_delete_changesets: true,
+            },
         });
         input.commit_result = Some(CommitResult::new(
             "abc123".to_string(),
@@ -1657,12 +1666,16 @@ mod tests {
             Vec::new(),
         )
         .with_options(SagaReleaseOptions {
-            is_prerelease_release: false,
-            is_graduating: false,
-            is_prerelease_graduation: false,
-            should_commit: true,
-            should_create_tags: true,
-            should_delete_changesets: true,
+            classification: ReleaseClassification {
+                is_prerelease_release: false,
+                is_graduating: false,
+                is_prerelease_graduation: false,
+            },
+            git_options: GitOptions {
+                should_commit: true,
+                should_create_tags: true,
+                should_delete_changesets: true,
+            },
         });
         input.commit_result = Some(CommitResult::new(
             "abc123".to_string(),
@@ -2027,7 +2040,7 @@ mod tests {
                 .build();
 
             let mut input = make_test_data();
-            input.is_graduating = true;
+            input.classification.is_graduating = true;
             input.consumed_files_cleared = vec![ChangesetFileState {
                 path: changeset_path.clone(),
                 original_consumed_status: Some("1.0.1-alpha.1".to_string()),
@@ -2102,7 +2115,7 @@ mod tests {
                 .build();
 
             let mut input = make_test_data();
-            input.is_prerelease_release = true;
+            input.classification.is_prerelease_release = true;
             input.changeset_files = vec![ChangesetFileState {
                 path: changeset_path.clone(),
                 original_consumed_status: None,

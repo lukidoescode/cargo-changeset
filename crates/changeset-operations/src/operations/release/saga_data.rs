@@ -5,18 +5,22 @@ use indexmap::IndexMap;
 use semver::Version;
 
 use super::steps::{GraduationStateUpdate, PrereleaseStateUpdate};
-use super::types::{ChangelogFileState, ChangesetFileState};
+use super::types::{ChangelogFileState, ChangesetFileState, GitOptions, ReleaseClassification};
 use super::{ChangelogUpdate, CommitResult, GitOperationResult, TagResult};
 use crate::types::PackageVersion;
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Copy, Default)]
 pub struct SagaReleaseOptions {
-    pub is_prerelease_release: bool,
-    pub is_graduating: bool,
-    pub is_prerelease_graduation: bool,
-    pub should_commit: bool,
-    pub should_create_tags: bool,
-    pub should_delete_changesets: bool,
+    pub classification: ReleaseClassification,
+    pub git_options: GitOptions,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(super) enum ChangesetConsumedState {
+    #[default]
+    NotConsumed,
+    Consumed,
+    Cleared,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -29,12 +33,8 @@ pub struct ReleaseSagaData {
     pub package_paths: IndexMap<String, PathBuf>,
     pub changelog_updates: Vec<ChangelogUpdate>,
 
-    pub is_prerelease_release: bool,
-    pub is_graduating: bool,
-    pub is_prerelease_graduation: bool,
-    pub should_commit: bool,
-    pub should_create_tags: bool,
-    pub should_delete_changesets: bool,
+    pub classification: ReleaseClassification,
+    pub git_options: GitOptions,
 
     pub prerelease_state_update: Option<PrereleaseStateUpdate>,
     pub graduation_state_update: Option<GraduationStateUpdate>,
@@ -57,8 +57,7 @@ pub struct ReleaseSagaData {
     pub tags_created: Vec<TagResult>,
 
     pub changesets_deleted: Vec<PathBuf>,
-    pub changesets_consumed: bool,
-    pub consumed_cleared: bool,
+    pub consumed_state: ChangesetConsumedState,
     pub consumed_files_cleared: Vec<ChangesetFileState>,
 
     pub changelog_backups: Vec<ChangelogFileState>,
@@ -111,12 +110,8 @@ impl ReleaseSagaData {
     }
 
     pub fn with_options(mut self, options: SagaReleaseOptions) -> Self {
-        self.is_prerelease_release = options.is_prerelease_release;
-        self.is_graduating = options.is_graduating;
-        self.is_prerelease_graduation = options.is_prerelease_graduation;
-        self.should_commit = options.should_commit;
-        self.should_create_tags = options.should_create_tags;
-        self.should_delete_changesets = options.should_delete_changesets;
+        self.classification = options.classification;
+        self.git_options = options.git_options;
         self
     }
 

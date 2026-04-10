@@ -370,12 +370,8 @@ where
             context.changeset_files.clone(),
         )
         .with_options(SagaReleaseOptions {
-            is_prerelease_release: context.classification.is_prerelease_release,
-            is_graduating: context.classification.is_graduating,
-            is_prerelease_graduation: context.classification.is_prerelease_graduation,
-            should_commit: context.git_options.should_commit,
-            should_create_tags: context.git_options.should_create_tags,
-            should_delete_changesets: context.git_options.should_delete_changesets,
+            classification: context.classification,
+            git_options: context.git_options,
         })
         .with_inherited_packages(context.inherited_packages.clone())
         .with_prerelease_state(context.prerelease_state.as_ref())

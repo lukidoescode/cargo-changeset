@@ -170,7 +170,7 @@ impl DependencyGraphProvider for MockProjectProvider {
             .map(|p| p.name().clone())
             .collect();
         Ok(WorkspaceDependencyGraph::from_edges(
-            member_names,
+            &member_names,
             &self.dependency_edges,
         ))
     }
@@ -414,6 +414,20 @@ impl ChangesetWriter for MockChangesetWriter {
     }
 }
 
+#[derive(Clone, Copy)]
+enum TagFailMode {
+    Never,
+    Always,
+    OnNth(usize),
+}
+
+struct MockFailureFlags {
+    commit: bool,
+    stage_files: bool,
+    is_clean: bool,
+    create_tag: TagFailMode,
+}
+
 struct MockGitState {
     staged_files: Vec<PathBuf>,
     commits: Vec<String>,
@@ -421,11 +435,7 @@ struct MockGitState {
     deleted_files: Vec<PathBuf>,
     deleted_tags: Vec<String>,
     reset_count: usize,
-    fail_on_commit: bool,
-    fail_on_create_tag: bool,
-    fail_on_create_tag_nth: Option<usize>,
-    fail_on_stage_files: bool,
-    fail_on_is_clean: bool,
+    failure_flags: MockFailureFlags,
 }
 
 pub struct MockGitProvider {
@@ -453,11 +463,12 @@ impl MockGitProvider {
                 deleted_files: Vec::new(),
                 deleted_tags: Vec::new(),
                 reset_count: 0,
-                fail_on_commit: false,
-                fail_on_create_tag: false,
-                fail_on_create_tag_nth: None,
-                fail_on_stage_files: false,
-                fail_on_is_clean: false,
+                failure_flags: MockFailureFlags {
+                    commit: false,
+                    stage_files: false,
+                    is_clean: false,
+                    create_tag: TagFailMode::Never,
+                },
             }),
         }
     }
@@ -539,29 +550,47 @@ impl MockGitProvider {
     }
 
     pub fn set_fail_on_commit(&self, fail: bool) {
-        self.state.lock().expect("lock poisoned").fail_on_commit = fail;
+        self.state
+            .lock()
+            .expect("lock poisoned")
+            .failure_flags
+            .commit = fail;
     }
 
     pub fn set_fail_on_create_tag(&self, fail: bool) {
-        self.state.lock().expect("lock poisoned").fail_on_create_tag = fail;
+        self.state
+            .lock()
+            .expect("lock poisoned")
+            .failure_flags
+            .create_tag = if fail {
+            TagFailMode::Always
+        } else {
+            TagFailMode::Never
+        };
     }
 
     pub fn set_fail_on_create_tag_nth(&self, n: usize) {
         self.state
             .lock()
             .expect("lock poisoned")
-            .fail_on_create_tag_nth = Some(n);
+            .failure_flags
+            .create_tag = TagFailMode::OnNth(n);
     }
 
     pub fn set_fail_on_stage_files(&self, fail: bool) {
         self.state
             .lock()
             .expect("lock poisoned")
-            .fail_on_stage_files = fail;
+            .failure_flags
+            .stage_files = fail;
     }
 
     pub fn set_fail_on_is_clean(&self, fail: bool) {
-        self.state.lock().expect("lock poisoned").fail_on_is_clean = fail;
+        self.state
+            .lock()
+            .expect("lock poisoned")
+            .failure_flags
+            .is_clean = fail;
     }
 }
 
@@ -590,7 +619,13 @@ impl GitWorkdirDiffProvider for MockGitProvider {
 
 impl GitStatusProvider for MockGitProvider {
     fn is_working_tree_clean(&self, _project_root: &Path) -> Result<bool> {
-        if self.state.lock().expect("lock poisoned").fail_on_is_clean {
+        if self
+            .state
+            .lock()
+            .expect("lock poisoned")
+            .failure_flags
+            .is_clean
+        {
             return Err(crate::OperationError::Io(std::io::Error::other(
                 "mock is_working_tree_clean failure",
             )));
@@ -610,7 +645,7 @@ impl GitStatusProvider for MockGitProvider {
 impl GitStagingProvider for MockGitProvider {
     fn stage_files(&self, _project_root: &Path, paths: &[&Path]) -> Result<()> {
         let mut state = self.state.lock().expect("lock poisoned");
-        if state.fail_on_stage_files {
+        if state.failure_flags.stage_files {
             return Err(crate::OperationError::Io(std::io::Error::other(
                 "mock stage files failure",
             )));
@@ -634,7 +669,7 @@ impl GitStagingProvider for MockGitProvider {
 impl GitCommitProvider for MockGitProvider {
     fn commit(&self, _project_root: &Path, message: &str) -> Result<CommitInfo> {
         let mut state = self.state.lock().expect("lock poisoned");
-        if state.fail_on_commit {
+        if state.failure_flags.commit {
             return Err(crate::OperationError::Io(std::io::Error::other(
                 "mock commit failure",
             )));
@@ -655,21 +690,16 @@ impl GitCommitProvider for MockGitProvider {
 impl GitTagProvider for MockGitProvider {
     fn create_tag(&self, _project_root: &Path, tag_name: &str, message: &str) -> Result<TagInfo> {
         let mut state = self.state.lock().expect("lock poisoned");
-        if state.fail_on_create_tag {
+        let should_fail = match state.failure_flags.create_tag {
+            TagFailMode::Never => false,
+            TagFailMode::Always => true,
+            TagFailMode::OnNth(n) => state.tags_created.len() == n,
+        };
+        if should_fail {
             return Err(crate::OperationError::Io(std::io::Error::other(
                 "mock create tag failure",
             )));
         }
-
-        let current_count = state.tags_created.len();
-        if let Some(n) = state.fail_on_create_tag_nth {
-            if current_count == n {
-                return Err(crate::OperationError::Io(std::io::Error::other(
-                    "mock create tag failure (nth)",
-                )));
-            }
-        }
-
         state
             .tags_created
             .push((tag_name.to_string(), message.to_string()));
