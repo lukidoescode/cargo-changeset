@@ -97,6 +97,9 @@ pub(crate) fn run(args: InitArgs, start_path: &Path) -> Result<()> {
         }
     }
 
+    println!();
+    println!("Tip: Use 'cargo changeset additional-packages add' to declare non-Rust packages.");
+
     Ok(())
 }
 

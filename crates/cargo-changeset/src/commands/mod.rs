@@ -1,4 +1,5 @@
 mod add;
+mod additional_packages;
 mod init;
 mod manage;
 mod release;
@@ -352,6 +353,9 @@ Use 'cargo changeset manage' to configure these files."
     Init(InitArgs),
     /// Manage release configuration files
     Manage(ManageArgs),
+    /// Manage non-Rust package declarations in Cargo.toml metadata
+    #[command(name = "additional-packages")]
+    AdditionalPackages(additional_packages::AdditionalPackagesArgs),
 }
 
 impl Commands {
@@ -370,6 +374,10 @@ impl Commands {
             Self::Init(args) => (init::run(args, start_path), ExecuteResult { quiet: false }),
             Self::Manage(args) => (
                 manage::run(args, start_path),
+                ExecuteResult { quiet: false },
+            ),
+            Self::AdditionalPackages(args) => (
+                additional_packages::run(args, start_path),
                 ExecuteResult { quiet: false },
             ),
         }

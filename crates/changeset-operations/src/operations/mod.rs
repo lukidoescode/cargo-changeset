@@ -1,4 +1,5 @@
 mod add;
+mod additional_packages;
 mod changelog_aggregation;
 mod init;
 mod manage;
@@ -8,6 +9,13 @@ mod verify;
 
 pub use crate::planner::{ReleasePlan, VersionPlanner};
 pub use add::{AddInput, AddOperation, AddResult};
+pub use additional_packages::{
+    AdditionalPackageAddInput, AdditionalPackageDirectAddOperation,
+    AdditionalPackageDirectEditOperation, AdditionalPackageDirectRemoveOperation,
+    AdditionalPackageEditInput, AdditionalPackageEvent, AdditionalPackageInteractiveAddOperation,
+    AdditionalPackageInteractiveEditOperation, AdditionalPackageInteractiveRemoveOperation,
+    AdditionalPackageListOperation, AdditionalPackageSummaryData,
+};
 pub use init::{
     InitInput, InitInputBuilder, InitOperation, InitOutput, InitPlan, build_config_from_input,
 };

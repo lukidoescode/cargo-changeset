@@ -52,6 +52,17 @@ pub struct AdditionalPackageManifest {
     version_path: String,
 }
 
+impl AdditionalPackageManifest {
+    #[must_use]
+    pub fn new(file_path: PathBuf, format: ManifestFormat, version_path: String) -> Self {
+        Self {
+            file_path,
+            format,
+            version_path,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Getset)]
 #[serde(rename_all = "kebab-case")]
 pub struct AdditionalPackageDeclaration {
@@ -63,6 +74,23 @@ pub struct AdditionalPackageDeclaration {
     influence: Vec<String>,
     #[getset(get, vis = "pub")]
     manifest: AdditionalPackageManifest,
+}
+
+impl AdditionalPackageDeclaration {
+    #[must_use]
+    pub fn new(
+        name: String,
+        path: PathBuf,
+        influence: Vec<String>,
+        manifest: AdditionalPackageManifest,
+    ) -> Self {
+        Self {
+            name,
+            path,
+            influence,
+            manifest,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, ValueEnum)]

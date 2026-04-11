@@ -1,9 +1,14 @@
+mod additional_packages;
 mod config;
 mod error;
 mod external;
 mod reader;
 mod writer;
 
+pub use additional_packages::{
+    AdditionalPackageUpdate, add_additional_package, remove_additional_package,
+    update_additional_package,
+};
 pub use config::{
     ChangelogLocation, ComparisonLinks, InitConfig, MetadataSection, NoneBumpBehavior, TagFormat,
     ZeroVersionBehavior,

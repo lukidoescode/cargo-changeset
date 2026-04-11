@@ -1,15 +1,15 @@
 use std::path::Path;
 use std::process::Command;
 
-use changeset_core::ManifestFormat;
-use changeset_manifest::{InitConfig, MetadataSection};
+use changeset_core::{AdditionalPackageDeclaration, ManifestFormat};
+use changeset_manifest::{AdditionalPackageUpdate, InitConfig, MetadataSection};
 use semver::Version;
 
 use crate::Result;
 use crate::error::OperationError;
 use crate::traits::{
-    ExternalManifestVersionWriter, InheritedVersionChecker, LockfileUpdater,
-    ManifestDependencyWriter, ManifestMetadataWriter, ManifestVersionWriter,
+    AdditionalPackageConfigWriter, ExternalManifestVersionWriter, InheritedVersionChecker,
+    LockfileUpdater, ManifestDependencyWriter, ManifestMetadataWriter, ManifestVersionWriter,
     WorkspaceVersionManager,
 };
 
@@ -185,6 +185,49 @@ impl ManifestMetadataWriter for FileSystemManifestWriter {
             manifest_path,
             section,
             config,
+        )?)
+    }
+}
+
+impl AdditionalPackageConfigWriter for FileSystemManifestWriter {
+    fn add_additional_package(
+        &self,
+        manifest_path: &Path,
+        section: MetadataSection,
+        declaration: &AdditionalPackageDeclaration,
+    ) -> Result<()> {
+        Ok(changeset_manifest::add_additional_package(
+            manifest_path,
+            section,
+            declaration,
+        )?)
+    }
+
+    fn remove_additional_package(
+        &self,
+        manifest_path: &Path,
+        section: MetadataSection,
+        name: &str,
+    ) -> Result<bool> {
+        Ok(changeset_manifest::remove_additional_package(
+            manifest_path,
+            section,
+            name,
+        )?)
+    }
+
+    fn update_additional_package(
+        &self,
+        manifest_path: &Path,
+        section: MetadataSection,
+        name: &str,
+        updates: &AdditionalPackageUpdate,
+    ) -> Result<bool> {
+        Ok(changeset_manifest::update_additional_package(
+            manifest_path,
+            section,
+            name,
+            updates,
         )?)
     }
 }

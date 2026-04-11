@@ -3,9 +3,11 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, RwLock};
 
 use changeset_changelog::{RepositoryInfo, VersionRelease};
-use changeset_core::{BumpType, ChangeCategory, Changeset, ManifestFormat, PackageInfo};
+use changeset_core::{
+    AdditionalPackageDeclaration, BumpType, ChangeCategory, Changeset, ManifestFormat, PackageInfo,
+};
 use changeset_git::{CommitInfo, FileChange, TagInfo};
-use changeset_manifest::{InitConfig, MetadataSection};
+use changeset_manifest::{AdditionalPackageUpdate, InitConfig, MetadataSection};
 use changeset_project::{
     CargoProject, GraduationState, PackageChangesetConfig, PrereleaseState, ProjectKind,
     RootChangesetConfig, WorkspaceDependencyGraph,
@@ -14,6 +16,7 @@ use semver::Version;
 
 use crate::Result;
 use crate::traits::{
+    AdditionalPackageConfigWriter, AdditionalPackageField, AdditionalPackageInteractionProvider,
     BumpSelection, CategorySelection, ChangelogSettingsInput, ChangelogWriteResult,
     ChangelogWriter, ChangesetReader, ChangesetWriter, DependencyGraphProvider, DescriptionInput,
     ExternalManifestVersionWriter, FilteringSettingsInput, GitCommitProvider, GitDiffProvider,
@@ -1718,6 +1721,131 @@ impl_arc_delegation! {
         fn select_graduation_action(&self) -> Result<MenuSelection<GraduationAction>>;
         fn select_package_for_graduation(&self, eligible: &[&PackageInfo]) -> Result<MenuSelection<usize>>;
         fn select_package_to_remove_graduation(&self, items: &[String]) -> Result<MenuSelection<usize>>;
+    }
+}
+
+pub struct MockAdditionalPackageConfigWriter {
+    pub add_result: bool,
+    pub remove_result: bool,
+    pub update_result: Option<bool>,
+}
+
+impl MockAdditionalPackageConfigWriter {
+    #[must_use]
+    pub fn new() -> Self {
+        Self {
+            add_result: true,
+            remove_result: true,
+            update_result: Some(true),
+        }
+    }
+}
+
+impl Default for MockAdditionalPackageConfigWriter {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl AdditionalPackageConfigWriter for MockAdditionalPackageConfigWriter {
+    fn add_additional_package(
+        &self,
+        _manifest_path: &Path,
+        _section: MetadataSection,
+        _declaration: &AdditionalPackageDeclaration,
+    ) -> Result<()> {
+        if self.add_result {
+            Ok(())
+        } else {
+            Err(crate::OperationError::Cancelled)
+        }
+    }
+
+    fn remove_additional_package(
+        &self,
+        _manifest_path: &Path,
+        _section: MetadataSection,
+        _name: &str,
+    ) -> Result<bool> {
+        if self.remove_result {
+            Ok(true)
+        } else {
+            Err(crate::OperationError::Cancelled)
+        }
+    }
+
+    fn update_additional_package(
+        &self,
+        _manifest_path: &Path,
+        _section: MetadataSection,
+        _name: &str,
+        _updates: &AdditionalPackageUpdate,
+    ) -> Result<bool> {
+        match self.update_result {
+            Some(v) => Ok(v),
+            None => Err(crate::OperationError::Cancelled),
+        }
+    }
+}
+
+pub struct MockAdditionalPackageInteractionProvider {
+    pub package_name: String,
+    pub package_path: PathBuf,
+    pub influence_patterns: Vec<String>,
+    pub manifest_file_path: PathBuf,
+    pub manifest_format: ManifestFormat,
+    pub manifest_version_path: String,
+    pub select_remove_result: MenuSelection<usize>,
+    pub select_edit_result: MenuSelection<usize>,
+    pub select_field_result: MenuSelection<AdditionalPackageField>,
+    pub confirm_removal_result: bool,
+}
+
+impl AdditionalPackageInteractionProvider for MockAdditionalPackageInteractionProvider {
+    fn prompt_package_name(&self) -> Result<String> {
+        Ok(self.package_name.clone())
+    }
+
+    fn prompt_package_path(&self) -> Result<PathBuf> {
+        Ok(self.package_path.clone())
+    }
+
+    fn prompt_influence_patterns(&self) -> Result<Vec<String>> {
+        Ok(self.influence_patterns.clone())
+    }
+
+    fn prompt_manifest_file_path(&self) -> Result<PathBuf> {
+        Ok(self.manifest_file_path.clone())
+    }
+
+    fn prompt_manifest_format(&self) -> Result<ManifestFormat> {
+        Ok(self.manifest_format)
+    }
+
+    fn prompt_manifest_version_path(&self) -> Result<String> {
+        Ok(self.manifest_version_path.clone())
+    }
+
+    fn select_package_to_remove(
+        &self,
+        _packages: &[&AdditionalPackageDeclaration],
+    ) -> Result<MenuSelection<usize>> {
+        Ok(self.select_remove_result.clone())
+    }
+
+    fn select_package_to_edit(
+        &self,
+        _packages: &[&AdditionalPackageDeclaration],
+    ) -> Result<MenuSelection<usize>> {
+        Ok(self.select_edit_result.clone())
+    }
+
+    fn select_field_to_edit(&self) -> Result<MenuSelection<AdditionalPackageField>> {
+        Ok(self.select_field_result.clone())
+    }
+
+    fn confirm_removal(&self, _name: &str) -> Result<bool> {
+        Ok(self.confirm_removal_result)
     }
 }
 

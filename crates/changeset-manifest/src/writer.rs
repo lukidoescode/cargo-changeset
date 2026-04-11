@@ -1,7 +1,7 @@
 use std::path::Path;
 
 use semver::Version;
-use toml_edit::{Item, Table, value};
+use toml_edit::{DocumentMut, Item, Table, value};
 
 use crate::config::{InitConfig, MetadataSection};
 use crate::error::ManifestError;
@@ -143,48 +143,7 @@ pub fn write_metadata_section(
 
     let mut doc = read_document(path)?;
 
-    let root_key = match section {
-        MetadataSection::Workspace => "workspace",
-        MetadataSection::Package => "package",
-    };
-
-    let root = doc
-        .entry(root_key)
-        .or_insert_with(|| Item::Table(Table::new()));
-
-    let root_table = root
-        .as_table_mut()
-        .ok_or_else(|| ManifestError::InvalidSectionType {
-            path: path.to_path_buf(),
-            section: root_key.to_string(),
-        })?;
-
-    let metadata = root_table
-        .entry("metadata")
-        .or_insert_with(|| Item::Table(Table::new()));
-
-    let metadata_table =
-        metadata
-            .as_table_mut()
-            .ok_or_else(|| ManifestError::InvalidSectionType {
-                path: path.to_path_buf(),
-                section: format!("{root_key}.metadata"),
-            })?;
-
-    let changeset = metadata_table
-        .entry("changeset")
-        .or_insert_with(|| Item::Table(Table::new()));
-
-    let changeset_table =
-        changeset
-            .as_table_mut()
-            .ok_or_else(|| ManifestError::InvalidSectionType {
-                path: path.to_path_buf(),
-                section: format!("{root_key}.metadata.changeset"),
-            })?;
-
-    changeset_table.set_implicit(true);
-
+    let changeset_table = navigate_to_changeset_table(&mut doc, section, path)?;
     populate_changeset_table(changeset_table, config);
 
     std::fs::write(path, doc.to_string()).map_err(|source| ManifestError::Write {
@@ -257,6 +216,56 @@ fn update_dep_entry(deps: &mut Item, dep_name: &str, new_version: &Version) -> b
     }
 
     false
+}
+
+pub(crate) fn navigate_to_changeset_table<'a>(
+    doc: &'a mut DocumentMut,
+    section: MetadataSection,
+    path: &Path,
+) -> Result<&'a mut Table, ManifestError> {
+    let root_key = match section {
+        MetadataSection::Workspace => "workspace",
+        MetadataSection::Package => "package",
+    };
+
+    let root = doc
+        .entry(root_key)
+        .or_insert_with(|| Item::Table(Table::new()));
+
+    let root_table = root
+        .as_table_mut()
+        .ok_or_else(|| ManifestError::InvalidSectionType {
+            path: path.to_path_buf(),
+            section: root_key.to_string(),
+        })?;
+
+    let metadata = root_table
+        .entry("metadata")
+        .or_insert_with(|| Item::Table(Table::new()));
+
+    let metadata_table =
+        metadata
+            .as_table_mut()
+            .ok_or_else(|| ManifestError::InvalidSectionType {
+                path: path.to_path_buf(),
+                section: format!("{root_key}.metadata"),
+            })?;
+
+    let changeset = metadata_table
+        .entry("changeset")
+        .or_insert_with(|| Item::Table(Table::new()));
+
+    let changeset_table =
+        changeset
+            .as_table_mut()
+            .ok_or_else(|| ManifestError::InvalidSectionType {
+                path: path.to_path_buf(),
+                section: format!("{root_key}.metadata.changeset"),
+            })?;
+
+    changeset_table.set_implicit(true);
+
+    Ok(changeset_table)
 }
 
 fn populate_changeset_table(changeset_table: &mut Table, config: &InitConfig) {
