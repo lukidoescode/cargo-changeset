@@ -1,5 +1,7 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 
+use changeset_core::CARGO_MANIFEST_FILENAME;
+
 use crate::error::ProjectError;
 use crate::manifest::{DependencyEntry, read_manifest};
 use crate::project::CargoProject;
@@ -34,7 +36,7 @@ impl WorkspaceDependencyGraph {
             .collect();
 
         for package in project.packages() {
-            let manifest_path = package.path().join("Cargo.toml");
+            let manifest_path = package.path().join(CARGO_MANIFEST_FILENAME);
             let manifest = read_manifest(&manifest_path)?;
 
             let dep_sections = [manifest.dependencies, manifest.build_dependencies];

@@ -1,6 +1,7 @@
 use std::marker::PhantomData;
 use std::path::Path;
 
+use changeset_core::CARGO_MANIFEST_FILENAME;
 use changeset_project::TagFormat;
 use changeset_saga::SagaStep;
 use semver::Version;
@@ -67,7 +68,7 @@ where
 
         for release in &input.planned_releases {
             if let Some(pkg_path) = input.package_paths.get(release.name()) {
-                let manifest_path = pkg_path.join("Cargo.toml");
+                let manifest_path = pkg_path.join(CARGO_MANIFEST_FILENAME);
                 ctx.manifest_writer()
                     .write_version(&manifest_path, release.new_version())?;
                 ctx.manifest_writer()
@@ -101,7 +102,7 @@ where
         );
         for release in &input.planned_releases {
             if let Some(pkg_path) = input.package_paths.get(release.name()) {
-                let manifest_path = pkg_path.join("Cargo.toml");
+                let manifest_path = pkg_path.join(CARGO_MANIFEST_FILENAME);
                 ctx.manifest_writer()
                     .write_version(&manifest_path, release.current_version())?;
             }
@@ -143,7 +144,7 @@ where
         let mut manifest_paths: Vec<_> = input
             .package_paths
             .values()
-            .map(|p| p.join("Cargo.toml"))
+            .map(|p| p.join(CARGO_MANIFEST_FILENAME))
             .collect();
         manifest_paths.push(input.root_manifest_path.clone());
 
@@ -186,7 +187,7 @@ where
         let mut manifest_paths: Vec<_> = input
             .package_paths
             .values()
-            .map(|p| p.join("Cargo.toml"))
+            .map(|p| p.join(CARGO_MANIFEST_FILENAME))
             .collect();
         manifest_paths.push(input.root_manifest_path.clone());
 

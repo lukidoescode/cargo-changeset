@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::path::Path;
 
 use changeset_changelog::{ChangelogLocation, ComparisonLinksSetting};
-use changeset_core::ZeroVersionBehavior;
+use changeset_core::{AdditionalPackageDeclaration, ZeroVersionBehavior};
 use serde::Deserialize;
 use serde::de::IgnoredAny;
 
@@ -107,6 +107,8 @@ pub(crate) struct ChangesetMetadata {
     pub(crate) none_bump_behavior: Option<changeset_core::NoneBumpBehavior>,
     #[serde(default)]
     pub(crate) none_bump_promote_message_template: Option<String>,
+    #[serde(default)]
+    pub(crate) additional_packages: Vec<AdditionalPackageDeclaration>,
 }
 
 #[derive(Debug, Deserialize, Clone, Copy)]

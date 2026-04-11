@@ -1,6 +1,6 @@
 use std::path::{Path, PathBuf};
 
-use changeset_core::PackageInfo;
+use changeset_core::{CARGO_MANIFEST_FILENAME, PackageInfo};
 use globset::GlobBuilder;
 use semver::Version;
 
@@ -97,7 +97,7 @@ fn find_project_root(start_dir: &Path) -> Result<(PathBuf, CargoManifest), Proje
     let mut fallback_single_package: Option<(PathBuf, CargoManifest)> = None;
 
     loop {
-        let manifest_path = current.join("Cargo.toml");
+        let manifest_path = current.join(CARGO_MANIFEST_FILENAME);
 
         if manifest_path.exists() {
             let manifest = read_manifest(&manifest_path)?;
@@ -148,7 +148,7 @@ fn collect_packages(
             let version = resolve_version(
                 pkg.version.as_ref(),
                 workspace_version,
-                &root.join("Cargo.toml"),
+                &root.join(CARGO_MANIFEST_FILENAME),
             )?;
             packages.push(PackageInfo::new(
                 pkg.name.clone(),
@@ -163,7 +163,7 @@ fn collect_packages(
             let version = resolve_version(
                 pkg.version.as_ref(),
                 workspace_version,
-                &root.join("Cargo.toml"),
+                &root.join(CARGO_MANIFEST_FILENAME),
             )?;
             return Ok(vec![PackageInfo::new(
                 pkg.name.clone(),
@@ -181,7 +181,7 @@ fn collect_packages(
             let member_dirs = expand_glob_pattern(root, pattern, excludes)?;
 
             for member_dir in member_dirs {
-                let member_manifest_path = member_dir.join("Cargo.toml");
+                let member_manifest_path = member_dir.join(CARGO_MANIFEST_FILENAME);
                 if !member_manifest_path.exists() {
                     continue;
                 }

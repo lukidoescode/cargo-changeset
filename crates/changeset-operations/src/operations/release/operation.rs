@@ -1,7 +1,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use changeset_core::PackageInfo;
+use changeset_core::{CARGO_MANIFEST_FILENAME, PackageInfo};
 use changeset_project::{ProjectKind, TagFormat, WorkspaceDependencyGraph};
 use changeset_saga::SagaBuilder;
 use chrono::Local;
@@ -363,7 +363,7 @@ where
 
         let saga_data = ReleaseSagaData::new(
             context.changeset_dir.clone(),
-            context.project.root().join("Cargo.toml"),
+            context.project.root().join(CARGO_MANIFEST_FILENAME),
             plan.output.planned_releases().clone(),
             package_paths,
             plan.output.changelog_updates().clone(),

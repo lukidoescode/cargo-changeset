@@ -2,12 +2,14 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use changeset_changelog::{ChangelogConfig, ChangelogLocation, ComparisonLinksSetting};
-use changeset_core::ZeroVersionBehavior;
+use changeset_core::{
+    AdditionalPackageDeclaration, CARGO_MANIFEST_FILENAME, NoneBumpBehavior, ZeroVersionBehavior,
+};
 use changeset_git::DEFAULT_BASE_BRANCH;
 use globset::{Glob, GlobSet, GlobSetBuilder};
 
 use crate::error::ProjectError;
-use crate::manifest::{ChangesetMetadata, TagFormatValue, read_manifest};
+use crate::manifest::{CargoManifest, ChangesetMetadata, TagFormatValue, read_manifest};
 use crate::project::{CargoProject, ProjectKind};
 
 const DEFAULT_DEPENDENCY_BUMP_CHANGELOG_TEMPLATE: &str =
@@ -107,6 +109,7 @@ pub struct RootChangesetConfig {
     base_branch: String,
     none_bump_behavior: changeset_core::NoneBumpBehavior,
     none_bump_promote_message_template: String,
+    additional_packages: Vec<changeset_core::AdditionalPackageDeclaration>,
 }
 
 impl RootChangesetConfig {
@@ -160,6 +163,11 @@ impl RootChangesetConfig {
         &self.none_bump_promote_message_template
     }
 
+    #[must_use]
+    pub fn additional_packages(&self) -> &[changeset_core::AdditionalPackageDeclaration] {
+        &self.additional_packages
+    }
+
     #[cfg(any(test, feature = "testing"))]
     #[must_use]
     pub fn with_git_config(mut self, git_config: GitConfig) -> Self {
@@ -191,6 +199,7 @@ impl Default for RootChangesetConfig {
             none_bump_promote_message_template: String::from(
                 DEFAULT_NONE_BUMP_PROMOTE_MESSAGE_TEMPLATE,
             ),
+            additional_packages: Vec::new(),
         }
     }
 }
@@ -218,6 +227,21 @@ enum CargoRootConfigType {
     Package,
 }
 
+struct RootConfigFields {
+    patterns: Vec<String>,
+    changeset_dir: String,
+    zero_version_behavior: ZeroVersionBehavior,
+    dependency_bump_changelog_template: String,
+    base_branch: String,
+    none_bump_behavior: NoneBumpBehavior,
+    none_bump_promote_message_template: String,
+    additional_packages: Vec<AdditionalPackageDeclaration>,
+    changelog: Option<ChangelogLocation>,
+    comparison_links: Option<ComparisonLinksSetting>,
+    comparison_links_template: Option<String>,
+    git_metadata: Option<ChangesetMetadata>,
+}
+
 /// Parses the root changeset configuration based on project kind.
 ///
 /// For single-package projects, reads from `[package.metadata.changeset]`.
@@ -241,7 +265,7 @@ pub fn parse_root_config(project: &CargoProject) -> Result<RootChangesetConfig, 
 ///
 /// Returns `ProjectError` if the manifest cannot be read or parsed, or if glob patterns are invalid.
 pub fn parse_package_config(package_path: &Path) -> Result<PackageChangesetConfig, ProjectError> {
-    let manifest_path = package_path.join("Cargo.toml");
+    let manifest_path = package_path.join(CARGO_MANIFEST_FILENAME);
     let manifest = read_manifest(&manifest_path)?;
 
     let patterns = manifest
@@ -288,6 +312,65 @@ fn build_glob_set(patterns: &[String]) -> Result<GlobSet, ProjectError> {
     })
 }
 
+fn extract_changeset_metadata(
+    manifest: CargoManifest,
+    config_type: CargoRootConfigType,
+) -> Option<ChangesetMetadata> {
+    match config_type {
+        CargoRootConfigType::Workspace => manifest
+            .workspace
+            .and_then(|ws| ws.metadata)
+            .and_then(|meta| meta.changeset),
+        CargoRootConfigType::Package => manifest
+            .package
+            .and_then(|pkg| pkg.metadata)
+            .and_then(|meta| meta.changeset),
+    }
+}
+
+fn extract_root_config_fields(metadata: Option<ChangesetMetadata>) -> RootConfigFields {
+    RootConfigFields {
+        patterns: metadata
+            .as_ref()
+            .map(|cs| cs.ignored_files.clone())
+            .unwrap_or_default(),
+        changeset_dir: metadata
+            .as_ref()
+            .and_then(|cs| cs.changeset_dir.clone())
+            .unwrap_or_else(|| crate::DEFAULT_CHANGESET_DIR.to_string()),
+        zero_version_behavior: metadata
+            .as_ref()
+            .and_then(|cs| cs.zero_version_behavior)
+            .unwrap_or_default(),
+        dependency_bump_changelog_template: metadata
+            .as_ref()
+            .and_then(|cs| cs.dependency_bump_changelog_template.clone())
+            .unwrap_or_else(|| String::from(DEFAULT_DEPENDENCY_BUMP_CHANGELOG_TEMPLATE)),
+        base_branch: metadata
+            .as_ref()
+            .and_then(|cs| cs.base_branch.clone())
+            .unwrap_or_else(|| String::from(DEFAULT_BASE_BRANCH)),
+        none_bump_behavior: metadata
+            .as_ref()
+            .and_then(|cs| cs.none_bump_behavior)
+            .unwrap_or_default(),
+        none_bump_promote_message_template: metadata
+            .as_ref()
+            .and_then(|cs| cs.none_bump_promote_message_template.clone())
+            .unwrap_or_else(|| String::from(DEFAULT_NONE_BUMP_PROMOTE_MESSAGE_TEMPLATE)),
+        additional_packages: metadata
+            .as_ref()
+            .map(|cs| cs.additional_packages.clone())
+            .unwrap_or_default(),
+        changelog: metadata.as_ref().and_then(|cs| cs.changelog),
+        comparison_links: metadata.as_ref().and_then(|cs| cs.comparison_links),
+        comparison_links_template: metadata
+            .as_ref()
+            .and_then(|cs| cs.comparison_links_template.clone()),
+        git_metadata: metadata,
+    }
+}
+
 fn build_changelog_config(
     changelog: Option<ChangelogLocation>,
     comparison_links: Option<ComparisonLinksSetting>,
@@ -327,79 +410,25 @@ fn parse_cargo_root_config(
     project_root: &Path,
     config_type: CargoRootConfigType,
 ) -> Result<RootChangesetConfig, ProjectError> {
-    let manifest_path = project_root.join("Cargo.toml");
-    let manifest = read_manifest(&manifest_path)?;
-
-    let changeset_metadata = match config_type {
-        CargoRootConfigType::Workspace => manifest
-            .workspace
-            .and_then(|ws| ws.metadata)
-            .and_then(|meta| meta.changeset),
-        CargoRootConfigType::Package => manifest
-            .package
-            .and_then(|pkg| pkg.metadata)
-            .and_then(|meta| meta.changeset),
-    };
-
-    let patterns = changeset_metadata
-        .as_ref()
-        .map(|cs| cs.ignored_files.clone())
-        .unwrap_or_default();
-
-    let changeset_dir = changeset_metadata
-        .as_ref()
-        .and_then(|cs| cs.changeset_dir.clone())
-        .unwrap_or_else(|| crate::DEFAULT_CHANGESET_DIR.to_string());
-
-    let ignored_files = build_glob_set(&patterns)?;
-
-    let changelog_config = build_changelog_config(
-        changeset_metadata.as_ref().and_then(|cs| cs.changelog),
-        changeset_metadata
-            .as_ref()
-            .and_then(|cs| cs.comparison_links),
-        changeset_metadata
-            .as_ref()
-            .and_then(|cs| cs.comparison_links_template.clone()),
-    );
-
-    let git_config = build_git_config(changeset_metadata.as_ref());
-
-    let zero_version_behavior = changeset_metadata
-        .as_ref()
-        .and_then(|cs| cs.zero_version_behavior)
-        .unwrap_or_default();
-
-    let dependency_bump_changelog_template = changeset_metadata
-        .as_ref()
-        .and_then(|cs| cs.dependency_bump_changelog_template.clone())
-        .unwrap_or_else(|| String::from(DEFAULT_DEPENDENCY_BUMP_CHANGELOG_TEMPLATE));
-
-    let base_branch = changeset_metadata
-        .as_ref()
-        .and_then(|cs| cs.base_branch.clone())
-        .unwrap_or_else(|| String::from(DEFAULT_BASE_BRANCH));
-
-    let none_bump_behavior = changeset_metadata
-        .as_ref()
-        .and_then(|cs| cs.none_bump_behavior)
-        .unwrap_or_default();
-
-    let none_bump_promote_message_template = changeset_metadata
-        .as_ref()
-        .and_then(|cs| cs.none_bump_promote_message_template.clone())
-        .unwrap_or_else(|| String::from(DEFAULT_NONE_BUMP_PROMOTE_MESSAGE_TEMPLATE));
+    let manifest = read_manifest(&project_root.join(CARGO_MANIFEST_FILENAME))?;
+    let metadata = extract_changeset_metadata(manifest, config_type);
+    let fields = extract_root_config_fields(metadata);
 
     Ok(RootChangesetConfig {
-        ignored_files,
-        changeset_dir: PathBuf::from(changeset_dir),
-        changelog_config,
-        git_config,
-        zero_version_behavior,
-        dependency_bump_changelog_template,
-        base_branch,
-        none_bump_behavior,
-        none_bump_promote_message_template,
+        ignored_files: build_glob_set(&fields.patterns)?,
+        changeset_dir: PathBuf::from(fields.changeset_dir),
+        changelog_config: build_changelog_config(
+            fields.changelog,
+            fields.comparison_links,
+            fields.comparison_links_template,
+        ),
+        git_config: build_git_config(fields.git_metadata.as_ref()),
+        zero_version_behavior: fields.zero_version_behavior,
+        dependency_bump_changelog_template: fields.dependency_bump_changelog_template,
+        base_branch: fields.base_branch,
+        none_bump_behavior: fields.none_bump_behavior,
+        none_bump_promote_message_template: fields.none_bump_promote_message_template,
+        additional_packages: fields.additional_packages,
     })
 }
 
@@ -1041,6 +1070,144 @@ members = ["crates/*"]
             config.none_bump_promote_message_template(),
             "Internal architectural changes"
         );
+
+        Ok(())
+    }
+
+    #[test]
+    fn parse_additional_packages_from_workspace_metadata() -> anyhow::Result<()> {
+        let toml = r#"
+[workspace]
+members = ["crates/*"]
+
+[[workspace.metadata.changeset.additional-packages]]
+name = "my-helm-chart"
+path = "charts/my-chart"
+influence = ["charts/my-chart/**"]
+
+[workspace.metadata.changeset.additional-packages.manifest]
+file-path = "charts/my-chart/Chart.yaml"
+format = "yaml"
+version-path = "version"
+"#;
+        let dir = setup_with_config(toml)?;
+
+        let config = parse_cargo_root_config(dir.path(), CargoRootConfigType::Workspace)?;
+        let packages = config.additional_packages();
+
+        assert_eq!(packages.len(), 1);
+        assert_eq!(packages[0].name(), "my-helm-chart");
+        assert_eq!(packages[0].path(), Path::new("charts/my-chart"));
+        assert_eq!(packages[0].influence(), &["charts/my-chart/**"]);
+        assert_eq!(
+            packages[0].manifest().file_path(),
+            Path::new("charts/my-chart/Chart.yaml")
+        );
+        assert_eq!(
+            packages[0].manifest().format(),
+            changeset_core::ManifestFormat::Yaml
+        );
+        assert_eq!(packages[0].manifest().version_path(), "version");
+
+        Ok(())
+    }
+
+    #[test]
+    fn parse_additional_packages_empty_by_default() -> anyhow::Result<()> {
+        let toml = r#"
+[workspace]
+members = ["crates/*"]
+"#;
+        let dir = setup_with_config(toml)?;
+
+        let config = parse_cargo_root_config(dir.path(), CargoRootConfigType::Workspace)?;
+
+        assert!(config.additional_packages().is_empty());
+
+        Ok(())
+    }
+
+    #[test]
+    fn parse_multiple_additional_packages() -> anyhow::Result<()> {
+        let toml = r#"
+[workspace]
+members = ["crates/*"]
+
+[[workspace.metadata.changeset.additional-packages]]
+name = "my-helm-chart"
+path = "charts/my-chart"
+influence = ["charts/my-chart/**"]
+
+[workspace.metadata.changeset.additional-packages.manifest]
+file-path = "charts/my-chart/Chart.yaml"
+format = "yaml"
+version-path = "version"
+
+[[workspace.metadata.changeset.additional-packages]]
+name = "my-npm-package"
+path = "frontend"
+influence = ["frontend/**"]
+
+[workspace.metadata.changeset.additional-packages.manifest]
+file-path = "frontend/package.json"
+format = "json"
+version-path = "version"
+"#;
+        let dir = setup_with_config(toml)?;
+
+        let config = parse_cargo_root_config(dir.path(), CargoRootConfigType::Workspace)?;
+        let packages = config.additional_packages();
+
+        assert_eq!(packages.len(), 2);
+        assert_eq!(packages[0].name(), "my-helm-chart");
+        assert_eq!(
+            packages[0].manifest().format(),
+            changeset_core::ManifestFormat::Yaml
+        );
+        assert_eq!(packages[1].name(), "my-npm-package");
+        assert_eq!(
+            packages[1].manifest().format(),
+            changeset_core::ManifestFormat::Json
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn parse_additional_packages_from_package_metadata() -> anyhow::Result<()> {
+        let toml = r#"
+[package]
+name = "my-crate"
+version = "0.1.0"
+
+[[package.metadata.changeset.additional-packages]]
+name = "my-npm-package"
+path = "frontend"
+influence = ["frontend/**"]
+
+[package.metadata.changeset.additional-packages.manifest]
+file-path = "frontend/package.json"
+format = "json"
+version-path = "version"
+"#;
+        let dir = setup_with_config(toml)?;
+
+        let config = parse_cargo_root_config(dir.path(), CargoRootConfigType::Package)?;
+        let packages = config.additional_packages();
+
+        assert_eq!(packages.len(), 1);
+        assert_eq!(packages[0].name(), "my-npm-package");
+        assert_eq!(packages[0].path(), Path::new("frontend"));
+        assert_eq!(packages[0].influence(), &["frontend/**"]);
+        assert_eq!(
+            packages[0].manifest().file_path(),
+            Path::new("frontend/package.json")
+        );
+        assert_eq!(
+            packages[0].manifest().format(),
+            changeset_core::ManifestFormat::Json
+        );
+        assert_eq!(packages[0].manifest().version_path(), "version");
 
         Ok(())
     }

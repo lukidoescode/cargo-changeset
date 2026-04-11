@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use changeset_core::PackageInfo;
+use changeset_core::{CARGO_MANIFEST_FILENAME, PackageInfo};
 
 use crate::Result;
 
@@ -19,7 +19,7 @@ pub trait InheritedVersionChecker: Send + Sync {
     ) -> Result<Vec<String>> {
         let mut inherited = Vec::new();
         for pkg in packages {
-            let manifest_path = pkg.path().join("Cargo.toml");
+            let manifest_path = pkg.path().join(CARGO_MANIFEST_FILENAME);
             if self.has_inherited_version(&manifest_path)? {
                 inherited.push(pkg.name().clone());
             }

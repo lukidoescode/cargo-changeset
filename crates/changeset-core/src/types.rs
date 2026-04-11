@@ -7,6 +7,64 @@ use gset::Getset;
 use semver::Version;
 use serde::{Deserialize, Serialize};
 
+pub const CARGO_MANIFEST_FILENAME: &str = "Cargo.toml";
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ValueEnum)]
+#[serde(rename_all = "lowercase")]
+pub enum ManifestFormat {
+    Toml,
+    Yaml,
+    Json,
+}
+
+impl fmt::Display for ManifestFormat {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let s = match self {
+            Self::Toml => "toml",
+            Self::Yaml => "yaml",
+            Self::Json => "json",
+        };
+        write!(f, "{s}")
+    }
+}
+
+impl FromStr for ManifestFormat {
+    type Err = crate::error::ManifestFormatParseError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.to_lowercase().as_str() {
+            "toml" => Ok(Self::Toml),
+            "yaml" => Ok(Self::Yaml),
+            "json" => Ok(Self::Json),
+            _ => Err(crate::error::ManifestFormatParseError(s.to_string())),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Getset)]
+#[serde(rename_all = "kebab-case")]
+pub struct AdditionalPackageManifest {
+    #[getset(get, vis = "pub")]
+    file_path: PathBuf,
+    #[getset(get_copy, vis = "pub")]
+    format: ManifestFormat,
+    #[getset(get, vis = "pub")]
+    version_path: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Getset)]
+#[serde(rename_all = "kebab-case")]
+pub struct AdditionalPackageDeclaration {
+    #[getset(get, vis = "pub")]
+    name: String,
+    #[getset(get, vis = "pub")]
+    path: PathBuf,
+    #[getset(get, vis = "pub")]
+    influence: Vec<String>,
+    #[getset(get, vis = "pub")]
+    manifest: AdditionalPackageManifest,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, ValueEnum)]
 #[serde(rename_all = "lowercase")]
 pub enum BumpType {
@@ -445,5 +503,122 @@ mod tests {
         assert!("123".parse::<PrereleaseSpec>().is_ok());
         assert!("abc123".parse::<PrereleaseSpec>().is_ok());
         assert!("ABC-123-xyz".parse::<PrereleaseSpec>().is_ok());
+    }
+
+    #[test]
+    fn manifest_format_display() {
+        assert_eq!(format!("{}", ManifestFormat::Toml), "toml");
+        assert_eq!(format!("{}", ManifestFormat::Yaml), "yaml");
+        assert_eq!(format!("{}", ManifestFormat::Json), "json");
+    }
+
+    #[test]
+    fn manifest_format_from_str_case_insensitive() {
+        assert_eq!(
+            "toml".parse::<ManifestFormat>().unwrap(),
+            ManifestFormat::Toml
+        );
+        assert_eq!(
+            "TOML".parse::<ManifestFormat>().unwrap(),
+            ManifestFormat::Toml
+        );
+        assert_eq!(
+            "Toml".parse::<ManifestFormat>().unwrap(),
+            ManifestFormat::Toml
+        );
+        assert_eq!(
+            "yaml".parse::<ManifestFormat>().unwrap(),
+            ManifestFormat::Yaml
+        );
+        assert_eq!(
+            "YAML".parse::<ManifestFormat>().unwrap(),
+            ManifestFormat::Yaml
+        );
+        assert_eq!(
+            "json".parse::<ManifestFormat>().unwrap(),
+            ManifestFormat::Json
+        );
+        assert_eq!(
+            "JSON".parse::<ManifestFormat>().unwrap(),
+            ManifestFormat::Json
+        );
+    }
+
+    #[test]
+    fn manifest_format_from_str_rejects_unknown() {
+        let err = "xml".parse::<ManifestFormat>().unwrap_err();
+        assert_eq!(
+            err,
+            crate::error::ManifestFormatParseError("xml".to_string())
+        );
+    }
+
+    #[test]
+    fn manifest_format_serde_round_trip() {
+        for (variant, expected) in [
+            (ManifestFormat::Toml, r#""toml""#),
+            (ManifestFormat::Yaml, r#""yaml""#),
+            (ManifestFormat::Json, r#""json""#),
+        ] {
+            let serialized = serde_json::to_string(&variant).unwrap();
+            assert_eq!(serialized, expected);
+            let deserialized: ManifestFormat = serde_json::from_str(&serialized).unwrap();
+            assert_eq!(deserialized, variant);
+        }
+    }
+
+    #[test]
+    fn additional_package_manifest_serde_round_trip() {
+        let manifest = AdditionalPackageManifest {
+            file_path: PathBuf::from("charts/my-chart/Chart.yaml"),
+            format: ManifestFormat::Yaml,
+            version_path: "version".to_string(),
+        };
+        let serialized = serde_json::to_string(&manifest).unwrap();
+        assert!(serialized.contains(r#""file-path""#));
+        assert!(serialized.contains(r#""version-path""#));
+        let deserialized: AdditionalPackageManifest = serde_json::from_str(&serialized).unwrap();
+        assert_eq!(deserialized, manifest);
+    }
+
+    #[test]
+    fn additional_package_declaration_serde_round_trip() {
+        let decl = AdditionalPackageDeclaration {
+            name: "my-helm-chart".to_string(),
+            path: PathBuf::from("charts/my-chart"),
+            influence: vec!["charts/my-chart/**".to_string()],
+            manifest: AdditionalPackageManifest {
+                file_path: PathBuf::from("charts/my-chart/Chart.yaml"),
+                format: ManifestFormat::Yaml,
+                version_path: "version".to_string(),
+            },
+        };
+        let serialized = serde_json::to_string(&decl).unwrap();
+        let deserialized: AdditionalPackageDeclaration = serde_json::from_str(&serialized).unwrap();
+        assert_eq!(deserialized, decl);
+    }
+
+    #[test]
+    fn manifest_format_parse_error_display() {
+        let err = crate::error::ManifestFormatParseError("bad".to_string());
+        assert_eq!(
+            err.to_string(),
+            "unknown manifest format 'bad', expected one of: toml, yaml, json"
+        );
+    }
+
+    #[test]
+    fn additional_package_declaration_missing_required_field() {
+        let json = r#"{
+            "path": "charts/my-chart",
+            "influence": ["charts/my-chart/**"],
+            "manifest": {
+                "file-path": "charts/my-chart/Chart.yaml",
+                "format": "yaml",
+                "version-path": "version"
+            }
+        }"#;
+        let result = serde_json::from_str::<AdditionalPackageDeclaration>(json);
+        assert!(result.is_err());
     }
 }

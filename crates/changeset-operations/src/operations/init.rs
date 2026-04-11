@@ -1,6 +1,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use changeset_core::CARGO_MANIFEST_FILENAME;
 use changeset_git::DEFAULT_BASE_BRANCH;
 use changeset_manifest::{InitConfig, MetadataSection};
 use changeset_project::{CargoProject, ProjectKind, RootChangesetConfig};
@@ -228,7 +229,7 @@ where
             if plan.config().is_empty() {
                 false
             } else {
-                let manifest_path = project.root().join("Cargo.toml");
+                let manifest_path = project.root().join(CARGO_MANIFEST_FILENAME);
                 writer.write_metadata(&manifest_path, plan.metadata_section(), plan.config())?;
                 true
             }
