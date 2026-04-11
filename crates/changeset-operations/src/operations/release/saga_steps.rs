@@ -8,13 +8,13 @@ use semver::Version;
 use tracing::debug;
 
 use super::context::ReleaseSagaContext;
-use super::saga_data::{DependencyUpdate, ManifestUpdate, ReleaseSagaData};
+use super::saga_data::{DependencyUpdate, ManifestKind, ManifestUpdate, ReleaseSagaData};
 use super::{CommitResult, TagResult};
 use crate::OperationError;
 use crate::traits::{
-    ChangelogWriter, ChangesetReader, ChangesetWriter, GitCommitProvider, GitStagingProvider,
-    GitTagProvider, LockfileUpdater, ManifestDependencyWriter, ManifestVersionWriter,
-    ReleaseStateIO, WorkspaceVersionManager,
+    ChangelogWriter, ChangesetReader, ChangesetWriter, ExternalManifestVersionWriter,
+    GitCommitProvider, GitStagingProvider, GitTagProvider, LockfileUpdater,
+    ManifestDependencyWriter, ManifestVersionWriter, ReleaseStateIO, WorkspaceVersionManager,
 };
 
 macro_rules! saga_step_struct {
@@ -45,7 +45,7 @@ saga_step_struct!(WriteManifestVersionsStep);
 impl<G, M, RW, S, C> SagaStep for WriteManifestVersionsStep<G, M, RW, S, C>
 where
     G: Send + Sync,
-    M: ManifestVersionWriter,
+    M: ManifestVersionWriter + ExternalManifestVersionWriter,
     RW: Send + Sync,
     S: Send + Sync,
     C: Send + Sync,
@@ -66,8 +66,45 @@ where
     ) -> Result<Self::Output, Self::Error> {
         let mut manifest_updates = Vec::new();
 
-        for release in &input.planned_releases {
-            if let Some(pkg_path) = input.package_paths.get(release.name()) {
+        for release in input.planned_releases() {
+            if let Some(additional_info) = input.additional_package_manifests().get(release.name())
+            {
+                let manifest_path = &additional_info.manifest_path;
+                let format = additional_info.format;
+                let version_path = &additional_info.version_path;
+
+                ctx.manifest_writer().write_external_version(
+                    manifest_path,
+                    format,
+                    version_path,
+                    release.new_version(),
+                )?;
+                ctx.manifest_writer().verify_external_version(
+                    manifest_path,
+                    format,
+                    version_path,
+                    release.new_version(),
+                )?;
+
+                let update = ManifestUpdate {
+                    manifest_path: manifest_path.clone(),
+                    old_version: release.current_version().clone(),
+                    new_version: release.new_version().clone(),
+                    written: true,
+                    kind: ManifestKind::Additional {
+                        format,
+                        version_path: version_path.clone(),
+                    },
+                };
+                debug!(
+                    manifest = %update.manifest_path.display(),
+                    old = %update.old_version,
+                    new = %update.new_version,
+                    written = update.written,
+                    "updated external manifest version"
+                );
+                manifest_updates.push(update);
+            } else if let Some(pkg_path) = input.package_paths().get(release.name()) {
                 let manifest_path = pkg_path.join(CARGO_MANIFEST_FILENAME);
                 ctx.manifest_writer()
                     .write_version(&manifest_path, release.new_version())?;
@@ -79,6 +116,7 @@ where
                     old_version: release.current_version().clone(),
                     new_version: release.new_version().clone(),
                     written: true,
+                    kind: ManifestKind::Cargo,
                 };
                 debug!(
                     manifest = %update.manifest_path.display(),
@@ -100,8 +138,16 @@ where
             count = input.manifest_updates.len(),
             "rolling back manifest version updates"
         );
-        for release in &input.planned_releases {
-            if let Some(pkg_path) = input.package_paths.get(release.name()) {
+        for release in input.planned_releases() {
+            if let Some(additional_info) = input.additional_package_manifests().get(release.name())
+            {
+                ctx.manifest_writer().write_external_version(
+                    &additional_info.manifest_path,
+                    additional_info.format,
+                    &additional_info.version_path,
+                    release.current_version(),
+                )?;
+            } else if let Some(pkg_path) = input.package_paths().get(release.name()) {
                 let manifest_path = pkg_path.join(CARGO_MANIFEST_FILENAME);
                 ctx.manifest_writer()
                     .write_version(&manifest_path, release.current_version())?;
@@ -111,7 +157,7 @@ where
     }
 
     fn compensation_description(&self) -> String {
-        "restore original package versions in Cargo.toml files".to_string()
+        "restore original package versions in manifest files".to_string()
     }
 }
 
@@ -142,13 +188,24 @@ where
         let mut dependency_updates = Vec::new();
 
         let mut manifest_paths: Vec<_> = input
-            .package_paths
-            .values()
-            .map(|p| p.join(CARGO_MANIFEST_FILENAME))
+            .package_paths()
+            .iter()
+            .filter(|(name, _)| {
+                !input
+                    .additional_package_manifests()
+                    .contains_key(name.as_str())
+            })
+            .map(|(_, p)| p.join(CARGO_MANIFEST_FILENAME))
             .collect();
-        manifest_paths.push(input.root_manifest_path.clone());
+        manifest_paths.push(input.root_manifest_path().clone());
 
-        for release in &input.planned_releases {
+        let cargo_releases: Vec<_> = input
+            .planned_releases()
+            .iter()
+            .filter(|r| !input.additional_package_manifests().contains_key(r.name()))
+            .collect();
+
+        for release in &cargo_releases {
             for manifest_path in &manifest_paths {
                 let updated = ctx.manifest_writer().update_dependency_version(
                     manifest_path,
@@ -185,13 +242,24 @@ where
             "rolling back dependency version updates"
         );
         let mut manifest_paths: Vec<_> = input
-            .package_paths
-            .values()
-            .map(|p| p.join(CARGO_MANIFEST_FILENAME))
+            .package_paths()
+            .iter()
+            .filter(|(name, _)| {
+                !input
+                    .additional_package_manifests()
+                    .contains_key(name.as_str())
+            })
+            .map(|(_, p)| p.join(CARGO_MANIFEST_FILENAME))
             .collect();
-        manifest_paths.push(input.root_manifest_path.clone());
+        manifest_paths.push(input.root_manifest_path().clone());
 
-        for release in &input.planned_releases {
+        let cargo_releases: Vec<_> = input
+            .planned_releases()
+            .iter()
+            .filter(|r| !input.additional_package_manifests().contains_key(r.name()))
+            .collect();
+
+        for release in &cargo_releases {
             for manifest_path in &manifest_paths {
                 ctx.manifest_writer().update_dependency_version(
                     manifest_path,
@@ -235,9 +303,9 @@ where
         if !input.inherited_packages.is_empty() {
             input.original_workspace_version = ctx
                 .manifest_writer()
-                .read_workspace_version(&input.root_manifest_path)?;
+                .read_workspace_version(input.root_manifest_path())?;
             ctx.manifest_writer()
-                .remove_workspace_version(&input.root_manifest_path)?;
+                .remove_workspace_version(input.root_manifest_path())?;
             input.workspace_version_removed = true;
         }
         Ok(input)
@@ -247,10 +315,10 @@ where
         if !input.inherited_packages.is_empty() {
             if let Some(version) = &input.original_workspace_version {
                 ctx.manifest_writer()
-                    .write_workspace_version(&input.root_manifest_path, version)?;
-            } else if let Some(release) = input.planned_releases.first() {
+                    .write_workspace_version(input.root_manifest_path(), version)?;
+            } else if let Some(release) = input.planned_releases().first() {
                 ctx.manifest_writer().write_workspace_version(
-                    &input.root_manifest_path,
+                    input.root_manifest_path(),
                     release.current_version(),
                 )?;
             }
@@ -338,14 +406,14 @@ where
         mut input: Self::Input,
     ) -> Result<Self::Output, Self::Error> {
         if input.classification.is_prerelease_release && !input.changeset_files.is_empty() {
-            if let Some(first_release) = input.planned_releases.first() {
+            if let Some(first_release) = input.planned_releases().first() {
                 let paths_refs: Vec<&Path> = input
                     .changeset_files
                     .iter()
                     .map(|f| f.path.as_path())
                     .collect();
                 ctx.changeset_rw().mark_consumed_for_prerelease(
-                    &input.changeset_dir,
+                    input.changeset_dir(),
                     &paths_refs,
                     first_release.new_version(),
                 )?;
@@ -369,7 +437,7 @@ where
 
             if !files_to_clear.is_empty() {
                 ctx.changeset_rw()
-                    .clear_consumed_for_prerelease(&input.changeset_dir, &files_to_clear)?;
+                    .clear_consumed_for_prerelease(input.changeset_dir(), &files_to_clear)?;
             }
         }
         Ok(())
@@ -407,7 +475,7 @@ where
         if input.classification.is_graduating {
             let consumed_paths = ctx
                 .changeset_rw()
-                .list_consumed_changesets(&input.changeset_dir)?;
+                .list_consumed_changesets(input.changeset_dir())?;
 
             if !consumed_paths.is_empty() {
                 let mut consumed_files = Vec::new();
@@ -422,7 +490,7 @@ where
 
                 let paths_refs: Vec<&Path> = consumed_paths.iter().map(AsRef::as_ref).collect();
                 ctx.changeset_rw()
-                    .clear_consumed_for_prerelease(&input.changeset_dir, &paths_refs)?;
+                    .clear_consumed_for_prerelease(input.changeset_dir(), &paths_refs)?;
                 input.consumed_state = super::saga_data::ChangesetConsumedState::Cleared;
                 input.consumed_files_cleared = consumed_files;
             }
@@ -433,18 +501,10 @@ where
     fn compensate(&self, ctx: &Self::Context, input: Self::Input) -> Result<(), Self::Error> {
         for file_state in &input.consumed_files_cleared {
             if let Some(original_version) = &file_state.original_consumed_status {
-                let version: Version =
-                    original_version
-                        .parse()
-                        .map_err(|source| OperationError::VersionParse {
-                            version: original_version.clone(),
-                            context: "compensation restore consumed status".to_string(),
-                            source,
-                        })?;
-                ctx.changeset_rw().mark_consumed_for_prerelease(
-                    &input.changeset_dir,
+                ctx.changeset_rw().restore_consumed_for_prerelease(
+                    input.changeset_dir(),
                     &[file_state.path.as_path()],
-                    &version,
+                    original_version,
                 )?;
             }
         }
@@ -555,10 +615,10 @@ where
         }
 
         if input.workspace_version_removed {
-            files.push(input.root_manifest_path.clone());
+            files.push(input.root_manifest_path().clone());
         }
 
-        for update in &input.changelog_updates {
+        for update in input.changelog_updates() {
             files.push(update.path().clone());
         }
 
@@ -670,7 +730,7 @@ where
             return Ok(input);
         }
 
-        let message = self.build_commit_message(&input.planned_releases);
+        let message = self.build_commit_message(input.planned_releases());
         let commit_info = ctx.git_provider().commit(ctx.project_root(), &message)?;
 
         input.commit_result = Some(CommitResult::new(
@@ -748,7 +808,7 @@ where
         let mut tags = Vec::new();
         let mut created_tag_names: Vec<String> = Vec::new();
 
-        for release in &input.planned_releases {
+        for release in input.planned_releases() {
             let tag_name = self.format_tag_name(release.name(), release.new_version());
 
             let tag_message = format!("Release {} v{}", release.name(), release.new_version());
@@ -785,7 +845,7 @@ where
         }
 
         let mut failed_tags = Vec::new();
-        for release in &input.planned_releases {
+        for release in input.planned_releases() {
             let tag_name = self.format_tag_name(release.name(), release.new_version());
             if ctx
                 .git_provider()
@@ -832,31 +892,31 @@ where
         ctx: &Self::Context,
         input: Self::Input,
     ) -> Result<Self::Output, Self::Error> {
-        if let Some(update) = &input.prerelease_state_update {
+        if let Some(update) = input.prerelease_state_update() {
             ctx.release_state_io()
-                .save_prerelease_state(&input.changeset_dir, &update.new_state)?;
+                .save_prerelease_state(input.changeset_dir(), &update.new_state)?;
         }
 
-        if let Some(update) = &input.graduation_state_update {
+        if let Some(update) = input.graduation_state_update() {
             ctx.release_state_io()
-                .save_graduation_state(&input.changeset_dir, &update.new_state)?;
+                .save_graduation_state(input.changeset_dir(), &update.new_state)?;
         }
 
         Ok(input)
     }
 
     fn compensate(&self, ctx: &Self::Context, input: Self::Input) -> Result<(), Self::Error> {
-        if let Some(update) = &input.prerelease_state_update {
+        if let Some(update) = input.prerelease_state_update() {
             if let Some(original) = &update.original {
                 ctx.release_state_io()
-                    .save_prerelease_state(&input.changeset_dir, original)?;
+                    .save_prerelease_state(input.changeset_dir(), original)?;
             }
         }
 
-        if let Some(update) = &input.graduation_state_update {
+        if let Some(update) = input.graduation_state_update() {
             if let Some(original) = &update.original {
                 ctx.release_state_io()
-                    .save_graduation_state(&input.changeset_dir, original)?;
+                    .save_graduation_state(input.changeset_dir(), original)?;
             }
         }
 
@@ -896,7 +956,7 @@ where
     }
 
     fn compensate(&self, ctx: &Self::Context, input: Self::Input) -> Result<(), Self::Error> {
-        for backup in &input.changelog_backups {
+        for backup in input.changelog_backups() {
             if backup.file_existed {
                 if let Some(content) = &backup.original_content {
                     ctx.changelog_writer()
@@ -928,7 +988,9 @@ mod tests {
         MockChangelogWriter, MockChangesetReader, MockGitProvider, MockManifestWriter,
         MockReleaseStateIO,
     };
-    use crate::operations::release::saga_data::SagaReleaseOptions;
+    use crate::operations::release::saga_data::{
+        AdditionalManifestInfo, ManifestKind, SagaReleaseOptions,
+    };
     use crate::operations::release::types::{GitOptions, ReleaseClassification};
     use crate::types::PackageVersion;
 
@@ -1046,6 +1108,7 @@ mod tests {
             old_version: "1.0.0".parse()?,
             new_version: "1.0.1".parse()?,
             written: true,
+            kind: ManifestKind::Cargo,
         });
 
         SagaStep::compensate(&step, &ctx, input)?;
@@ -1195,6 +1258,7 @@ mod tests {
             old_version: "1.0.0".parse()?,
             new_version: "1.0.1".parse()?,
             written: true,
+            kind: ManifestKind::Cargo,
         });
         input.dependency_updates.push(DependencyUpdate {
             manifest_path: shared_path.clone(),
@@ -1238,6 +1302,7 @@ mod tests {
             old_version: "1.0.0".parse()?,
             new_version: "1.0.1".parse()?,
             written: true,
+            kind: ManifestKind::Cargo,
         });
 
         let result = SagaStep::execute(&step, &ctx, input)?;
@@ -1708,6 +1773,347 @@ mod tests {
         );
     }
 
+    fn make_additional_manifest_info(
+        manifest_path: &str,
+        format: changeset_core::ManifestFormat,
+        version_path: &str,
+    ) -> AdditionalManifestInfo {
+        AdditionalManifestInfo {
+            manifest_path: PathBuf::from(manifest_path),
+            format,
+            version_path: version_path.to_string(),
+        }
+    }
+
+    #[test]
+    fn write_manifest_versions_uses_external_writer_for_additional_packages() -> anyhow::Result<()>
+    {
+        let manifest_writer = Arc::new(MockManifestWriter::new());
+        let ctx = make_test_context(
+            Arc::new(MockGitProvider::new()),
+            Arc::clone(&manifest_writer),
+            Arc::new(MockChangesetReader::new()),
+            Arc::new(MockReleaseStateIO::new()),
+        );
+
+        let step: WriteManifestVersionsStep<
+            MockGitProvider,
+            MockManifestWriter,
+            MockChangesetReader,
+            MockReleaseStateIO,
+            MockChangelogWriter,
+        > = WriteManifestVersionsStep::new();
+
+        let mut additional = IndexMap::new();
+        additional.insert(
+            "my-chart".to_string(),
+            make_additional_manifest_info(
+                "/mock/project/charts/my-chart/Chart.yaml",
+                changeset_core::ManifestFormat::Yaml,
+                "version",
+            ),
+        );
+
+        let mut package_paths = IndexMap::new();
+        package_paths.insert(
+            "my-chart".to_string(),
+            PathBuf::from("/mock/project/charts/my-chart"),
+        );
+
+        let input = ReleaseSagaData::new(
+            PathBuf::from("/mock/project/.changeset"),
+            PathBuf::from("/mock/project/Cargo.toml"),
+            vec![make_test_release("my-chart", "1.0.0", "1.0.1")],
+            package_paths,
+            Vec::new(),
+            Vec::new(),
+        )
+        .with_additional_packages(additional);
+
+        let result = SagaStep::execute(&step, &ctx, input)?;
+
+        assert_eq!(result.manifest_updates.len(), 1);
+        assert!(result.manifest_updates[0].written);
+        assert!(
+            manifest_writer.written_versions().is_empty(),
+            "Cargo write_version should not be called for additional packages"
+        );
+        assert_eq!(
+            manifest_writer.external_written_versions().len(),
+            1,
+            "external writer should be called for additional packages"
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn write_manifest_versions_compensate_uses_external_writer_for_additional() -> anyhow::Result<()>
+    {
+        let manifest_writer = Arc::new(MockManifestWriter::new());
+        let ctx = make_test_context(
+            Arc::new(MockGitProvider::new()),
+            Arc::clone(&manifest_writer),
+            Arc::new(MockChangesetReader::new()),
+            Arc::new(MockReleaseStateIO::new()),
+        );
+
+        let step: WriteManifestVersionsStep<
+            MockGitProvider,
+            MockManifestWriter,
+            MockChangesetReader,
+            MockReleaseStateIO,
+            MockChangelogWriter,
+        > = WriteManifestVersionsStep::new();
+
+        let mut additional = IndexMap::new();
+        additional.insert(
+            "my-chart".to_string(),
+            make_additional_manifest_info(
+                "/mock/project/charts/my-chart/Chart.yaml",
+                changeset_core::ManifestFormat::Yaml,
+                "version",
+            ),
+        );
+
+        let mut package_paths = IndexMap::new();
+        package_paths.insert(
+            "my-chart".to_string(),
+            PathBuf::from("/mock/project/charts/my-chart"),
+        );
+
+        let input = ReleaseSagaData::new(
+            PathBuf::from("/mock/project/.changeset"),
+            PathBuf::from("/mock/project/Cargo.toml"),
+            vec![make_test_release("my-chart", "1.0.0", "1.0.1")],
+            package_paths,
+            Vec::new(),
+            Vec::new(),
+        )
+        .with_additional_packages(additional);
+
+        SagaStep::compensate(&step, &ctx, input)?;
+
+        assert!(
+            manifest_writer.written_versions().is_empty(),
+            "Cargo write_version should not be called during compensate for additional packages"
+        );
+        let external = manifest_writer.external_written_versions();
+        assert_eq!(external.len(), 1);
+        assert_eq!(
+            external[0].version.to_string(),
+            "1.0.0",
+            "compensate should restore old version via external writer"
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn update_dependency_versions_skips_additional_packages() -> anyhow::Result<()> {
+        let manifest_writer =
+            Arc::new(MockManifestWriter::new().with_dependency_updates_returning_true());
+        let ctx = make_test_context(
+            Arc::new(MockGitProvider::new()),
+            Arc::clone(&manifest_writer),
+            Arc::new(MockChangesetReader::new()),
+            Arc::new(MockReleaseStateIO::new()),
+        );
+
+        let step: UpdateDependencyVersionsStep<
+            MockGitProvider,
+            MockManifestWriter,
+            MockChangesetReader,
+            MockReleaseStateIO,
+            MockChangelogWriter,
+        > = UpdateDependencyVersionsStep::new();
+
+        let mut additional = IndexMap::new();
+        additional.insert(
+            "my-chart".to_string(),
+            make_additional_manifest_info(
+                "/mock/project/charts/my-chart/Chart.yaml",
+                changeset_core::ManifestFormat::Yaml,
+                "version",
+            ),
+        );
+
+        let mut package_paths = IndexMap::new();
+        package_paths.insert(
+            "pkg-a".to_string(),
+            PathBuf::from("/mock/project/crates/pkg-a"),
+        );
+        package_paths.insert(
+            "my-chart".to_string(),
+            PathBuf::from("/mock/project/charts/my-chart"),
+        );
+
+        let input = ReleaseSagaData::new(
+            PathBuf::from("/mock/project/.changeset"),
+            PathBuf::from("/mock/project/Cargo.toml"),
+            vec![
+                make_test_release("pkg-a", "1.0.0", "1.0.1"),
+                make_test_release("my-chart", "2.0.0", "2.0.1"),
+            ],
+            package_paths,
+            Vec::new(),
+            Vec::new(),
+        )
+        .with_additional_packages(additional);
+
+        let result = SagaStep::execute(&step, &ctx, input)?;
+
+        let dep_names: Vec<_> = result
+            .dependency_updates
+            .iter()
+            .map(|d| d.dependency_name.as_str())
+            .collect();
+        assert!(
+            !dep_names.contains(&"my-chart"),
+            "additional packages should not appear in dependency updates"
+        );
+
+        let update_calls = manifest_writer.dependency_version_updates();
+        let chart_calls: Vec<_> = update_calls
+            .iter()
+            .filter(|(_, name, _)| name == "my-chart")
+            .collect();
+        assert!(
+            chart_calls.is_empty(),
+            "update_dependency_version should not be called for additional packages"
+        );
+
+        let manifest_paths: Vec<_> = update_calls.iter().map(|(p, _, _)| p.clone()).collect();
+        let chart_manifest =
+            PathBuf::from("/mock/project/charts/my-chart").join(CARGO_MANIFEST_FILENAME);
+        assert!(
+            !manifest_paths.contains(&chart_manifest),
+            "additional package manifest path should not be in scanned manifests"
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn mixed_cargo_and_additional_packages_write_correct_manifests() -> anyhow::Result<()> {
+        let manifest_writer = Arc::new(MockManifestWriter::new());
+        let ctx = make_test_context(
+            Arc::new(MockGitProvider::new()),
+            Arc::clone(&manifest_writer),
+            Arc::new(MockChangesetReader::new()),
+            Arc::new(MockReleaseStateIO::new()),
+        );
+
+        let step: WriteManifestVersionsStep<
+            MockGitProvider,
+            MockManifestWriter,
+            MockChangesetReader,
+            MockReleaseStateIO,
+            MockChangelogWriter,
+        > = WriteManifestVersionsStep::new();
+
+        let mut additional = IndexMap::new();
+        additional.insert(
+            "my-chart".to_string(),
+            make_additional_manifest_info(
+                "/mock/project/charts/my-chart/Chart.yaml",
+                changeset_core::ManifestFormat::Yaml,
+                "version",
+            ),
+        );
+
+        let mut package_paths = IndexMap::new();
+        package_paths.insert(
+            "pkg-a".to_string(),
+            PathBuf::from("/mock/project/crates/pkg-a"),
+        );
+        package_paths.insert(
+            "my-chart".to_string(),
+            PathBuf::from("/mock/project/charts/my-chart"),
+        );
+
+        let input = ReleaseSagaData::new(
+            PathBuf::from("/mock/project/.changeset"),
+            PathBuf::from("/mock/project/Cargo.toml"),
+            vec![
+                make_test_release("pkg-a", "1.0.0", "1.0.1"),
+                make_test_release("my-chart", "2.0.0", "2.0.1"),
+            ],
+            package_paths,
+            Vec::new(),
+            Vec::new(),
+        )
+        .with_additional_packages(additional);
+
+        let result = SagaStep::execute(&step, &ctx, input)?;
+
+        assert_eq!(result.manifest_updates.len(), 2);
+
+        let cargo_update = result
+            .manifest_updates
+            .iter()
+            .find(|u| u.manifest_path.ends_with("Cargo.toml"))
+            .expect("should have a Cargo manifest update");
+        assert!(matches!(cargo_update.kind, ManifestKind::Cargo));
+
+        let external_update = result
+            .manifest_updates
+            .iter()
+            .find(|u| u.manifest_path.ends_with("Chart.yaml"))
+            .expect("should have an external manifest update");
+        assert!(matches!(
+            external_update.kind,
+            ManifestKind::Additional { .. }
+        ));
+
+        assert_eq!(manifest_writer.written_versions().len(), 1);
+        assert_eq!(manifest_writer.external_written_versions().len(), 1);
+
+        Ok(())
+    }
+
+    #[test]
+    fn stage_files_includes_additional_package_manifests() -> anyhow::Result<()> {
+        let git_provider = Arc::new(MockGitProvider::new());
+        let ctx = make_test_context(
+            Arc::clone(&git_provider),
+            Arc::new(MockManifestWriter::new()),
+            Arc::new(MockChangesetReader::new()),
+            Arc::new(MockReleaseStateIO::new()),
+        );
+
+        let step: StageFilesStep<
+            MockGitProvider,
+            MockManifestWriter,
+            MockChangesetReader,
+            MockReleaseStateIO,
+            MockChangelogWriter,
+        > = StageFilesStep::new();
+        let mut input = make_test_data();
+        input.manifest_updates.push(ManifestUpdate {
+            manifest_path: PathBuf::from("/mock/project/charts/my-chart/Chart.yaml"),
+            old_version: "2.0.0".parse()?,
+            new_version: "2.0.1".parse()?,
+            written: true,
+            kind: ManifestKind::Additional {
+                format: changeset_core::ManifestFormat::Yaml,
+                version_path: "version".to_string(),
+            },
+        });
+
+        let result = SagaStep::execute(&step, &ctx, input)?;
+
+        assert!(result.files_were_staged);
+        assert!(
+            result
+                .staged_files
+                .contains(&PathBuf::from("/mock/project/charts/my-chart/Chart.yaml")),
+            "additional package manifest should be staged"
+        );
+
+        Ok(())
+    }
+
     #[allow(clippy::items_after_statements)]
     mod rollback_integration {
         use changeset_core::{ChangeCategory, Changeset, PackageRelease};
@@ -2132,5 +2538,95 @@ mod tests {
                 "consumed status should be cleared after rollback (was not consumed before)"
             );
         }
+    }
+
+    #[test]
+    fn clear_changesets_consumed_compensate_restores_consumed_status() -> anyhow::Result<()> {
+        let changeset_path = PathBuf::from(".changeset/some-changeset.md");
+        let changeset = changeset_core::Changeset::new(
+            "test change".to_string(),
+            vec![],
+            changeset_core::ChangeCategory::Fixed,
+        );
+        let changeset_rw = Arc::new(MockChangesetReader::new().with_consumed_changeset(
+            changeset_path.clone(),
+            changeset,
+            "1.0.0-alpha.1".to_string(),
+        ));
+        let ctx = make_test_context(
+            Arc::new(MockGitProvider::new()),
+            Arc::new(MockManifestWriter::new()),
+            Arc::clone(&changeset_rw),
+            Arc::new(MockReleaseStateIO::new()),
+        );
+
+        let step: ClearChangesetsConsumedStep<
+            MockGitProvider,
+            MockManifestWriter,
+            MockChangesetReader,
+            MockReleaseStateIO,
+            MockChangelogWriter,
+        > = ClearChangesetsConsumedStep::new();
+        let mut input = make_test_data();
+        input.consumed_files_cleared =
+            vec![crate::operations::release::types::ChangesetFileState {
+                path: changeset_path.clone(),
+                original_consumed_status: Some("1.0.0-alpha.1".to_string()),
+                backup: None,
+            }];
+
+        SagaStep::compensate(&step, &ctx, input)?;
+
+        assert_eq!(
+            changeset_rw.get_consumed_status(&changeset_path),
+            Some("1.0.0-alpha.1".to_string()),
+            "consumed status should be restored to the original version string"
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn clear_changesets_consumed_compensate_skips_files_without_original_status()
+    -> anyhow::Result<()> {
+        let changeset_path = PathBuf::from(".changeset/some-changeset.md");
+        let changeset = changeset_core::Changeset::new(
+            "test change".to_string(),
+            vec![],
+            changeset_core::ChangeCategory::Fixed,
+        );
+        let changeset_rw =
+            Arc::new(MockChangesetReader::new().with_changeset(changeset_path.clone(), changeset));
+        let ctx = make_test_context(
+            Arc::new(MockGitProvider::new()),
+            Arc::new(MockManifestWriter::new()),
+            Arc::clone(&changeset_rw),
+            Arc::new(MockReleaseStateIO::new()),
+        );
+
+        let step: ClearChangesetsConsumedStep<
+            MockGitProvider,
+            MockManifestWriter,
+            MockChangesetReader,
+            MockReleaseStateIO,
+            MockChangelogWriter,
+        > = ClearChangesetsConsumedStep::new();
+        let mut input = make_test_data();
+        input.consumed_files_cleared =
+            vec![crate::operations::release::types::ChangesetFileState {
+                path: changeset_path.clone(),
+                original_consumed_status: None,
+                backup: None,
+            }];
+
+        SagaStep::compensate(&step, &ctx, input)?;
+
+        assert_eq!(
+            changeset_rw.get_consumed_status(&changeset_path),
+            None,
+            "consumed status should remain absent when original was absent"
+        );
+
+        Ok(())
     }
 }

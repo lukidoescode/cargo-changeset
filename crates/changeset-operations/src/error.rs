@@ -160,14 +160,6 @@ pub enum OperationError {
     #[error("release validation failed")]
     ValidationFailed(#[from] crate::operations::ValidationErrors),
 
-    #[error("failed to parse version '{version}' during {context}")]
-    VersionParse {
-        version: String,
-        context: String,
-        #[source]
-        source: semver::Error,
-    },
-
     #[error("failed to delete {} tag(s) during compensation: {}", failed_tags.len(), failed_tags.join(", "))]
     TagDeletionFailed { failed_tags: Vec<String> },
 
@@ -324,17 +316,6 @@ mod tests {
             source: std::io::Error::other("test"),
         };
         assert!(err.to_string().contains("/some/path"));
-    }
-
-    #[test]
-    fn version_parse_error_includes_version_and_context() {
-        let err = OperationError::VersionParse {
-            version: "not-a-version".to_string(),
-            context: "test context".to_string(),
-            source: "bad".parse::<semver::Version>().expect_err("should fail"),
-        };
-        assert!(err.to_string().contains("not-a-version"));
-        assert!(err.to_string().contains("test context"));
     }
 
     #[test]

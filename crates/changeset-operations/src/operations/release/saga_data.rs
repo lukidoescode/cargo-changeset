@@ -1,6 +1,8 @@
 use std::path::PathBuf;
 
+use changeset_core::ManifestFormat;
 use changeset_project::{GraduationState, PrereleaseState};
+use gset::Getset;
 use indexmap::IndexMap;
 use semver::Version;
 
@@ -15,6 +17,23 @@ pub struct SagaReleaseOptions {
     pub git_options: GitOptions,
 }
 
+#[derive(Debug, Clone)]
+pub(super) enum ManifestKind {
+    Cargo,
+    #[allow(dead_code)]
+    Additional {
+        format: ManifestFormat,
+        version_path: String,
+    },
+}
+
+#[derive(Debug, Clone)]
+pub(super) struct AdditionalManifestInfo {
+    pub(super) manifest_path: PathBuf,
+    pub(super) format: ManifestFormat,
+    pub(super) version_path: String,
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(super) enum ChangesetConsumedState {
     #[default]
@@ -23,45 +42,55 @@ pub(super) enum ChangesetConsumedState {
     Cleared,
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, Getset)]
 pub struct ReleaseSagaData {
-    pub changeset_dir: PathBuf,
-    pub root_manifest_path: PathBuf,
-    pub inherited_packages: Vec<String>,
+    #[getset(get, vis = "pub(super)")]
+    changeset_dir: PathBuf,
+    #[getset(get, vis = "pub(super)")]
+    root_manifest_path: PathBuf,
+    pub(super) inherited_packages: Vec<String>,
 
-    pub planned_releases: Vec<PackageVersion>,
-    pub package_paths: IndexMap<String, PathBuf>,
-    pub changelog_updates: Vec<ChangelogUpdate>,
+    #[getset(get, vis = "pub(super)")]
+    planned_releases: Vec<PackageVersion>,
+    #[getset(get, vis = "pub(super)")]
+    package_paths: IndexMap<String, PathBuf>,
+    #[getset(get, vis = "pub(super)")]
+    additional_package_manifests: IndexMap<String, AdditionalManifestInfo>,
+    #[getset(get, vis = "pub(super)")]
+    changelog_updates: Vec<ChangelogUpdate>,
 
-    pub classification: ReleaseClassification,
-    pub git_options: GitOptions,
+    pub(super) classification: ReleaseClassification,
+    pub(super) git_options: GitOptions,
 
-    pub prerelease_state_update: Option<PrereleaseStateUpdate>,
-    pub graduation_state_update: Option<GraduationStateUpdate>,
+    #[getset(get, vis = "pub(super)")]
+    prerelease_state_update: Option<PrereleaseStateUpdate>,
+    #[getset(get, vis = "pub(super)")]
+    graduation_state_update: Option<GraduationStateUpdate>,
 
-    pub changeset_files: Vec<ChangesetFileState>,
+    pub(super) changeset_files: Vec<ChangesetFileState>,
 
-    pub manifest_updates: Vec<ManifestUpdate>,
-    pub dependency_updates: Vec<DependencyUpdate>,
-    pub workspace_version_removed: bool,
-    pub original_workspace_version: Option<Version>,
+    pub(super) manifest_updates: Vec<ManifestUpdate>,
+    pub(super) dependency_updates: Vec<DependencyUpdate>,
+    pub(super) workspace_version_removed: bool,
+    pub(super) original_workspace_version: Option<Version>,
 
-    pub lockfile_backup: Option<Vec<u8>>,
-    pub lockfile_path: Option<PathBuf>,
+    pub(super) lockfile_backup: Option<Vec<u8>>,
+    pub(super) lockfile_path: Option<PathBuf>,
 
-    pub staged_files: Vec<PathBuf>,
-    pub files_were_staged: bool,
+    pub(super) staged_files: Vec<PathBuf>,
+    pub(super) files_were_staged: bool,
 
-    pub commit_result: Option<CommitResult>,
+    pub(super) commit_result: Option<CommitResult>,
 
-    pub tags_created: Vec<TagResult>,
+    pub(super) tags_created: Vec<TagResult>,
 
-    pub changesets_deleted: Vec<PathBuf>,
-    pub consumed_state: ChangesetConsumedState,
-    pub consumed_files_cleared: Vec<ChangesetFileState>,
+    pub(super) changesets_deleted: Vec<PathBuf>,
+    pub(super) consumed_state: ChangesetConsumedState,
+    pub(super) consumed_files_cleared: Vec<ChangesetFileState>,
 
-    pub changelog_backups: Vec<ChangelogFileState>,
-    pub changelogs_written: bool,
+    #[getset(get, vis = "pub(super)")]
+    changelog_backups: Vec<ChangelogFileState>,
+    changelogs_written: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -70,6 +99,8 @@ pub(super) struct ManifestUpdate {
     pub(super) old_version: Version,
     pub(super) new_version: Version,
     pub(super) written: bool,
+    #[allow(dead_code)]
+    pub(super) kind: ManifestKind,
 }
 
 #[derive(Debug, Clone)]
@@ -151,6 +182,14 @@ impl ReleaseSagaData {
                 new_state,
             });
         }
+        self
+    }
+
+    pub fn with_additional_packages(
+        mut self,
+        additional: IndexMap<String, AdditionalManifestInfo>,
+    ) -> Self {
+        self.additional_package_manifests = additional;
         self
     }
 

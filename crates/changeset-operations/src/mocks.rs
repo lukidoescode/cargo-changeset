@@ -343,6 +343,21 @@ impl ChangesetWriter for MockChangesetReader {
         }
         Ok(())
     }
+
+    fn restore_consumed_for_prerelease(
+        &self,
+        _changeset_dir: &Path,
+        paths: &[&Path],
+        version: &str,
+    ) -> Result<()> {
+        let mut changesets = self.changesets.lock().expect("lock poisoned");
+        for path in paths {
+            if let Some(changeset) = changesets.get_mut(*path) {
+                changeset.set_consumed_for_prerelease(Some(version.to_owned()));
+            }
+        }
+        Ok(())
+    }
 }
 
 impl_arc_delegation! {
@@ -360,6 +375,7 @@ impl_arc_delegation! {
         fn filename_exists(&self, changeset_dir: &Path, filename: &str) -> bool;
         fn mark_consumed_for_prerelease(&self, changeset_dir: &Path, paths: &[&Path], version: &Version) -> Result<()>;
         fn clear_consumed_for_prerelease(&self, changeset_dir: &Path, paths: &[&Path]) -> Result<()>;
+        fn restore_consumed_for_prerelease(&self, changeset_dir: &Path, paths: &[&Path], version: &str) -> Result<()>;
     }
 }
 
@@ -426,6 +442,15 @@ impl ChangesetWriter for MockChangesetWriter {
     }
 
     fn clear_consumed_for_prerelease(&self, _changeset_dir: &Path, _paths: &[&Path]) -> Result<()> {
+        Ok(())
+    }
+
+    fn restore_consumed_for_prerelease(
+        &self,
+        _changeset_dir: &Path,
+        _paths: &[&Path],
+        _version: &str,
+    ) -> Result<()> {
         Ok(())
     }
 }

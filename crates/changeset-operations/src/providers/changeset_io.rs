@@ -188,6 +188,22 @@ impl ChangesetWriter for FileSystemChangesetIO {
         }
         Ok(())
     }
+
+    fn restore_consumed_for_prerelease(
+        &self,
+        changeset_dir: &Path,
+        paths: &[&Path],
+        version: &str,
+    ) -> Result<()> {
+        let version_string = version.to_owned();
+        for path in paths {
+            let full_path = self.resolve_changeset_path(changeset_dir, path)?;
+            update_changeset_file(&full_path, |changeset| {
+                changeset.set_consumed_for_prerelease(Some(version_string.clone()));
+            })?;
+        }
+        Ok(())
+    }
 }
 
 fn update_changeset_file<F>(full_path: &Path, updater: F) -> Result<()>

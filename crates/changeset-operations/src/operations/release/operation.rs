@@ -9,7 +9,7 @@ use indexmap::IndexMap;
 
 use super::classifiers::{self, EarlyReturnDecision};
 use super::context::ReleaseSagaContext;
-use super::saga_data::{ReleaseSagaData, SagaReleaseOptions};
+use super::saga_data::{AdditionalManifestInfo, ReleaseSagaData, SagaReleaseOptions};
 use super::saga_steps::{
     ClearChangesetsConsumedStep, CreateCommitStep, CreateTagsStep, DeleteChangesetFilesStep,
     MarkChangesetsConsumedStep, RemoveWorkspaceVersionStep, RestoreChangelogsStep, StageFilesStep,
@@ -27,8 +27,9 @@ use crate::none_bump;
 use crate::operations::changelog_aggregation::ChangesetAggregator;
 use crate::planner::VersionPlanner;
 use crate::traits::{
-    ChangelogWriter, ChangesetReader, ChangesetWriter, DependencyGraphProvider, FullGitProvider,
-    FullManifestWriter, ProjectProvider, ReleaseStateIO,
+    ChangelogWriter, ChangesetReader, ChangesetWriter, DependencyGraphProvider,
+    ExternalManifestVersionWriter, FullGitProvider, FullManifestWriter, ProjectProvider,
+    ReleaseStateIO,
 };
 use crate::types::PackageVersion;
 
@@ -45,7 +46,7 @@ impl<P, RW, M, C, G, S> ReleaseOperation<P, RW, M, C, G, S>
 where
     P: ProjectProvider + DependencyGraphProvider,
     RW: ChangesetReader + ChangesetWriter + Send + Sync + 'static,
-    M: FullManifestWriter + Send + Sync + 'static,
+    M: FullManifestWriter + ExternalManifestVersionWriter + Send + Sync + 'static,
     C: ChangelogWriter + Send + Sync + 'static,
     G: FullGitProvider + Send + Sync + 'static,
     S: ReleaseStateIO + Send + Sync + 'static,
@@ -169,6 +170,10 @@ where
         let project = self.project_provider.discover_project(start_path)?;
         let (root_config, _) = self.project_provider.load_configs(&project)?;
 
+        let additional_packages = self
+            .project_provider
+            .discover_additional_packages(project.root(), &root_config)?;
+
         let changeset_dir = project.root().join(root_config.changeset_dir());
         let changeset_files = self.changeset_io.list_changesets(&changeset_dir)?;
 
@@ -179,12 +184,19 @@ where
             .release_state_io
             .load_graduation_state(&changeset_dir)?;
 
+        let all_packages: Vec<PackageInfo> = project
+            .packages()
+            .iter()
+            .cloned()
+            .chain(additional_packages.iter().cloned())
+            .collect();
+
         let cli_input = ReleaseCliInput::from(input);
         let validated_config = ReleaseValidator::validate(
             &cli_input,
             prerelease_state.as_ref(),
             graduation_state.as_ref(),
-            project.packages(),
+            &all_packages,
             project.kind(),
         )?;
 
@@ -239,7 +251,18 @@ where
             },
             git_options,
             inherited_packages,
+            additional_packages,
         })))
+    }
+
+    fn all_packages(context: &ReleaseContext) -> Vec<PackageInfo> {
+        context
+            .project
+            .packages()
+            .iter()
+            .cloned()
+            .chain(context.additional_packages.iter().cloned())
+            .collect()
     }
 
     fn plan_release(&self, context: &ReleaseContext, dry_run: bool) -> Result<ReleasePlan> {
@@ -249,8 +272,10 @@ where
             &context.changeset_files,
         )?;
 
+        let all_packages = Self::all_packages(context);
+
         let planned_releases = if context.classification.is_prerelease_graduation {
-            VersionPlanner::plan_graduation(context.project.packages())?
+            VersionPlanner::plan_graduation(&all_packages)?
                 .releases()
                 .clone()
         } else {
@@ -275,7 +300,7 @@ where
 
             let base_releases = VersionPlanner::plan_releases_per_package(
                 &changesets,
-                context.project.packages(),
+                &all_packages,
                 &context.per_package_config,
                 context.root_config.zero_version_behavior(),
             )?
@@ -302,15 +327,18 @@ where
             expanded
         };
 
-        let package_lookup: IndexMap<_, _> = context
+        let mut package_lookup: IndexMap<_, _> = context
             .project
             .packages()
             .iter()
             .map(|p| (p.name().clone(), p.clone()))
             .collect();
+        for pkg in &context.additional_packages {
+            package_lookup.insert(pkg.name().clone(), pkg.clone());
+        }
 
         let unchanged_packages =
-            classifiers::collect_unchanged_packages(context.project.packages(), &planned_releases);
+            classifiers::collect_unchanged_packages(&all_packages, &planned_releases);
 
         let (changelog_updates, changelog_backups) = if dry_run {
             (Vec::new(), Vec::new())
@@ -355,10 +383,29 @@ where
         context: &ReleaseContext,
         plan: ReleasePlan,
     ) -> Result<ReleaseOutcome> {
-        let package_paths: IndexMap<String, PathBuf> = plan
+        let mut package_paths: IndexMap<String, PathBuf> = plan
             .package_lookup
             .iter()
             .map(|(name, info)| (name.clone(), info.path().clone()))
+            .collect();
+        for pkg in &context.additional_packages {
+            package_paths.insert(pkg.name().clone(), pkg.path().clone());
+        }
+
+        let additional_package_manifests: IndexMap<String, AdditionalManifestInfo> = context
+            .root_config
+            .additional_packages()
+            .iter()
+            .map(|decl| {
+                (
+                    decl.name().clone(),
+                    AdditionalManifestInfo {
+                        manifest_path: context.project.root().join(decl.manifest().file_path()),
+                        format: decl.manifest().format(),
+                        version_path: decl.manifest().version_path().clone(),
+                    },
+                )
+            })
             .collect();
 
         let saga_data = ReleaseSagaData::new(
@@ -376,6 +423,7 @@ where
         .with_inherited_packages(context.inherited_packages.clone())
         .with_prerelease_state(context.prerelease_state.as_ref())
         .with_graduation_state(context.graduation_state.as_ref())
+        .with_additional_packages(additional_package_manifests)
         .with_changelog_backups(plan.changelog_backups);
 
         let result = self.execute_release_saga(context, saga_data)?;
@@ -504,7 +552,7 @@ mod tests {
     where
         P: ProjectProvider + DependencyGraphProvider,
         RW: ChangesetReader + ChangesetWriter + Send + Sync + 'static,
-        M: FullManifestWriter + Send + Sync + 'static,
+        M: FullManifestWriter + ExternalManifestVersionWriter + Send + Sync + 'static,
     {
         ReleaseOperation::new(
             project_provider,
