@@ -13,8 +13,13 @@ pub use config::{
 };
 pub use dependency_graph::WorkspaceDependencyGraph;
 pub use error::ProjectError;
-pub use mapping::{FileMapping, PackageFiles, map_files_to_packages};
-pub use project::{CargoProject, ProjectKind, discover_project, ensure_changeset_dir};
+pub use mapping::{
+    FileMapping, PackageFiles, compile_influence_patterns, map_files_to_all_packages,
+    map_files_to_packages,
+};
+pub use project::{
+    CargoProject, ProjectKind, discover_additional_packages, discover_project, ensure_changeset_dir,
+};
 pub use release_state::{GraduationState, PrereleaseState};
 
 pub const DEFAULT_CHANGESET_DIR: &str = ".changeset";

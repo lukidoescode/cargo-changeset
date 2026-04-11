@@ -1,12 +1,13 @@
 use std::path::{Path, PathBuf};
 
-use changeset_core::{CARGO_MANIFEST_FILENAME, PackageInfo};
+use changeset_core::{AdditionalPackageDeclaration, CARGO_MANIFEST_FILENAME, PackageInfo};
 use globset::GlobBuilder;
 use semver::Version;
 
 use crate::CHANGESETS_SUBDIR;
 use crate::config::RootChangesetConfig;
 use crate::error::ProjectError;
+use crate::external_manifest::read_external_version;
 use crate::manifest::{CargoManifest, VersionField, read_manifest};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -90,6 +91,32 @@ pub fn ensure_changeset_dir(
         })?;
     }
     Ok(changeset_dir)
+}
+
+/// # Errors
+///
+/// Returns `ProjectError::ManifestRead` if a manifest file cannot be read,
+/// or `ProjectError::InvalidVersion` if the version string is not valid semver.
+pub fn discover_additional_packages(
+    project_root: &Path,
+    declarations: &[AdditionalPackageDeclaration],
+) -> Result<Vec<PackageInfo>, ProjectError> {
+    declarations
+        .iter()
+        .map(|decl| {
+            let manifest_path = project_root.join(decl.manifest().file_path());
+            let version = read_external_version(
+                &manifest_path,
+                decl.manifest().format(),
+                decl.manifest().version_path(),
+            )?;
+            Ok(PackageInfo::new(
+                decl.name().clone(),
+                version,
+                project_root.join(decl.path()),
+            ))
+        })
+        .collect()
 }
 
 fn find_project_root(start_dir: &Path) -> Result<(PathBuf, CargoManifest), ProjectError> {
@@ -288,6 +315,159 @@ fn expand_glob_pattern(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn make_decl(json: &str) -> AdditionalPackageDeclaration {
+        serde_json::from_str(json).expect("valid declaration JSON")
+    }
+
+    #[test]
+    fn discovers_additional_packages_from_declarations() {
+        let temp = tempfile::tempdir().expect("create temp dir");
+        let root = temp.path();
+
+        std::fs::create_dir_all(root.join("charts/my-chart")).expect("create dir");
+        std::fs::write(
+            root.join("charts/my-chart/Chart.yaml"),
+            "version: \"1.2.3\"\n",
+        )
+        .expect("write file");
+
+        let decl = make_decl(
+            r#"{
+            "name": "my-helm-chart",
+            "path": "charts/my-chart",
+            "influence": ["charts/my-chart/**"],
+            "manifest": {
+                "file-path": "charts/my-chart/Chart.yaml",
+                "format": "yaml",
+                "version-path": "version"
+            }
+        }"#,
+        );
+
+        let result = discover_additional_packages(root, &[decl]).expect("should succeed");
+
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].name(), "my-helm-chart");
+        assert_eq!(result[0].version(), &semver::Version::new(1, 2, 3));
+        assert_eq!(*result[0].path(), root.join("charts/my-chart"));
+    }
+
+    #[test]
+    fn discovers_multiple_additional_packages() {
+        let temp = tempfile::tempdir().expect("create temp dir");
+        let root = temp.path();
+
+        std::fs::create_dir_all(root.join("charts/chart-a")).expect("create dir");
+        std::fs::write(
+            root.join("charts/chart-a/Chart.yaml"),
+            "version: \"2.0.0\"\n",
+        )
+        .expect("write yaml");
+
+        std::fs::create_dir_all(root.join("apps/app-b")).expect("create dir");
+        std::fs::write(
+            root.join("apps/app-b/package.json"),
+            r#"{"version": "3.1.0"}"#,
+        )
+        .expect("write json");
+
+        let decls = vec![
+            make_decl(
+                r#"{
+                "name": "chart-a",
+                "path": "charts/chart-a",
+                "influence": ["charts/chart-a/**"],
+                "manifest": {
+                    "file-path": "charts/chart-a/Chart.yaml",
+                    "format": "yaml",
+                    "version-path": "version"
+                }
+            }"#,
+            ),
+            make_decl(
+                r#"{
+                "name": "app-b",
+                "path": "apps/app-b",
+                "influence": ["apps/app-b/**"],
+                "manifest": {
+                    "file-path": "apps/app-b/package.json",
+                    "format": "json",
+                    "version-path": "version"
+                }
+            }"#,
+            ),
+        ];
+
+        let result = discover_additional_packages(root, &decls).expect("should succeed");
+
+        assert_eq!(result.len(), 2);
+        assert_eq!(result[0].name(), "chart-a");
+        assert_eq!(result[0].version(), &semver::Version::new(2, 0, 0));
+        assert_eq!(result[1].name(), "app-b");
+        assert_eq!(result[1].version(), &semver::Version::new(3, 1, 0));
+    }
+
+    #[test]
+    fn returns_error_for_missing_manifest() {
+        let temp = tempfile::tempdir().expect("create temp dir");
+        let root = temp.path();
+
+        let decl = make_decl(
+            r#"{
+            "name": "missing-chart",
+            "path": "charts/missing",
+            "influence": [],
+            "manifest": {
+                "file-path": "charts/missing/Chart.yaml",
+                "format": "yaml",
+                "version-path": "version"
+            }
+        }"#,
+        );
+
+        let result = discover_additional_packages(root, &[decl]);
+
+        assert!(matches!(result, Err(ProjectError::ManifestRead { .. })));
+    }
+
+    #[test]
+    fn returns_error_for_invalid_version_in_manifest() {
+        let temp = tempfile::tempdir().expect("create temp dir");
+        let root = temp.path();
+
+        std::fs::create_dir_all(root.join("charts/bad")).expect("create dir");
+        std::fs::write(
+            root.join("charts/bad/Chart.yaml"),
+            "version: \"not-a-version\"\n",
+        )
+        .expect("write file");
+
+        let decl = make_decl(
+            r#"{
+            "name": "bad-chart",
+            "path": "charts/bad",
+            "influence": [],
+            "manifest": {
+                "file-path": "charts/bad/Chart.yaml",
+                "format": "yaml",
+                "version-path": "version"
+            }
+        }"#,
+        );
+
+        let result = discover_additional_packages(root, &[decl]);
+
+        assert!(matches!(result, Err(ProjectError::InvalidVersion { .. })));
+    }
+
+    #[test]
+    fn returns_empty_vec_for_no_declarations() {
+        let temp = tempfile::tempdir().expect("create temp dir");
+        let result =
+            discover_additional_packages(temp.path(), &[]).expect("should succeed with empty");
+        assert!(result.is_empty());
+    }
 
     #[test]
     fn determine_project_kind_virtual() {
