@@ -64,4 +64,24 @@ pub enum ProjectError {
         #[source]
         source: std::io::Error,
     },
+
+    #[error("failed to parse JSON at '{path}'")]
+    JsonParse {
+        path: PathBuf,
+        #[source]
+        source: serde_json::Error,
+    },
+
+    #[error("failed to parse YAML at '{path}'")]
+    YamlParse {
+        path: PathBuf,
+        #[source]
+        source: serde_yml::Error,
+    },
+
+    #[error("version path '{version_path}' not found in external manifest at '{path}'")]
+    ExternalVersionPathNotFound { path: PathBuf, version_path: String },
+
+    #[error("expected string at version path '{version_path}' in external manifest at '{path}'")]
+    ExternalVersionNotString { path: PathBuf, version_path: String },
 }

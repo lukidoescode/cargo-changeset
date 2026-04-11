@@ -13,9 +13,12 @@ keywords = ["cargo", "changeset", "toml", "manifest", "release"]
 categories = ["development-tools::cargo-plugins"]
 
 [dependencies]
+changeset-core = { workspace = true }
+jsonc-parser = { workspace = true }
 semver = { workspace = true }
 thiserror = { workspace = true }
 toml_edit = { workspace = true }
+yaml-edit = { workspace = true }
 
 [dev-dependencies]
 tempfile = "3.25"

@@ -1,6 +1,7 @@
 mod config;
 mod dependency_graph;
 mod error;
+mod external_manifest;
 mod manifest;
 mod mapping;
 mod project;
