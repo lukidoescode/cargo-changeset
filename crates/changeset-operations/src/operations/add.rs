@@ -70,8 +70,19 @@ where
     /// if the changeset cannot be written.
     pub fn execute(&self, start_path: &Path, input: &AddInput) -> Result<AddResult> {
         let project = self.project_provider.discover_project(start_path)?;
+        let (root_config, _) = self.project_provider.load_configs(&project)?;
+        let additional = self
+            .project_provider
+            .discover_additional_packages(project.root(), &root_config)?;
 
-        if project.packages().is_empty() {
+        let all_packages: Vec<PackageInfo> = project
+            .packages()
+            .iter()
+            .cloned()
+            .chain(additional)
+            .collect();
+
+        if all_packages.is_empty() {
             return Err(OperationError::EmptyProject(project.root().to_path_buf()));
         }
 
@@ -82,8 +93,7 @@ where
         };
 
         let display_labels: Option<Vec<String>> = graph.as_ref().map(|g| {
-            project
-                .packages()
+            all_packages
                 .iter()
                 .map(|pkg| {
                     let dependents = g.transitive_dependents(pkg.name());
@@ -104,7 +114,7 @@ where
         });
 
         let packages =
-            match self.select_packages(project.packages(), input, display_labels.as_deref())? {
+            match self.select_packages(&all_packages, input, display_labels.as_deref())? {
                 Some(packages) if packages.is_empty() => return Ok(AddResult::NoPackages),
                 Some(packages) => packages,
                 None => return Ok(AddResult::Cancelled),
@@ -139,7 +149,6 @@ where
 
         let changeset = Changeset::new(description, releases, category);
 
-        let (root_config, _) = self.project_provider.load_configs(&project)?;
         let changeset_dir = self
             .project_provider
             .ensure_changeset_dir(&project, &root_config)?;
@@ -805,6 +814,176 @@ mod tests {
             }
             _ => panic!("Expected AddResult::Created"),
         }
+    }
+
+    fn make_additional_package(name: &str) -> PackageInfo {
+        make_package(name, "1.0.0")
+    }
+
+    #[test]
+    fn creates_changeset_for_additional_package() {
+        let helm_chart = make_additional_package("helm-chart");
+        let project_provider = MockProjectProvider::single_package("core", "1.0.0")
+            .with_additional_packages(vec![helm_chart]);
+        let writer = MockChangesetWriter::new();
+        let interaction = MockInteractionProvider::all_cancelled();
+
+        let operation = AddOperation::new(project_provider, writer, interaction);
+
+        let input = AddInput {
+            packages: vec!["helm-chart".to_string()],
+            bump: Some(BumpType::Patch),
+            description: Some("Update helm chart".to_string()),
+            ..Default::default()
+        };
+
+        let result = operation
+            .execute(Path::new("/any"), &input)
+            .expect("AddOperation should succeed for additional package");
+
+        match result {
+            AddResult::Created { changeset, .. } => {
+                assert_eq!(changeset.releases().len(), 1);
+                assert_eq!(changeset.releases()[0].name(), "helm-chart");
+                assert_eq!(changeset.releases()[0].bump_type(), BumpType::Patch);
+            }
+            _ => panic!("Expected AddResult::Created"),
+        }
+    }
+
+    #[test]
+    fn auto_selects_single_additional_package_only_project() {
+        let helm_chart = make_additional_package("helm-chart");
+        let project_provider =
+            MockProjectProvider::workspace(vec![]).with_additional_packages(vec![helm_chart]);
+        let writer = MockChangesetWriter::new();
+        let interaction = MockInteractionProvider::all_cancelled();
+
+        let operation = AddOperation::new(project_provider, writer, interaction);
+
+        let input = AddInput {
+            bump: Some(BumpType::Minor),
+            description: Some("New chart version".to_string()),
+            ..Default::default()
+        };
+
+        let result = operation
+            .execute(Path::new("/any"), &input)
+            .expect("AddOperation should succeed for single additional package project");
+
+        match result {
+            AddResult::Created { changeset, .. } => {
+                assert_eq!(changeset.releases().len(), 1);
+                assert_eq!(changeset.releases()[0].name(), "helm-chart");
+            }
+            _ => panic!("Expected AddResult::Created"),
+        }
+    }
+
+    #[test]
+    fn additional_packages_excluded_from_dependency_graph() {
+        let helm_chart = make_additional_package("helm-chart");
+        let project_provider =
+            MockProjectProvider::workspace(vec![("core", "1.0.0"), ("app", "1.0.0")])
+                .with_dependency_edges(vec![("app", "core")])
+                .with_additional_packages(vec![helm_chart]);
+        let writer = MockChangesetWriter::new();
+        let interaction = MockInteractionProvider::all_cancelled();
+
+        let operation = AddOperation::new(project_provider, writer, interaction);
+
+        let input = AddInput {
+            packages: vec!["core".to_string()],
+            bump: Some(BumpType::Patch),
+            description: Some("Fix in core".to_string()),
+            ..Default::default()
+        };
+
+        let result = operation
+            .execute(Path::new("/any"), &input)
+            .expect("AddOperation should succeed");
+
+        match result {
+            AddResult::Created {
+                uncovered_dependents,
+                ..
+            } => {
+                assert!(
+                    uncovered_dependents.contains(&"app".to_string()),
+                    "app should be an uncovered dependent of core"
+                );
+                assert!(
+                    !uncovered_dependents.contains(&"helm-chart".to_string()),
+                    "helm-chart should not appear as a dependent"
+                );
+            }
+            _ => panic!("Expected AddResult::Created"),
+        }
+    }
+
+    #[test]
+    fn workspace_with_rust_and_additional_packages_resolves_both() {
+        let helm_chart = make_additional_package("helm-chart");
+        let project_provider = MockProjectProvider::single_package("core", "1.0.0")
+            .with_additional_packages(vec![helm_chart]);
+        let writer = MockChangesetWriter::new();
+        let interaction = MockInteractionProvider::all_cancelled();
+
+        let operation = AddOperation::new(project_provider, writer, interaction);
+
+        let mut package_bumps = HashMap::new();
+        package_bumps.insert("core".to_string(), BumpType::Patch);
+        package_bumps.insert("helm-chart".to_string(), BumpType::Patch);
+
+        let input = AddInput {
+            package_bumps,
+            description: Some("Update both".to_string()),
+            ..Default::default()
+        };
+
+        let result = operation
+            .execute(Path::new("/any"), &input)
+            .expect("AddOperation should succeed for mixed Rust and additional packages");
+
+        match result {
+            AddResult::Created { changeset, .. } => {
+                assert_eq!(changeset.releases().len(), 2);
+                let names: Vec<_> = changeset
+                    .releases()
+                    .iter()
+                    .map(|r| r.name().as_str())
+                    .collect();
+                assert!(names.contains(&"core"));
+                assert!(names.contains(&"helm-chart"));
+            }
+            _ => panic!("Expected AddResult::Created"),
+        }
+    }
+
+    #[test]
+    fn returns_error_for_unknown_additional_package_name() {
+        let helm_chart = make_additional_package("helm-chart");
+        let project_provider = MockProjectProvider::single_package("core", "1.0.0")
+            .with_additional_packages(vec![helm_chart]);
+        let writer = MockChangesetWriter::new();
+        let interaction = MockInteractionProvider::all_cancelled();
+
+        let operation = AddOperation::new(project_provider, writer, interaction);
+
+        let input = AddInput {
+            packages: vec!["nonexistent-chart".to_string()],
+            bump: Some(BumpType::Patch),
+            description: Some("Test".to_string()),
+            ..Default::default()
+        };
+
+        let result = operation.execute(Path::new("/any"), &input);
+
+        assert!(result.is_err());
+        assert!(matches!(
+            result.expect_err("should error"),
+            crate::OperationError::UnknownPackage { .. }
+        ));
     }
 
     #[test]
