@@ -72,9 +72,11 @@ where
     pub fn execute(&self, start_path: &Path, input: &AddInput) -> Result<AddResult> {
         let project = self.project_provider.discover_project(start_path)?;
         let (root_config, _) = self.project_provider.load_configs(&project)?;
-        let additional = self
-            .project_provider
-            .discover_additional_packages(project.root(), &root_config)?;
+        let additional = super::discover_additional_packages_if_workspace(
+            &self.project_provider,
+            &project,
+            &root_config,
+        )?;
 
         let all_packages: Cow<'_, [PackageInfo]> = if additional.is_empty() {
             Cow::Borrowed(project.packages())
@@ -830,7 +832,7 @@ mod tests {
     #[test]
     fn creates_changeset_for_additional_package() {
         let helm_chart = make_additional_package("helm-chart");
-        let project_provider = MockProjectProvider::single_package("core", "1.0.0")
+        let project_provider = MockProjectProvider::workspace(vec![("core", "1.0.0")])
             .with_additional_packages(vec![helm_chart]);
         let writer = MockChangesetWriter::new();
         let interaction = MockInteractionProvider::all_cancelled();
@@ -931,7 +933,7 @@ mod tests {
     #[test]
     fn workspace_with_rust_and_additional_packages_resolves_both() {
         let helm_chart = make_additional_package("helm-chart");
-        let project_provider = MockProjectProvider::single_package("core", "1.0.0")
+        let project_provider = MockProjectProvider::workspace(vec![("core", "1.0.0")])
             .with_additional_packages(vec![helm_chart]);
         let writer = MockChangesetWriter::new();
         let interaction = MockInteractionProvider::all_cancelled();
@@ -970,7 +972,7 @@ mod tests {
     #[test]
     fn returns_error_for_unknown_additional_package_name() {
         let helm_chart = make_additional_package("helm-chart");
-        let project_provider = MockProjectProvider::single_package("core", "1.0.0")
+        let project_provider = MockProjectProvider::workspace(vec![("core", "1.0.0")])
             .with_additional_packages(vec![helm_chart]);
         let writer = MockChangesetWriter::new();
         let interaction = MockInteractionProvider::all_cancelled();
@@ -1021,5 +1023,28 @@ mod tests {
             }
             _ => panic!("Expected AddResult::Created"),
         }
+    }
+
+    #[test]
+    fn single_package_never_calls_discover_additional_packages() {
+        let project_provider =
+            MockProjectProvider::single_package("solo", "1.0.0").with_fail_on_discover_additional();
+        let writer = MockChangesetWriter::new();
+        let interaction = MockInteractionProvider::all_cancelled();
+
+        let operation = AddOperation::new(project_provider, writer, interaction);
+
+        let input = AddInput {
+            packages: vec!["solo".to_string()],
+            bump: Some(BumpType::Patch),
+            description: Some("Fix".to_string()),
+            ..Default::default()
+        };
+
+        let result = operation
+            .execute(Path::new("/any"), &input)
+            .expect("single-package should succeed without calling discover_additional_packages");
+
+        assert!(matches!(result, AddResult::Created { .. }));
     }
 }

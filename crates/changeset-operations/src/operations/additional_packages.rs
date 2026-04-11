@@ -76,7 +76,10 @@ where
         start_path: &Path,
         input: AdditionalPackageAddInput,
     ) -> Result<Vec<AdditionalPackageEvent>> {
-        execute_add(&self.project_provider, &self.writer, start_path, input)
+        let project = self.project_provider.discover_project(start_path)?;
+        require_workspace(&project)?;
+        let (root_config, _) = self.project_provider.load_configs(&project)?;
+        write_additional_package(&self.writer, &project, &root_config, input)
     }
 }
 
@@ -104,6 +107,7 @@ where
     /// or the manifest cannot be written.
     pub fn execute(&self, start_path: &Path, name: &str) -> Result<Vec<AdditionalPackageEvent>> {
         let project = self.project_provider.discover_project(start_path)?;
+        require_workspace(&project)?;
         let (root_config, _) = self.project_provider.load_configs(&project)?;
 
         if !root_config
@@ -156,6 +160,7 @@ where
         input: AdditionalPackageEditInput,
     ) -> Result<Vec<AdditionalPackageEvent>> {
         let project = self.project_provider.discover_project(start_path)?;
+        require_workspace(&project)?;
         let (root_config, _) = self.project_provider.load_configs(&project)?;
 
         if !root_config
@@ -215,6 +220,7 @@ where
     /// Returns an error if the project cannot be discovered or configs cannot be loaded.
     pub fn execute(&self, start_path: &Path) -> Result<Vec<AdditionalPackageEvent>> {
         let project = self.project_provider.discover_project(start_path)?;
+        require_workspace(&project)?;
         let (root_config, _) = self.project_provider.load_configs(&project)?;
 
         let packages = root_config.additional_packages();
@@ -260,10 +266,13 @@ where
 
     /// # Errors
     ///
-    /// Returns an error if any user prompt fails, the project cannot be discovered,
+    /// Returns an error if the project is not a workspace, any user prompt fails,
     /// glob patterns are invalid, the manifest file does not exist, or the manifest
     /// cannot be written.
     pub fn execute(&self, start_path: &Path) -> Result<Vec<AdditionalPackageEvent>> {
+        let project = self.project_provider.discover_project(start_path)?;
+        require_workspace(&project)?;
+
         let name = self.interaction.prompt_package_name()?;
         let path = self.interaction.prompt_package_path()?;
         let influence = self.interaction.prompt_influence_patterns()?;
@@ -271,10 +280,11 @@ where
         let manifest_format = self.interaction.prompt_manifest_format()?;
         let manifest_version_path = self.interaction.prompt_manifest_version_path()?;
 
-        execute_add(
-            &self.project_provider,
+        let (root_config, _) = self.project_provider.load_configs(&project)?;
+        write_additional_package(
             &self.writer,
-            start_path,
+            &project,
+            &root_config,
             AdditionalPackageAddInput {
                 name,
                 path,
@@ -314,6 +324,7 @@ where
     /// the selection prompt fails, or the manifest cannot be written.
     pub fn execute(&self, start_path: &Path) -> Result<Vec<AdditionalPackageEvent>> {
         let project = self.project_provider.discover_project(start_path)?;
+        require_workspace(&project)?;
         let (root_config, _) = self.project_provider.load_configs(&project)?;
 
         let packages: Vec<&AdditionalPackageDeclaration> =
@@ -370,6 +381,7 @@ where
     /// be written.
     pub fn execute(&self, start_path: &Path) -> Result<Vec<AdditionalPackageEvent>> {
         let project = self.project_provider.discover_project(start_path)?;
+        require_workspace(&project)?;
         let (root_config, _) = self.project_provider.load_configs(&project)?;
 
         let packages: Vec<&AdditionalPackageDeclaration> =
@@ -441,19 +453,15 @@ where
     }
 }
 
-fn execute_add<P, W>(
-    project_provider: &P,
+fn write_additional_package<W>(
     writer: &W,
-    start_path: &Path,
+    project: &changeset_project::CargoProject,
+    root_config: &changeset_project::RootChangesetConfig,
     input: AdditionalPackageAddInput,
 ) -> Result<Vec<AdditionalPackageEvent>>
 where
-    P: ProjectProvider,
     W: AdditionalPackageConfigWriter,
 {
-    let project = project_provider.discover_project(start_path)?;
-    let (root_config, _) = project_provider.load_configs(&project)?;
-
     let existing = root_config.additional_packages();
     if existing.iter().any(|p| p.name() == &input.name) {
         return Err(OperationError::AdditionalPackageAlreadyExists { name: input.name });
@@ -483,11 +491,18 @@ where
         ),
     );
 
-    let (manifest_path, section) = resolve_manifest_and_section(&project);
+    let (manifest_path, section) = resolve_manifest_and_section(project);
 
     writer.add_additional_package(&manifest_path, section, &declaration)?;
 
     Ok(vec![AdditionalPackageEvent::Added { name: input.name }])
+}
+
+fn require_workspace(project: &changeset_project::CargoProject) -> Result<()> {
+    if *project.kind() == ProjectKind::SinglePackage {
+        return Err(OperationError::AdditionalPackagesRequireWorkspace);
+    }
+    Ok(())
 }
 
 fn resolve_manifest_and_section(
@@ -498,7 +513,9 @@ fn resolve_manifest_and_section(
         ProjectKind::VirtualWorkspace | ProjectKind::WorkspaceWithRoot => {
             MetadataSection::Workspace
         }
-        ProjectKind::SinglePackage => MetadataSection::Package,
+        ProjectKind::SinglePackage => {
+            unreachable!("require_workspace() must be called before this function")
+        }
     };
     (manifest_path, section)
 }
@@ -824,5 +841,118 @@ mod tests {
             .expect("load configs");
 
         assert_eq!(root_config.additional_packages().len(), 0);
+    }
+
+    #[test]
+    fn add_rejects_single_package_project() {
+        let (_dir, manifest_file) = make_temp_manifest_file();
+        let provider = MockProjectProvider::single_package("my-crate", "1.0.0");
+        let writer = MockAdditionalPackageConfigWriter::new();
+
+        let op = AdditionalPackageDirectAddOperation::new(provider, writer);
+        let input = AdditionalPackageAddInput {
+            name: "my-chart".to_string(),
+            path: PathBuf::from("charts/my-chart"),
+            influence: vec![],
+            manifest_file_path: manifest_file,
+            manifest_format: ManifestFormat::Yaml,
+            manifest_version_path: "version".to_string(),
+        };
+
+        let result = op.execute(Path::new("/any"), input);
+        assert!(matches!(
+            result,
+            Err(OperationError::AdditionalPackagesRequireWorkspace)
+        ));
+    }
+
+    #[test]
+    fn remove_rejects_single_package_project() {
+        let provider = MockProjectProvider::single_package("my-crate", "1.0.0");
+        let writer = MockAdditionalPackageConfigWriter::new();
+
+        let op = AdditionalPackageDirectRemoveOperation::new(provider, writer);
+        let result = op.execute(Path::new("/any"), "my-chart");
+        assert!(matches!(
+            result,
+            Err(OperationError::AdditionalPackagesRequireWorkspace)
+        ));
+    }
+
+    #[test]
+    fn edit_rejects_single_package_project() {
+        let provider = MockProjectProvider::single_package("my-crate", "1.0.0");
+        let writer = MockAdditionalPackageConfigWriter::new();
+
+        let op = AdditionalPackageDirectEditOperation::new(provider, writer);
+        let input = AdditionalPackageEditInput {
+            name: "my-chart".to_string(),
+            updates: AdditionalPackageUpdate {
+                path: Some(PathBuf::from("new/path")),
+                influence: None,
+                manifest_file_path: None,
+                manifest_format: None,
+                manifest_version_path: None,
+            },
+        };
+
+        let result = op.execute(Path::new("/any"), input);
+        assert!(matches!(
+            result,
+            Err(OperationError::AdditionalPackagesRequireWorkspace)
+        ));
+    }
+
+    #[test]
+    fn list_rejects_single_package_project() {
+        let provider = MockProjectProvider::single_package("my-crate", "1.0.0");
+        let op = AdditionalPackageListOperation::new(provider);
+        let result = op.execute(Path::new("/any"));
+        assert!(matches!(
+            result,
+            Err(OperationError::AdditionalPackagesRequireWorkspace)
+        ));
+    }
+
+    #[test]
+    fn interactive_add_rejects_single_package_without_prompts() {
+        let provider = MockProjectProvider::single_package("my-crate", "1.0.0");
+        let writer = MockAdditionalPackageConfigWriter::new();
+        let interaction = crate::mocks::PanickingAdditionalPackageInteractionProvider;
+
+        let op = AdditionalPackageInteractiveAddOperation::new(provider, writer, interaction);
+        let result = op.execute(Path::new("/any"));
+        assert!(matches!(
+            result,
+            Err(OperationError::AdditionalPackagesRequireWorkspace)
+        ));
+    }
+
+    #[test]
+    fn interactive_remove_rejects_single_package_without_prompts() {
+        let provider = MockProjectProvider::single_package("my-crate", "1.0.0");
+        let writer = MockAdditionalPackageConfigWriter::new();
+        let interaction = crate::mocks::PanickingAdditionalPackageInteractionProvider;
+
+        let op = AdditionalPackageInteractiveRemoveOperation::new(provider, writer, interaction);
+        let result = op.execute(Path::new("/any"));
+        assert!(matches!(
+            result,
+            Err(OperationError::AdditionalPackagesRequireWorkspace)
+        ));
+    }
+
+    #[test]
+    fn interactive_edit_rejects_single_package_without_prompts() {
+        let provider = MockProjectProvider::single_package("my-crate", "1.0.0");
+        let writer = MockAdditionalPackageConfigWriter::new();
+        let interaction = crate::mocks::PanickingAdditionalPackageInteractionProvider;
+
+        let op = AdditionalPackageInteractiveEditOperation::new(provider, writer, interaction);
+        let result = op.execute(Path::new("/any"));
+        assert!(matches!(
+            result,
+            Err(OperationError::AdditionalPackagesRequireWorkspace)
+        ));
     }
 }

@@ -170,9 +170,11 @@ where
         let project = self.project_provider.discover_project(start_path)?;
         let (root_config, _) = self.project_provider.load_configs(&project)?;
 
-        let additional_packages = self
-            .project_provider
-            .discover_additional_packages(project.root(), &root_config)?;
+        let additional_packages = crate::operations::discover_additional_packages_if_workspace(
+            &self.project_provider,
+            &project,
+            &root_config,
+        )?;
 
         let changeset_dir = project.root().join(root_config.changeset_dir());
         let changeset_files = self.changeset_io.list_changesets(&changeset_dir)?;
@@ -2423,5 +2425,31 @@ mod tests {
             .find(|r| r.name() == "crate-b")
             .expect("crate-b should be in planned releases");
         assert_eq!(release_b.bump_type(), BumpType::Patch);
+    }
+
+    #[test]
+    fn single_package_never_calls_discover_additional_packages() {
+        let project_provider = MockProjectProvider::single_package("my-crate", "1.0.0")
+            .with_fail_on_discover_additional();
+
+        let changeset = make_changeset("my-crate", BumpType::Patch, "Fix bug");
+        let changeset_reader = MockChangesetReader::new()
+            .with_changeset(PathBuf::from(".changeset/changesets/fix.md"), changeset);
+
+        let operation = ReleaseOperation::new(
+            project_provider,
+            changeset_reader,
+            MockManifestWriter::new(),
+            MockChangelogWriter::new(),
+            MockGitProvider::new(),
+            MockReleaseStateIO::new(),
+        );
+
+        let input = default_input();
+        let result = operation
+            .execute(Path::new("/any"), &input)
+            .expect("single-package should succeed without calling discover_additional_packages");
+
+        assert!(matches!(result, ReleaseOutcome::DryRun(_)));
     }
 }

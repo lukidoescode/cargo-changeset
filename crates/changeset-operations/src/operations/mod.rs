@@ -7,6 +7,12 @@ pub mod release;
 mod status;
 mod verify;
 
+use changeset_core::PackageInfo;
+use changeset_project::ProjectKind;
+
+use crate::Result;
+use crate::traits::ProjectProvider;
+
 pub use crate::planner::{ReleasePlan, VersionPlanner};
 pub use add::{AddInput, AddOperation, AddResult};
 pub use additional_packages::{
@@ -33,3 +39,14 @@ pub use release::{
 };
 pub use status::{StatusOperation, StatusOutput, StatusOutputBuilder};
 pub use verify::{VerifyInput, VerifyInputBuilder, VerifyOperation, VerifyOutcome, VerifyResult};
+
+pub(crate) fn discover_additional_packages_if_workspace<P: ProjectProvider>(
+    provider: &P,
+    project: &changeset_project::CargoProject,
+    root_config: &changeset_project::RootChangesetConfig,
+) -> Result<Vec<PackageInfo>> {
+    if *project.kind() == ProjectKind::SinglePackage {
+        return Ok(Vec::new());
+    }
+    provider.discover_additional_packages(project.root(), root_config)
+}

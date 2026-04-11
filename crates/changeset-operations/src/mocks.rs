@@ -52,6 +52,7 @@ pub struct MockProjectProvider {
     root_config: RootChangesetConfig,
     dependency_edges: Vec<(String, String)>,
     additional_packages: Vec<PackageInfo>,
+    fail_on_discover_additional: bool,
 }
 
 impl MockProjectProvider {
@@ -64,6 +65,7 @@ impl MockProjectProvider {
             root_config: RootChangesetConfig::default(),
             dependency_edges: Vec::new(),
             additional_packages: Vec::new(),
+            fail_on_discover_additional: false,
         }
     }
 
@@ -108,6 +110,12 @@ impl MockProjectProvider {
     #[must_use]
     pub fn with_additional_packages(mut self, packages: Vec<PackageInfo>) -> Self {
         self.additional_packages = packages;
+        self
+    }
+
+    #[must_use]
+    pub fn with_fail_on_discover_additional(mut self) -> Self {
+        self.fail_on_discover_additional = true;
         self
     }
 
@@ -176,6 +184,11 @@ impl ProjectProvider for MockProjectProvider {
         _project_root: &Path,
         _config: &RootChangesetConfig,
     ) -> Result<Vec<PackageInfo>> {
+        if self.fail_on_discover_additional {
+            return Err(crate::OperationError::Io(std::io::Error::other(
+                "discover_additional_packages must not be called for single-package projects",
+            )));
+        }
         Ok(self.additional_packages.clone())
     }
 }
@@ -1846,6 +1859,56 @@ impl AdditionalPackageInteractionProvider for MockAdditionalPackageInteractionPr
 
     fn confirm_removal(&self, _name: &str) -> Result<bool> {
         Ok(self.confirm_removal_result)
+    }
+}
+
+pub struct PanickingAdditionalPackageInteractionProvider;
+
+impl AdditionalPackageInteractionProvider for PanickingAdditionalPackageInteractionProvider {
+    fn prompt_package_name(&self) -> Result<String> {
+        panic!("prompt_package_name must not be called");
+    }
+
+    fn prompt_package_path(&self) -> Result<PathBuf> {
+        panic!("prompt_package_path must not be called");
+    }
+
+    fn prompt_influence_patterns(&self) -> Result<Vec<String>> {
+        panic!("prompt_influence_patterns must not be called");
+    }
+
+    fn prompt_manifest_file_path(&self) -> Result<PathBuf> {
+        panic!("prompt_manifest_file_path must not be called");
+    }
+
+    fn prompt_manifest_format(&self) -> Result<ManifestFormat> {
+        panic!("prompt_manifest_format must not be called");
+    }
+
+    fn prompt_manifest_version_path(&self) -> Result<String> {
+        panic!("prompt_manifest_version_path must not be called");
+    }
+
+    fn select_package_to_remove(
+        &self,
+        _packages: &[&AdditionalPackageDeclaration],
+    ) -> Result<MenuSelection<usize>> {
+        panic!("select_package_to_remove must not be called");
+    }
+
+    fn select_package_to_edit(
+        &self,
+        _packages: &[&AdditionalPackageDeclaration],
+    ) -> Result<MenuSelection<usize>> {
+        panic!("select_package_to_edit must not be called");
+    }
+
+    fn select_field_to_edit(&self) -> Result<MenuSelection<AdditionalPackageField>> {
+        panic!("select_field_to_edit must not be called");
+    }
+
+    fn confirm_removal(&self, _name: &str) -> Result<bool> {
+        panic!("confirm_removal must not be called");
     }
 }
 

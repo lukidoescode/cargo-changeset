@@ -163,6 +163,9 @@ pub enum OperationError {
     #[error("failed to delete {} tag(s) during compensation: {}", failed_tags.len(), failed_tags.join(", "))]
     TagDeletionFailed { failed_tags: Vec<String> },
 
+    #[error("additional packages are only supported in Cargo workspace projects")]
+    AdditionalPackagesRequireWorkspace,
+
     #[error("additional package '{name}' already exists")]
     AdditionalPackageAlreadyExists { name: String },
 

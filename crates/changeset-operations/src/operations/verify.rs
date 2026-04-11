@@ -92,14 +92,20 @@ where
         let project = self.project_provider.discover_project(start_path)?;
         let (root_config, package_configs) = self.project_provider.load_configs(&project)?;
 
-        let additional_packages = self
-            .project_provider
-            .discover_additional_packages(project.root(), &root_config)?;
-        let influence_patterns = compile_influence_patterns(root_config.additional_packages())?;
-        let additional_with_patterns: Vec<_> = additional_packages
-            .into_iter()
-            .zip(influence_patterns)
-            .collect();
+        let additional_packages = super::discover_additional_packages_if_workspace(
+            &self.project_provider,
+            &project,
+            &root_config,
+        )?;
+        let additional_with_patterns: Vec<_> = if additional_packages.is_empty() {
+            Vec::new()
+        } else {
+            let influence_patterns = compile_influence_patterns(root_config.additional_packages())?;
+            additional_packages
+                .into_iter()
+                .zip(influence_patterns)
+                .collect()
+        };
 
         let collected = self.collect_changes(&project, root_config.changeset_dir(), input)?;
         let is_dirty = collected.is_dirty;
@@ -1392,5 +1398,27 @@ mod tests {
             }
             other => panic!("Expected VerifyOutcome::Success, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn single_package_never_calls_discover_additional_packages() {
+        let project_provider = MockProjectProvider::single_package("my-crate", "1.0.0")
+            .with_fail_on_discover_additional();
+
+        let git_provider = MockGitProvider::new();
+        let changeset_reader = MockChangesetReader::new();
+
+        let operation = VerifyOperation::new(project_provider, git_provider, changeset_reader);
+
+        let input = VerifyInputBuilder::default()
+            .base("main".to_string())
+            .build()
+            .expect("all fields have defaults");
+
+        let result = operation
+            .execute(Path::new("/any"), &input)
+            .expect("single-package should succeed without calling discover_additional_packages");
+
+        assert!(matches!(result.outcome(), VerifyOutcome::NoChanges));
     }
 }

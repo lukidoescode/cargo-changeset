@@ -68,9 +68,11 @@ where
     pub fn execute(&self, start_path: &Path) -> Result<StatusOutput> {
         let project = self.project_provider.discover_project(start_path)?;
         let (root_config, _) = self.project_provider.load_configs(&project)?;
-        let additional = self
-            .project_provider
-            .discover_additional_packages(project.root(), &root_config)?;
+        let additional = super::discover_additional_packages_if_workspace(
+            &self.project_provider,
+            &project,
+            &root_config,
+        )?;
 
         let all_packages: Cow<'_, [PackageInfo]> = if additional.is_empty() {
             Cow::Borrowed(project.packages())
@@ -878,7 +880,7 @@ mod tests {
 
     #[test]
     fn status_includes_additional_package_in_projected_releases() {
-        let project_provider = MockProjectProvider::single_package("core", "1.0.0")
+        let project_provider = MockProjectProvider::workspace(vec![("core", "1.0.0")])
             .with_additional_packages(vec![make_package("helm-chart", "1.0.0")]);
 
         let changeset = make_changeset("helm-chart", BumpType::Patch, "Fix chart template");
@@ -911,7 +913,7 @@ mod tests {
 
     #[test]
     fn status_lists_additional_package_in_unchanged_when_no_changeset() {
-        let project_provider = MockProjectProvider::single_package("core", "1.0.0")
+        let project_provider = MockProjectProvider::workspace(vec![("core", "1.0.0")])
             .with_additional_packages(vec![make_package("helm-chart", "1.0.0")]);
         let changeset_reader = MockChangesetReader::new();
 
@@ -1006,7 +1008,7 @@ mod tests {
 
     #[test]
     fn mixed_rust_and_additional_packages_with_changesets() {
-        let project_provider = MockProjectProvider::single_package("core", "1.0.0")
+        let project_provider = MockProjectProvider::workspace(vec![("core", "1.0.0")])
             .with_additional_packages(vec![make_package("helm-chart", "2.0.0")]);
 
         let changeset1 = make_changeset("core", BumpType::Patch, "Fix core");
@@ -1042,5 +1044,20 @@ mod tests {
         assert_eq!(*helm_release.new_version(), Version::new(2, 1, 0));
 
         assert!(result.unchanged_packages().is_empty());
+    }
+
+    #[test]
+    fn single_package_never_calls_discover_additional_packages() {
+        let project_provider = MockProjectProvider::single_package("my-crate", "1.0.0")
+            .with_fail_on_discover_additional();
+        let changeset_reader = MockChangesetReader::new();
+
+        let operation = make_operation(project_provider, changeset_reader);
+
+        let result = operation
+            .execute(Path::new("/any"))
+            .expect("single-package should succeed without calling discover_additional_packages");
+
+        assert!(result.changesets().is_empty());
     }
 }
