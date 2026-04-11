@@ -36,6 +36,7 @@ derive_builder = { workspace = true }
 anyhow = "1.0.101"
 changeset-project = { workspace = true, features = ["testing"] }
 git2 = { workspace = true }
+serde_json = { workspace = true }
 tempfile = "3.25"
 toml_edit = { workspace = true }
 

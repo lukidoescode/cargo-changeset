@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, RwLock};
 
 use changeset_changelog::{RepositoryInfo, VersionRelease};
-use changeset_core::{BumpType, ChangeCategory, Changeset, PackageInfo};
+use changeset_core::{BumpType, ChangeCategory, Changeset, ManifestFormat, PackageInfo};
 use changeset_git::{CommitInfo, FileChange, TagInfo};
 use changeset_manifest::{InitConfig, MetadataSection};
 use changeset_project::{
@@ -16,13 +16,13 @@ use crate::Result;
 use crate::traits::{
     BumpSelection, CategorySelection, ChangelogSettingsInput, ChangelogWriteResult,
     ChangelogWriter, ChangesetReader, ChangesetWriter, DependencyGraphProvider, DescriptionInput,
-    FilteringSettingsInput, GitCommitProvider, GitDiffProvider, GitSettingsInput,
-    GitStagingProvider, GitStatusProvider, GitTagProvider, GitWorkdirDiffProvider,
-    GraduationAction, GraduationInteractionProvider, InheritedVersionChecker,
-    InitInteractionProvider, InteractionProvider, LockfileUpdater, ManifestDependencyWriter,
-    ManifestMetadataWriter, ManifestVersionWriter, MenuSelection, PackageSelection,
-    PrereleaseAction, PrereleaseInteractionProvider, ProjectContext, ProjectProvider,
-    ReleaseStateIO, VersionSettingsInput, WorkspaceVersionManager,
+    ExternalManifestVersionWriter, FilteringSettingsInput, GitCommitProvider, GitDiffProvider,
+    GitSettingsInput, GitStagingProvider, GitStatusProvider, GitTagProvider,
+    GitWorkdirDiffProvider, GraduationAction, GraduationInteractionProvider,
+    InheritedVersionChecker, InitInteractionProvider, InteractionProvider, LockfileUpdater,
+    ManifestDependencyWriter, ManifestMetadataWriter, ManifestVersionWriter, MenuSelection,
+    PackageSelection, PrereleaseAction, PrereleaseInteractionProvider, ProjectContext,
+    ProjectProvider, ReleaseStateIO, VersionSettingsInput, WorkspaceVersionManager,
 };
 
 macro_rules! impl_arc_delegation {
@@ -48,6 +48,7 @@ pub struct MockProjectProvider {
     changeset_dir: PathBuf,
     root_config: RootChangesetConfig,
     dependency_edges: Vec<(String, String)>,
+    additional_packages: Vec<PackageInfo>,
 }
 
 impl MockProjectProvider {
@@ -59,6 +60,7 @@ impl MockProjectProvider {
             changeset_dir,
             root_config: RootChangesetConfig::default(),
             dependency_edges: Vec::new(),
+            additional_packages: Vec::new(),
         }
     }
 
@@ -97,6 +99,12 @@ impl MockProjectProvider {
             .into_iter()
             .map(|(a, b)| (a.to_string(), b.to_string()))
             .collect();
+        self
+    }
+
+    #[must_use]
+    pub fn with_additional_packages(mut self, packages: Vec<PackageInfo>) -> Self {
+        self.additional_packages = packages;
         self
     }
 
@@ -158,6 +166,14 @@ impl ProjectProvider for MockProjectProvider {
         _config: &RootChangesetConfig,
     ) -> Result<PathBuf> {
         Ok(self.changeset_dir.clone())
+    }
+
+    fn discover_additional_packages(
+        &self,
+        _project_root: &Path,
+        _config: &RootChangesetConfig,
+    ) -> Result<Vec<PackageInfo>> {
+        Ok(self.additional_packages.clone())
     }
 }
 
@@ -832,6 +848,14 @@ impl InteractionProvider for MockInteractionProvider {
     }
 }
 
+#[derive(Clone)]
+pub struct ExternalVersionWrite {
+    pub manifest_path: PathBuf,
+    pub format: ManifestFormat,
+    pub version_path: String,
+    pub version: Version,
+}
+
 struct MockManifestState {
     written_versions: Vec<(PathBuf, Version)>,
     dependency_version_updates: Vec<(PathBuf, String, Version)>,
@@ -842,6 +866,7 @@ struct MockManifestState {
     lockfile_content: Option<Vec<u8>>,
     lockfile_restored: Option<Vec<u8>>,
     lockfile_removed: bool,
+    external_written_versions: Vec<ExternalVersionWrite>,
 }
 
 pub struct MockManifestWriter {
@@ -863,6 +888,7 @@ impl MockManifestWriter {
                 lockfile_content: None,
                 lockfile_restored: None,
                 lockfile_removed: false,
+                external_written_versions: Vec::new(),
             }),
             inherited_paths: HashSet::new(),
         }
@@ -951,6 +977,15 @@ impl MockManifestWriter {
     #[must_use]
     pub fn lockfile_removed(&self) -> bool {
         self.state.lock().expect("lock poisoned").lockfile_removed
+    }
+
+    #[must_use]
+    pub fn external_written_versions(&self) -> Vec<ExternalVersionWrite> {
+        self.state
+            .lock()
+            .expect("lock poisoned")
+            .external_written_versions
+            .clone()
     }
 }
 
@@ -1067,6 +1102,38 @@ impl ManifestMetadataWriter for MockManifestWriter {
     }
 }
 
+impl ExternalManifestVersionWriter for MockManifestWriter {
+    fn write_external_version(
+        &self,
+        manifest_path: &Path,
+        format: ManifestFormat,
+        version_path: &str,
+        new_version: &Version,
+    ) -> Result<()> {
+        self.state
+            .lock()
+            .expect("lock poisoned")
+            .external_written_versions
+            .push(ExternalVersionWrite {
+                manifest_path: manifest_path.to_path_buf(),
+                format,
+                version_path: version_path.to_string(),
+                version: new_version.clone(),
+            });
+        Ok(())
+    }
+
+    fn verify_external_version(
+        &self,
+        _manifest_path: &Path,
+        _format: ManifestFormat,
+        _version_path: &str,
+        _expected: &Version,
+    ) -> Result<()> {
+        Ok(())
+    }
+}
+
 impl_arc_delegation! {
     impl InheritedVersionChecker for Arc<MockManifestWriter> {
         fn has_inherited_version(&self, manifest_path: &Path) -> Result<bool>;
@@ -1106,6 +1173,13 @@ impl_arc_delegation! {
 impl_arc_delegation! {
     impl ManifestMetadataWriter for Arc<MockManifestWriter> {
         fn write_metadata(&self, manifest_path: &Path, section: MetadataSection, config: &InitConfig) -> Result<()>;
+    }
+}
+
+impl_arc_delegation! {
+    impl ExternalManifestVersionWriter for Arc<MockManifestWriter> {
+        fn write_external_version(&self, manifest_path: &Path, format: ManifestFormat, version_path: &str, new_version: &Version) -> Result<()>;
+        fn verify_external_version(&self, manifest_path: &Path, format: ManifestFormat, version_path: &str, expected: &Version) -> Result<()>;
     }
 }
 

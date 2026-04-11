@@ -1,5 +1,6 @@
 use std::path::Path;
 
+use changeset_core::ManifestFormat;
 use changeset_manifest::{InitConfig, MetadataSection};
 use semver::Version;
 
@@ -87,6 +88,30 @@ pub trait LockfileUpdater: Send + Sync {
     ///
     /// Returns an error if the lockfile exists but cannot be removed.
     fn remove_lockfile(&self, project_root: &Path) -> Result<()>;
+}
+
+pub trait ExternalManifestVersionWriter: Send + Sync {
+    /// # Errors
+    ///
+    /// Propagates external manifest write errors.
+    fn write_external_version(
+        &self,
+        manifest_path: &Path,
+        format: ManifestFormat,
+        version_path: &str,
+        new_version: &Version,
+    ) -> Result<()>;
+
+    /// # Errors
+    ///
+    /// Propagates external manifest read/verification errors.
+    fn verify_external_version(
+        &self,
+        manifest_path: &Path,
+        format: ManifestFormat,
+        version_path: &str,
+        expected: &Version,
+    ) -> Result<()>;
 }
 
 pub trait ManifestMetadataWriter: Send + Sync {

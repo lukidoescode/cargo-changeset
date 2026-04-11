@@ -5,22 +5,11 @@ use changeset_git::{CommitInfo, FileChange, TagInfo};
 use crate::Result;
 
 pub trait FullGitProvider:
-    GitDiffProvider
-    + GitWorkdirDiffProvider
-    + GitStatusProvider
-    + GitStagingProvider
-    + GitCommitProvider
-    + GitTagProvider
+    GitStatusProvider + GitStagingProvider + GitCommitProvider + GitTagProvider
 {
 }
-impl<
-    T: GitDiffProvider
-        + GitWorkdirDiffProvider
-        + GitStatusProvider
-        + GitStagingProvider
-        + GitCommitProvider
-        + GitTagProvider,
-> FullGitProvider for T
+impl<T: GitStatusProvider + GitStagingProvider + GitCommitProvider + GitTagProvider> FullGitProvider
+    for T
 {
 }
 

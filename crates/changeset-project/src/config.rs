@@ -181,6 +181,16 @@ impl RootChangesetConfig {
         self.none_bump_behavior = behavior;
         self
     }
+
+    #[cfg(any(test, feature = "testing"))]
+    #[must_use]
+    pub fn with_additional_packages(
+        mut self,
+        packages: Vec<changeset_core::AdditionalPackageDeclaration>,
+    ) -> Self {
+        self.additional_packages = packages;
+        self
+    }
 }
 
 impl Default for RootChangesetConfig {

@@ -28,8 +28,8 @@ pub use manage_interaction::{
     PrereleaseInteractionProvider,
 };
 pub use manifest_writer::{
-    FullManifestWriter, LockfileUpdater, ManifestDependencyWriter, ManifestMetadataWriter,
-    ManifestVersionWriter, WorkspaceVersionManager,
+    ExternalManifestVersionWriter, FullManifestWriter, LockfileUpdater, ManifestDependencyWriter,
+    ManifestMetadataWriter, ManifestVersionWriter, WorkspaceVersionManager,
 };
 pub use project_provider::{DependencyGraphProvider, ProjectProvider};
 pub use release_state_io::ReleaseStateIO;

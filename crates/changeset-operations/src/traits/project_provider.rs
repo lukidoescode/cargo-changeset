@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
+use changeset_core::PackageInfo;
 use changeset_project::{
     CargoProject, PackageChangesetConfig, RootChangesetConfig, WorkspaceDependencyGraph,
 };
@@ -29,6 +30,15 @@ pub trait ProjectProvider: Send + Sync {
         project: &CargoProject,
         config: &RootChangesetConfig,
     ) -> Result<PathBuf>;
+
+    /// # Errors
+    ///
+    /// Returns an error if additional package manifests cannot be read.
+    fn discover_additional_packages(
+        &self,
+        project_root: &Path,
+        config: &RootChangesetConfig,
+    ) -> Result<Vec<PackageInfo>>;
 }
 
 pub trait DependencyGraphProvider: Send + Sync {

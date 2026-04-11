@@ -245,6 +245,7 @@ dependencies = [
  "petname",
  "semver",
  "serde",
+ "serde_json",
  "tempfile",
  "thiserror",
  "toml",
