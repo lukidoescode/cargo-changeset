@@ -252,17 +252,8 @@ where
             git_options,
             inherited_packages,
             additional_packages,
+            all_packages,
         })))
-    }
-
-    fn all_packages(context: &ReleaseContext) -> Vec<PackageInfo> {
-        context
-            .project
-            .packages()
-            .iter()
-            .cloned()
-            .chain(context.additional_packages.iter().cloned())
-            .collect()
     }
 
     fn plan_release(&self, context: &ReleaseContext, dry_run: bool) -> Result<ReleasePlan> {
@@ -272,10 +263,10 @@ where
             &context.changeset_files,
         )?;
 
-        let all_packages = Self::all_packages(context);
+        let all_packages = &context.all_packages;
 
         let planned_releases = if context.classification.is_prerelease_graduation {
-            VersionPlanner::plan_graduation(&all_packages)?
+            VersionPlanner::plan_graduation(all_packages)?
                 .releases()
                 .clone()
         } else {
@@ -300,7 +291,7 @@ where
 
             let base_releases = VersionPlanner::plan_releases_per_package(
                 &changesets,
-                &all_packages,
+                all_packages,
                 &context.per_package_config,
                 context.root_config.zero_version_behavior(),
             )?
@@ -338,7 +329,7 @@ where
         }
 
         let unchanged_packages =
-            classifiers::collect_unchanged_packages(&all_packages, &planned_releases);
+            classifiers::collect_unchanged_packages(all_packages, &planned_releases);
 
         let (changelog_updates, changelog_backups) = if dry_run {
             (Vec::new(), Vec::new())

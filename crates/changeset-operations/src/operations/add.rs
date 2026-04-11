@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
@@ -75,12 +76,18 @@ where
             .project_provider
             .discover_additional_packages(project.root(), &root_config)?;
 
-        let all_packages: Vec<PackageInfo> = project
-            .packages()
-            .iter()
-            .cloned()
-            .chain(additional)
-            .collect();
+        let all_packages: Cow<'_, [PackageInfo]> = if additional.is_empty() {
+            Cow::Borrowed(project.packages())
+        } else {
+            Cow::Owned(
+                project
+                    .packages()
+                    .iter()
+                    .cloned()
+                    .chain(additional)
+                    .collect(),
+            )
+        };
 
         if all_packages.is_empty() {
             return Err(OperationError::EmptyProject(project.root().to_path_buf()));

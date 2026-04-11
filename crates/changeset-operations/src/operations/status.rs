@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
@@ -67,6 +68,22 @@ where
     pub fn execute(&self, start_path: &Path) -> Result<StatusOutput> {
         let project = self.project_provider.discover_project(start_path)?;
         let (root_config, _) = self.project_provider.load_configs(&project)?;
+        let additional = self
+            .project_provider
+            .discover_additional_packages(project.root(), &root_config)?;
+
+        let all_packages: Cow<'_, [PackageInfo]> = if additional.is_empty() {
+            Cow::Borrowed(project.packages())
+        } else {
+            Cow::Owned(
+                project
+                    .packages()
+                    .iter()
+                    .cloned()
+                    .chain(additional)
+                    .collect(),
+            )
+        };
 
         let changeset_dir = project.root().join(root_config.changeset_dir());
         let changeset_files = self.changeset_reader.list_changesets(&changeset_dir)?;
@@ -93,7 +110,7 @@ where
 
         let plan = VersionPlanner::plan_releases_with_behavior(
             &changesets,
-            project.packages(),
+            &all_packages,
             None,
             root_config.zero_version_behavior(),
         )?;
@@ -103,12 +120,12 @@ where
         let projected_releases = super::release::expand_with_reverse_dependencies(
             plan.releases().clone(),
             &graph,
-            project.packages(),
+            &all_packages,
             root_config.zero_version_behavior(),
         )?;
 
         let (_, unchanged_packages) =
-            VersionPlanner::partition_packages(&changesets, project.packages());
+            VersionPlanner::partition_packages(&changesets, &all_packages);
 
         let packages_with_inherited_versions = self
             .inherited_checker
@@ -194,7 +211,7 @@ mod tests {
     use super::*;
     use crate::mocks::{
         FailingInheritedVersionChecker, MockChangesetReader, MockInheritedVersionChecker,
-        MockProjectProvider, make_changeset,
+        MockProjectProvider, make_changeset, make_package,
     };
     use crate::traits::DependencyGraphProvider;
     use changeset_core::BumpType;
@@ -857,5 +874,173 @@ mod tests {
             result.projected_releases().is_empty(),
             "None bump with Allow should not produce projected releases"
         );
+    }
+
+    #[test]
+    fn status_includes_additional_package_in_projected_releases() {
+        let project_provider = MockProjectProvider::single_package("core", "1.0.0")
+            .with_additional_packages(vec![make_package("helm-chart", "1.0.0")]);
+
+        let changeset = make_changeset("helm-chart", BumpType::Patch, "Fix chart template");
+        let changeset_reader = MockChangesetReader::new()
+            .with_changeset(PathBuf::from(".changeset/changesets/fix.md"), changeset);
+
+        let operation = make_operation(project_provider, changeset_reader);
+
+        let result = operation
+            .execute(Path::new("/any"))
+            .expect("StatusOperation failed");
+
+        let release = result
+            .projected_releases()
+            .iter()
+            .find(|r| r.name() == "helm-chart")
+            .expect("helm-chart should be in projected releases");
+        assert_eq!(*release.current_version(), Version::new(1, 0, 0));
+        assert_eq!(*release.new_version(), Version::new(1, 0, 1));
+        assert_eq!(release.bump_type(), BumpType::Patch);
+
+        assert!(
+            result
+                .unchanged_packages()
+                .iter()
+                .any(|p| p.name() == "core"),
+            "core should be in unchanged packages"
+        );
+    }
+
+    #[test]
+    fn status_lists_additional_package_in_unchanged_when_no_changeset() {
+        let project_provider = MockProjectProvider::single_package("core", "1.0.0")
+            .with_additional_packages(vec![make_package("helm-chart", "1.0.0")]);
+        let changeset_reader = MockChangesetReader::new();
+
+        let operation = make_operation(project_provider, changeset_reader);
+
+        let result = operation
+            .execute(Path::new("/any"))
+            .expect("StatusOperation failed");
+
+        assert_eq!(result.unchanged_packages().len(), 2);
+        let names: Vec<&str> = result
+            .unchanged_packages()
+            .iter()
+            .map(|p| p.name().as_str())
+            .collect();
+        assert!(names.contains(&"core"));
+        assert!(names.contains(&"helm-chart"));
+    }
+
+    #[test]
+    fn additional_packages_not_expanded_as_transitive_dependents() {
+        let project_provider =
+            MockProjectProvider::workspace(vec![("core", "1.0.0"), ("app", "1.0.0")])
+                .with_dependency_edges(vec![("app", "core")])
+                .with_additional_packages(vec![make_package("helm-chart", "1.0.0")]);
+
+        let changeset = make_changeset("core", BumpType::Patch, "Fix core");
+        let changeset_reader = MockChangesetReader::new()
+            .with_changeset(PathBuf::from(".changeset/changesets/fix.md"), changeset);
+
+        let operation = make_operation(project_provider, changeset_reader);
+
+        let result = operation
+            .execute(Path::new("/any"))
+            .expect("StatusOperation failed");
+
+        assert!(
+            result
+                .projected_releases()
+                .iter()
+                .any(|r| r.name() == "app" && r.auto_bumped()),
+            "app should be auto-bumped via dependency graph"
+        );
+        assert!(
+            !result
+                .projected_releases()
+                .iter()
+                .any(|r| r.name() == "helm-chart"),
+            "helm-chart should not appear in projected releases"
+        );
+        assert!(
+            result
+                .unchanged_packages()
+                .iter()
+                .any(|p| p.name() == "helm-chart"),
+            "helm-chart should be in unchanged packages"
+        );
+    }
+
+    #[test]
+    fn additional_packages_with_changesets_dont_affect_rust_dependency_expansion() {
+        let project_provider =
+            MockProjectProvider::workspace(vec![("core", "1.0.0"), ("app", "1.0.0")])
+                .with_dependency_edges(vec![("app", "core")])
+                .with_additional_packages(vec![make_package("helm-chart", "1.0.0")]);
+
+        let changeset = make_changeset("helm-chart", BumpType::Minor, "Add new endpoint");
+        let changeset_reader = MockChangesetReader::new()
+            .with_changeset(PathBuf::from(".changeset/changesets/feature.md"), changeset);
+
+        let operation = make_operation(project_provider, changeset_reader);
+
+        let result = operation
+            .execute(Path::new("/any"))
+            .expect("StatusOperation failed");
+
+        assert_eq!(
+            result.projected_releases().len(),
+            1,
+            "only helm-chart should be in projected releases"
+        );
+        assert_eq!(result.projected_releases()[0].name(), "helm-chart");
+
+        let unchanged_names: Vec<&str> = result
+            .unchanged_packages()
+            .iter()
+            .map(|p| p.name().as_str())
+            .collect();
+        assert!(unchanged_names.contains(&"core"));
+        assert!(unchanged_names.contains(&"app"));
+    }
+
+    #[test]
+    fn mixed_rust_and_additional_packages_with_changesets() {
+        let project_provider = MockProjectProvider::single_package("core", "1.0.0")
+            .with_additional_packages(vec![make_package("helm-chart", "2.0.0")]);
+
+        let changeset1 = make_changeset("core", BumpType::Patch, "Fix core");
+        let changeset2 = make_changeset("helm-chart", BumpType::Minor, "Add endpoint");
+        let changeset_reader = MockChangesetReader::new().with_changesets(vec![
+            (PathBuf::from(".changeset/changesets/fix.md"), changeset1),
+            (
+                PathBuf::from(".changeset/changesets/feature.md"),
+                changeset2,
+            ),
+        ]);
+
+        let operation = make_operation(project_provider, changeset_reader);
+
+        let result = operation
+            .execute(Path::new("/any"))
+            .expect("StatusOperation failed");
+
+        assert_eq!(result.projected_releases().len(), 2);
+
+        let core_release = result
+            .projected_releases()
+            .iter()
+            .find(|r| r.name() == "core")
+            .expect("core should be in projected releases");
+        assert_eq!(*core_release.new_version(), Version::new(1, 0, 1));
+
+        let helm_release = result
+            .projected_releases()
+            .iter()
+            .find(|r| r.name() == "helm-chart")
+            .expect("helm-chart should be in projected releases");
+        assert_eq!(*helm_release.new_version(), Version::new(2, 1, 0));
+
+        assert!(result.unchanged_packages().is_empty());
     }
 }
