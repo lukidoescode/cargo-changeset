@@ -99,19 +99,18 @@ mod tests {
             "version: \"1.2.3\"\n",
         )?;
 
-        let decl = make_decl(&format!(
-            r#"{{
+        let decl = make_decl(
+            r#"{
                 "name": "my-helm-chart",
                 "path": "charts/my-chart",
                 "influence": ["charts/my-chart/**"],
-                "manifest": {{
-                    "file-path": "{}/charts/my-chart/Chart.yaml",
+                "manifest": {
+                    "file-path": "charts/my-chart/Chart.yaml",
                     "format": "yaml",
                     "version-path": "version"
-                }}
-            }}"#,
-            root.display()
-        ));
+                }
+            }"#,
+        );
 
         let config = RootChangesetConfig::default().with_additional_packages(vec![decl]);
         let provider = FileSystemProjectProvider::new();
