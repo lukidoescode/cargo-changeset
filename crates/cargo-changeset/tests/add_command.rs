@@ -1,3 +1,5 @@
+mod common;
+
 use std::fs;
 use std::process::Command;
 use std::time::Duration;
@@ -5,68 +7,10 @@ use std::time::Duration;
 use predicates::str::contains;
 use tempfile::TempDir;
 
-fn create_single_crate_workspace() -> TempDir {
-    let dir = TempDir::new().expect("failed to create temp dir");
-    fs::create_dir_all(dir.path().join("src")).expect("failed to create src dir");
-    fs::write(
-        dir.path().join("Cargo.toml"),
-        r#"
-[package]
-name = "test-crate"
-version = "1.0.0"
-edition = "2021"
-"#,
-    )
-    .expect("failed to write Cargo.toml");
-    fs::write(dir.path().join("src/lib.rs"), "").expect("failed to write lib.rs");
-
-    dir
-}
-
-fn create_virtual_workspace() -> TempDir {
-    let dir = TempDir::new().expect("failed to create temp dir");
-
-    fs::create_dir_all(dir.path().join("crates/a/src")).expect("failed to create crate a dir");
-    fs::create_dir_all(dir.path().join("crates/b/src")).expect("failed to create crate b dir");
-
-    fs::write(
-        dir.path().join("Cargo.toml"),
-        r#"
-[workspace]
-members = ["crates/*"]
-resolver = "2"
-"#,
-    )
-    .expect("failed to write workspace Cargo.toml");
-
-    fs::write(
-        dir.path().join("crates/a/Cargo.toml"),
-        r#"
-[package]
-name = "crate-a"
-version = "0.1.0"
-edition = "2021"
-"#,
-    )
-    .expect("failed to write crate-a Cargo.toml");
-
-    fs::write(dir.path().join("crates/a/src/lib.rs"), "").expect("failed to write crate-a lib.rs");
-
-    fs::write(
-        dir.path().join("crates/b/Cargo.toml"),
-        r#"
-[package]
-name = "crate-b"
-version = "0.2.0"
-edition = "2021"
-"#,
-    )
-    .expect("failed to write crate-b Cargo.toml");
-
-    fs::write(dir.path().join("crates/b/src/lib.rs"), "").expect("failed to write crate-b lib.rs");
-
-    dir
-}
+use common::workspaces::{
+    create_single_crate_workspace, create_virtual_workspace,
+    create_workspace_with_additional_package,
+};
 
 fn create_workspace_with_underscored_crate() -> TempDir {
     let dir = TempDir::new().expect("failed to create temp dir");
@@ -511,6 +455,56 @@ mod non_interactive {
             .success()
             .stdout(contains("Message from stdin"));
     }
+
+    #[test]
+    fn add_creates_changeset_for_additional_package() {
+        let workspace = create_workspace_with_additional_package();
+
+        assert_cmd::cargo::cargo_bin_cmd!("cargo-changeset")
+            .arg("add")
+            .arg("--package-bump")
+            .arg("my-helm-chart:minor")
+            .arg("-m")
+            .arg("Add new endpoint")
+            .current_dir(workspace.path())
+            .assert()
+            .success()
+            .stdout(contains("Created changeset"));
+
+        let changeset_dir = workspace.path().join(".changeset/changesets");
+        let files: Vec<_> = fs::read_dir(&changeset_dir)
+            .expect("read dir")
+            .filter_map(|e| e.ok())
+            .filter(|e| e.path().extension().is_some_and(|ext| ext == "md"))
+            .collect();
+
+        assert_eq!(files.len(), 1, "should have one changeset file");
+
+        let content = fs::read_to_string(files[0].path()).expect("read changeset file");
+        assert!(
+            content.contains("my-helm-chart: minor"),
+            "should contain package bump entry, got:\n{content}"
+        );
+        assert!(
+            content.contains("Add new endpoint"),
+            "should contain message"
+        );
+    }
+
+    #[test]
+    fn add_rejects_unknown_additional_package_name() {
+        let workspace = create_workspace_with_additional_package();
+
+        assert_cmd::cargo::cargo_bin_cmd!("cargo-changeset")
+            .arg("add")
+            .arg("--package-bump")
+            .arg("nonexistent-pkg:patch")
+            .arg("-m")
+            .arg("test")
+            .current_dir(workspace.path())
+            .assert()
+            .failure();
+    }
 }
 
 #[cfg(not(windows))]
@@ -572,6 +566,9 @@ MOCK_EDITOR_EOF
 
         let result = session.expect("Select packages");
         assert!(result.is_ok(), "Expected to see 'Select packages' prompt");
+
+        session.send("\x1b").expect("failed to send escape");
+        session.expect(expectrl::Eof).ok();
     }
 
     #[test]
@@ -580,6 +577,9 @@ MOCK_EDITOR_EOF
         let mut session = spawn_add_in_workspace(&workspace);
 
         session.expect("crate-a").expect("Expected to see crate-a");
+
+        session.send("\x1b").expect("failed to send escape");
+        session.expect(expectrl::Eof).ok();
     }
 
     #[test]
@@ -630,6 +630,9 @@ MOCK_EDITOR_EOF
         session
             .expect("category")
             .expect("Expected category prompt");
+
+        session.send("\x1b").expect("failed to send escape");
+        session.expect(expectrl::Eof).ok();
     }
 
     #[test]

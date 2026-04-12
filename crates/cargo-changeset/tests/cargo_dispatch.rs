@@ -1,41 +1,9 @@
+mod common;
+
 use std::fs;
-use std::process::Command;
 
+use common::git::{git_add_and_commit, init_git_repo};
 use tempfile::TempDir;
-
-fn init_git_repo(dir: &TempDir) {
-    Command::new("git")
-        .args(["init", "--initial-branch=main"])
-        .current_dir(dir.path())
-        .output()
-        .expect("failed to init git repo");
-
-    Command::new("git")
-        .args(["config", "user.email", "test@example.com"])
-        .current_dir(dir.path())
-        .output()
-        .expect("failed to configure git email");
-
-    Command::new("git")
-        .args(["config", "user.name", "Test"])
-        .current_dir(dir.path())
-        .output()
-        .expect("failed to configure git name");
-}
-
-fn git_add_and_commit(dir: &TempDir, message: &str) {
-    Command::new("git")
-        .args(["add", "-A"])
-        .current_dir(dir.path())
-        .output()
-        .expect("failed to git add");
-
-    Command::new("git")
-        .args(["commit", "-m", message])
-        .current_dir(dir.path())
-        .output()
-        .expect("failed to git commit");
-}
 
 fn create_single_package_project() -> TempDir {
     let dir = TempDir::new().expect("failed to create temp dir");
@@ -46,8 +14,7 @@ fn create_single_package_project() -> TempDir {
 
     fs::write(
         dir.path().join("Cargo.toml"),
-        r#"
-[package]
+        r#"[package]
 name = "my-crate"
 version = "0.1.0"
 edition = "2021"

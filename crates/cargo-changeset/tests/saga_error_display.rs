@@ -1,50 +1,12 @@
+mod common;
+
 use std::fs;
-use std::process::Command;
 
 use predicates::str::contains;
 use tempfile::TempDir;
 
-fn init_git_repo(dir: &TempDir) {
-    Command::new("git")
-        .args(["init", "--initial-branch=main"])
-        .current_dir(dir.path())
-        .output()
-        .expect("failed to init git repo");
-
-    Command::new("git")
-        .args(["config", "user.email", "test@example.com"])
-        .current_dir(dir.path())
-        .output()
-        .expect("failed to configure git email");
-
-    Command::new("git")
-        .args(["config", "user.name", "Test"])
-        .current_dir(dir.path())
-        .output()
-        .expect("failed to configure git name");
-}
-
-fn git_add_and_commit(dir: &TempDir, message: &str) {
-    Command::new("git")
-        .args(["add", "-A"])
-        .current_dir(dir.path())
-        .output()
-        .expect("failed to git add");
-
-    Command::new("git")
-        .args(["commit", "-m", message])
-        .current_dir(dir.path())
-        .output()
-        .expect("failed to git commit");
-}
-
-fn create_tag(dir: &TempDir, tag_name: &str, message: &str) {
-    Command::new("git")
-        .args(["tag", "-a", tag_name, "-m", message])
-        .current_dir(dir.path())
-        .output()
-        .expect("failed to create tag");
-}
+use common::changesets::{write_changeset, write_multi_changeset};
+use common::git::{create_tag, git_add_and_commit, init_git_repo};
 
 fn create_single_package_with_git() -> TempDir {
     let dir = TempDir::new().expect("create temp dir");
@@ -118,55 +80,6 @@ edition = "2021"
     dir
 }
 
-fn write_changeset(dir: &TempDir, filename: &str, package: &str, bump: &str, summary: &str) {
-    let content = format!(
-        r#"---
-"{package}": {bump}
----
-
-{summary}
-"#
-    );
-    fs::write(
-        dir.path().join(".changeset/changesets").join(filename),
-        content,
-    )
-    .expect("write changeset");
-}
-
-fn write_multi_package_changeset(
-    dir: &TempDir,
-    filename: &str,
-    packages: &[(&str, &str)],
-    summary: &str,
-) {
-    let package_entries: String = packages
-        .iter()
-        .map(|(pkg, bump)| format!("\"{pkg}\": {bump}"))
-        .collect::<Vec<_>>()
-        .join("\n");
-
-    let content = format!(
-        r#"---
-{package_entries}
----
-
-{summary}
-"#
-    );
-    fs::write(
-        dir.path().join(".changeset/changesets").join(filename),
-        content,
-    )
-    .expect("write changeset");
-}
-
-macro_rules! cargo_changeset {
-    () => {
-        assert_cmd::cargo::cargo_bin_cmd!("cargo-changeset")
-    };
-}
-
 #[test]
 fn release_saga_failure_shows_failed_step_and_rollback_message() {
     let workspace = create_single_package_with_git();
@@ -175,7 +88,7 @@ fn release_saga_failure_shows_failed_step_and_rollback_message() {
 
     create_tag(&workspace, "v1.0.1", "Pre-existing conflicting tag");
 
-    cargo_changeset!()
+    assert_cmd::cargo::cargo_bin_cmd!("cargo-changeset")
         .arg("release")
         .current_dir(workspace.path())
         .assert()
@@ -194,7 +107,7 @@ fn release_saga_failure_message_includes_step_name() {
 
     create_tag(&workspace, "v1.0.1", "Pre-existing conflicting tag");
 
-    cargo_changeset!()
+    assert_cmd::cargo::cargo_bin_cmd!("cargo-changeset")
         .arg("release")
         .current_dir(workspace.path())
         .assert()
@@ -210,7 +123,7 @@ fn release_saga_failure_with_rollback_restores_version_in_manifest() {
 
     create_tag(&workspace, "v1.0.1", "Pre-existing conflicting tag");
 
-    cargo_changeset!()
+    assert_cmd::cargo::cargo_bin_cmd!("cargo-changeset")
         .arg("release")
         .current_dir(workspace.path())
         .assert()
@@ -227,7 +140,7 @@ fn release_saga_failure_with_rollback_restores_version_in_manifest() {
 #[test]
 fn release_saga_failure_multi_package_shows_proper_error_format() {
     let workspace = create_workspace_with_two_crates();
-    write_multi_package_changeset(
+    write_multi_changeset(
         &workspace,
         "multi.md",
         &[("crate-a", "patch"), ("crate-b", "patch")],
@@ -241,7 +154,7 @@ fn release_saga_failure_multi_package_shows_proper_error_format() {
         "Pre-existing conflicting tag for crate-b",
     );
 
-    cargo_changeset!()
+    assert_cmd::cargo::cargo_bin_cmd!("cargo-changeset")
         .arg("release")
         .current_dir(workspace.path())
         .assert()
@@ -258,7 +171,7 @@ fn release_saga_failure_error_includes_cause_chain() {
 
     create_tag(&workspace, "v1.0.1", "Pre-existing conflicting tag");
 
-    cargo_changeset!()
+    assert_cmd::cargo::cargo_bin_cmd!("cargo-changeset")
         .arg("release")
         .current_dir(workspace.path())
         .assert()

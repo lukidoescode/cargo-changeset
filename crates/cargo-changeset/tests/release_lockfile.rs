@@ -1,41 +1,12 @@
+mod common;
+
 use std::fs;
 use std::process::Command;
 
 use tempfile::TempDir;
 
-fn init_git_repo(dir: &TempDir) {
-    Command::new("git")
-        .args(["init", "--initial-branch=main"])
-        .current_dir(dir.path())
-        .output()
-        .expect("failed to init git repo");
-
-    Command::new("git")
-        .args(["config", "user.email", "test@example.com"])
-        .current_dir(dir.path())
-        .output()
-        .expect("failed to configure git email");
-
-    Command::new("git")
-        .args(["config", "user.name", "Test"])
-        .current_dir(dir.path())
-        .output()
-        .expect("failed to configure git name");
-}
-
-fn git_add_and_commit(dir: &TempDir, message: &str) {
-    Command::new("git")
-        .args(["add", "-A"])
-        .current_dir(dir.path())
-        .output()
-        .expect("failed to git add");
-
-    Command::new("git")
-        .args(["commit", "-m", message])
-        .current_dir(dir.path())
-        .output()
-        .expect("failed to git commit");
-}
+use common::changesets::write_changeset;
+use common::git::{git_add_and_commit, init_git_repo};
 
 fn lockfile_hash(dir: &TempDir) -> Vec<u8> {
     let output = Command::new("git")
@@ -45,22 +16,6 @@ fn lockfile_hash(dir: &TempDir) -> Vec<u8> {
         .expect("failed to hash Cargo.lock");
 
     output.stdout
-}
-
-fn write_changeset(dir: &TempDir, filename: &str, package: &str, bump: &str, summary: &str) {
-    let content = format!(
-        r#"---
-"{package}": {bump}
----
-
-{summary}
-"#
-    );
-    fs::write(
-        dir.path().join(".changeset/changesets").join(filename),
-        content,
-    )
-    .expect("write changeset");
 }
 
 fn setup_workspace_with_dependency() -> TempDir {
@@ -126,19 +81,13 @@ crate-a = { workspace = true }
     dir
 }
 
-macro_rules! cargo_changeset {
-    () => {
-        assert_cmd::cargo::cargo_bin_cmd!("cargo-changeset")
-    };
-}
-
 #[test]
 fn release_lockfile_not_dirtied_by_cargo_check() {
     let workspace = setup_workspace_with_dependency();
     write_changeset(&workspace, "fix.md", "crate-a", "patch", "Fix a bug");
     git_add_and_commit(&workspace, "Add changeset");
 
-    cargo_changeset!()
+    assert_cmd::cargo::cargo_bin_cmd!("cargo-changeset")
         .arg("release")
         .current_dir(workspace.path())
         .assert()
@@ -172,7 +121,7 @@ fn release_lockfile_correct_after_minor_bump_with_workspace_dep() {
     write_changeset(&workspace, "feat.md", "crate-a", "minor", "Add a feature");
     git_add_and_commit(&workspace, "Add changeset");
 
-    cargo_changeset!()
+    assert_cmd::cargo::cargo_bin_cmd!("cargo-changeset")
         .arg("release")
         .current_dir(workspace.path())
         .assert()

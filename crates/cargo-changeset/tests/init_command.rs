@@ -1,50 +1,11 @@
+mod common;
+
 use std::fs;
-use std::process::Command;
 
 use predicates::str::contains;
 use tempfile::TempDir;
 
-fn init_git_repo(dir: &TempDir) {
-    Command::new("git")
-        .args(["init", "--initial-branch=main"])
-        .current_dir(dir.path())
-        .output()
-        .expect("failed to init git repo");
-
-    Command::new("git")
-        .args(["config", "user.email", "test@example.com"])
-        .current_dir(dir.path())
-        .output()
-        .expect("failed to configure git email");
-
-    Command::new("git")
-        .args(["config", "user.name", "Test"])
-        .current_dir(dir.path())
-        .output()
-        .expect("failed to configure git name");
-}
-
-fn git_add_and_commit(dir: &TempDir, message: &str) {
-    Command::new("git")
-        .args(["add", "-A"])
-        .current_dir(dir.path())
-        .output()
-        .expect("failed to git add");
-
-    Command::new("git")
-        .args(["commit", "-m", message])
-        .current_dir(dir.path())
-        .output()
-        .expect("failed to git commit");
-}
-
-fn create_branch(dir: &TempDir, name: &str) {
-    Command::new("git")
-        .args(["checkout", "-b", name])
-        .current_dir(dir.path())
-        .output()
-        .expect("failed to create branch");
-}
+use common::git::{create_branch, git_add_and_commit, init_git_repo};
 
 fn setup_single_package() -> TempDir {
     let dir = TempDir::new().expect("create temp dir");

@@ -1,7 +1,12 @@
+mod common;
+
 use std::fs;
 
 use predicates::str::contains;
 use tempfile::TempDir;
+
+use common::changesets::write_changeset;
+use common::workspaces::create_workspace_with_additional_package;
 
 fn create_single_package_project() -> TempDir {
     let dir = TempDir::new().expect("create temp dir");
@@ -101,33 +106,11 @@ edition.workspace = true
     dir
 }
 
-fn write_changeset(dir: &TempDir, filename: &str, package: &str, bump: &str, summary: &str) {
-    let content = format!(
-        r#"---
-"{package}": {bump}
----
-
-{summary}
-"#
-    );
-    fs::write(
-        dir.path().join(".changeset/changesets").join(filename),
-        content,
-    )
-    .expect("write changeset");
-}
-
-macro_rules! cargo_changeset_status {
-    () => {
-        assert_cmd::cargo::cargo_bin_cmd!("cargo-changeset")
-    };
-}
-
 #[test]
 fn status_with_no_changesets() {
     let workspace = create_single_package_project();
 
-    cargo_changeset_status!()
+    assert_cmd::cargo::cargo_bin_cmd!("cargo-changeset")
         .arg("status")
         .current_dir(workspace.path())
         .assert()
@@ -140,7 +123,7 @@ fn status_shows_single_changeset() {
     let workspace = create_single_package_project();
     write_changeset(&workspace, "fix-bug.md", "my-crate", "patch", "Fix a bug");
 
-    cargo_changeset_status!()
+    assert_cmd::cargo::cargo_bin_cmd!("cargo-changeset")
         .arg("status")
         .current_dir(workspace.path())
         .assert()
@@ -158,7 +141,7 @@ fn status_shows_multiple_changesets() {
     write_changeset(&workspace, "fix.md", "my-crate", "patch", "Fix bug");
     write_changeset(&workspace, "feature.md", "my-crate", "minor", "Add feature");
 
-    cargo_changeset_status!()
+    assert_cmd::cargo::cargo_bin_cmd!("cargo-changeset")
         .arg("status")
         .current_dir(workspace.path())
         .assert()
@@ -173,7 +156,7 @@ fn status_shows_workspace_packages() {
     let workspace = create_workspace_project();
     write_changeset(&workspace, "fix-a.md", "crate-a", "patch", "Fix A");
 
-    cargo_changeset_status!()
+    assert_cmd::cargo::cargo_bin_cmd!("cargo-changeset")
         .arg("status")
         .current_dir(workspace.path())
         .assert()
@@ -187,7 +170,7 @@ fn status_shows_workspace_packages() {
 fn status_shows_inherited_version_warning() {
     let workspace = create_workspace_with_inherited_versions();
 
-    cargo_changeset_status!()
+    assert_cmd::cargo::cargo_bin_cmd!("cargo-changeset")
         .arg("status")
         .current_dir(workspace.path())
         .assert()
@@ -203,7 +186,7 @@ fn status_shows_inherited_version_warning_with_changesets() {
     let workspace = create_workspace_with_inherited_versions();
     write_changeset(&workspace, "fix.md", "crate-a", "patch", "Fix");
 
-    cargo_changeset_status!()
+    assert_cmd::cargo::cargo_bin_cmd!("cargo-changeset")
         .arg("status")
         .current_dir(workspace.path())
         .assert()
@@ -224,7 +207,7 @@ fn status_shows_unknown_package_warning() {
         "Fix typo",
     );
 
-    cargo_changeset_status!()
+    assert_cmd::cargo::cargo_bin_cmd!("cargo-changeset")
         .arg("status")
         .current_dir(workspace.path())
         .assert()
@@ -246,7 +229,7 @@ fn status_multiple_packages_multiple_bumps() {
         "Breaking B",
     );
 
-    cargo_changeset_status!()
+    assert_cmd::cargo::cargo_bin_cmd!("cargo-changeset")
         .arg("status")
         .current_dir(workspace.path())
         .assert()
@@ -257,4 +240,44 @@ fn status_multiple_packages_multiple_bumps() {
         ))
         .stdout(contains("crate-b: 2.0.0 -> 3.0.0 (major)"))
         .stdout(contains("Summary: 3 changeset(s), 2 package(s) to release"));
+}
+
+#[test]
+fn status_shows_additional_package_with_changeset() {
+    let workspace = create_workspace_with_additional_package();
+    write_changeset(
+        &workspace,
+        "helm-feat.md",
+        "my-helm-chart",
+        "minor",
+        "Add feature",
+    );
+
+    assert_cmd::cargo::cargo_bin_cmd!("cargo-changeset")
+        .arg("status")
+        .current_dir(workspace.path())
+        .assert()
+        .success()
+        .stdout(contains("my-helm-chart"))
+        .stdout(contains("2.0.0 -> 2.1.0 (minor)"));
+}
+
+#[test]
+fn status_lists_additional_package_without_changeset() {
+    let workspace = create_workspace_with_additional_package();
+    write_changeset(
+        &workspace,
+        "crate-fix.md",
+        "crate-a",
+        "patch",
+        "Fix crate-a",
+    );
+
+    assert_cmd::cargo::cargo_bin_cmd!("cargo-changeset")
+        .arg("status")
+        .current_dir(workspace.path())
+        .assert()
+        .success()
+        .stdout(contains("Packages without changesets:"))
+        .stdout(contains("my-helm-chart (2.0.0)"));
 }
