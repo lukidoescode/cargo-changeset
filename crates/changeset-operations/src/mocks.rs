@@ -1823,7 +1823,7 @@ impl AdditionalPackageInteractionProvider for MockAdditionalPackageInteractionPr
         Ok(self.package_path.clone())
     }
 
-    fn prompt_influence_patterns(&self) -> Result<Vec<String>> {
+    fn prompt_influence_patterns(&self, _package_path: &Path) -> Result<Vec<String>> {
         Ok(self.influence_patterns.clone())
     }
 
@@ -1873,7 +1873,7 @@ impl AdditionalPackageInteractionProvider for PanickingAdditionalPackageInteract
         panic!("prompt_package_path must not be called");
     }
 
-    fn prompt_influence_patterns(&self) -> Result<Vec<String>> {
+    fn prompt_influence_patterns(&self, _package_path: &Path) -> Result<Vec<String>> {
         panic!("prompt_influence_patterns must not be called");
     }
 

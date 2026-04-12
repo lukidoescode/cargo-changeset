@@ -275,7 +275,7 @@ where
 
         let name = self.interaction.prompt_package_name()?;
         let path = self.interaction.prompt_package_path()?;
-        let influence = self.interaction.prompt_influence_patterns()?;
+        let influence = self.interaction.prompt_influence_patterns(&path)?;
         let manifest_file_path = self.interaction.prompt_manifest_file_path()?;
         let manifest_format = self.interaction.prompt_manifest_format()?;
         let manifest_version_path = self.interaction.prompt_manifest_version_path()?;
@@ -418,7 +418,12 @@ where
                     changed_fields.push("path".to_string());
                 }
                 AdditionalPackageField::Influence => {
-                    updates.influence = Some(self.interaction.prompt_influence_patterns()?);
+                    let current_path = updates
+                        .path
+                        .as_deref()
+                        .unwrap_or_else(|| packages[index].path());
+                    updates.influence =
+                        Some(self.interaction.prompt_influence_patterns(current_path)?);
                     changed_fields.push("influence".to_string());
                 }
                 AdditionalPackageField::ManifestFilePath => {

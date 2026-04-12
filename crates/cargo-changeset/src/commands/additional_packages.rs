@@ -118,14 +118,28 @@ impl AdditionalPackageInteractionProvider for TerminalAdditionalPackageInteracti
         Ok(PathBuf::from(s))
     }
 
-    fn prompt_influence_patterns(&self) -> changeset_operations::Result<Vec<String>> {
+    fn prompt_influence_patterns(
+        &self,
+        package_path: &Path,
+    ) -> changeset_operations::Result<Vec<String>> {
         let mut patterns = Vec::new();
         println!(
-            "Enter glob patterns for files that influence this package (empty line to finish):"
+            "Enter glob patterns for files that influence this package (one per line, empty line to finish):"
         );
+        let default = format!("{}/**", package_path.display());
+        let first: String = Input::new()
+            .with_prompt("Glob pattern")
+            .default(default)
+            .allow_empty(true)
+            .interact_text()
+            .map_err(dialoguer_to_operation_error)?;
+        if first.is_empty() {
+            return Ok(patterns);
+        }
+        patterns.push(first);
         loop {
             let s: String = Input::new()
-                .with_prompt("Glob pattern")
+                .with_prompt("Additional pattern")
                 .allow_empty(true)
                 .interact_text()
                 .map_err(dialoguer_to_operation_error)?;

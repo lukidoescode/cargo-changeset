@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use changeset_core::{AdditionalPackageDeclaration, ManifestFormat};
 
@@ -25,7 +25,7 @@ pub trait AdditionalPackageInteractionProvider: Send + Sync {
 
     /// # Errors
     /// Returns an error if the terminal interaction fails.
-    fn prompt_influence_patterns(&self) -> Result<Vec<String>>;
+    fn prompt_influence_patterns(&self, package_path: &Path) -> Result<Vec<String>>;
 
     /// # Errors
     /// Returns an error if the terminal interaction fails.
