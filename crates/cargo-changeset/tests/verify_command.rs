@@ -1303,6 +1303,7 @@ fn verify_detects_additional_package_changes_requiring_coverage() {
         .open(workspace.path().join("charts/my-chart/values.yaml"))
         .expect("failed to open values.yaml for appending");
     writeln!(values, "image: nginx").expect("failed to append to values.yaml");
+    drop(values);
 
     git_add_and_commit(&workspace, "Modify helm values");
 
@@ -1326,6 +1327,7 @@ fn verify_passes_when_additional_package_change_covered() {
         .open(workspace.path().join("charts/my-chart/values.yaml"))
         .expect("failed to open values.yaml for appending");
     writeln!(values, "image: nginx").expect("failed to append to values.yaml");
+    drop(values);
 
     add_changeset(&workspace, "my-helm-chart");
     git_add_and_commit(&workspace, "Add changeset for helm chart");
@@ -1355,6 +1357,7 @@ fn verify_ignores_files_outside_additional_package_influence() {
         .open(workspace.path().join("docs/README.md"))
         .expect("failed to open README.md for appending");
     writeln!(readme, "## Additional section").expect("failed to append to README.md");
+    drop(readme);
 
     git_add_and_commit(&workspace, "Update docs");
 
