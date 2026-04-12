@@ -59,13 +59,13 @@ mod tests {
 
     impl InheritedVersionChecker for TestChecker {
         fn has_inherited_version(&self, manifest_path: &Path) -> Result<bool> {
-            if let Some(ref fail_path) = self.fail_on {
-                if manifest_path == fail_path {
-                    return Err(crate::OperationError::Io(std::io::Error::new(
-                        std::io::ErrorKind::PermissionDenied,
-                        "mock failure",
-                    )));
-                }
+            if let Some(ref fail_path) = self.fail_on
+                && manifest_path == fail_path
+            {
+                return Err(crate::OperationError::Io(std::io::Error::new(
+                    std::io::ErrorKind::PermissionDenied,
+                    "mock failure",
+                )));
             }
             Ok(self.inherited.contains(manifest_path))
         }

@@ -1377,12 +1377,14 @@ fn verify_both_rust_and_additional_package_uncovered() {
         .open(workspace.path().join("crates/crate-a/src/lib.rs"))
         .expect("failed to open lib.rs for appending");
     writeln!(lib, "// changed").expect("failed to append to lib.rs");
+    drop(lib);
 
     let mut values = OpenOptions::new()
         .append(true)
         .open(workspace.path().join("charts/my-chart/values.yaml"))
         .expect("failed to open values.yaml for appending");
     writeln!(values, "image: nginx").expect("failed to append to values.yaml");
+    drop(values);
 
     git_add_and_commit(&workspace, "Modify both");
 
@@ -1407,12 +1409,14 @@ fn verify_mixed_coverage_only_rust_uncovered() {
         .open(workspace.path().join("crates/crate-a/src/lib.rs"))
         .expect("failed to open lib.rs for appending");
     writeln!(lib, "// changed").expect("failed to append to lib.rs");
+    drop(lib);
 
     let mut values = OpenOptions::new()
         .append(true)
         .open(workspace.path().join("charts/my-chart/values.yaml"))
         .expect("failed to open values.yaml for appending");
     writeln!(values, "image: nginx").expect("failed to append to values.yaml");
+    drop(values);
 
     add_changeset(&workspace, "my-helm-chart");
     git_add_and_commit(&workspace, "Add helm changeset only");

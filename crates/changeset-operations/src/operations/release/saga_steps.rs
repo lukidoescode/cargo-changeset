@@ -405,20 +405,21 @@ where
         ctx: &Self::Context,
         mut input: Self::Input,
     ) -> Result<Self::Output, Self::Error> {
-        if input.classification.is_prerelease_release && !input.changeset_files.is_empty() {
-            if let Some(first_release) = input.planned_releases().first() {
-                let paths_refs: Vec<&Path> = input
-                    .changeset_files
-                    .iter()
-                    .map(|f| f.path.as_path())
-                    .collect();
-                ctx.changeset_rw().mark_consumed_for_prerelease(
-                    input.changeset_dir(),
-                    &paths_refs,
-                    first_release.new_version(),
-                )?;
-                input.consumed_state = super::saga_data::ChangesetConsumedState::Consumed;
-            }
+        if input.classification.is_prerelease_release
+            && !input.changeset_files.is_empty()
+            && let Some(first_release) = input.planned_releases().first()
+        {
+            let paths_refs: Vec<&Path> = input
+                .changeset_files
+                .iter()
+                .map(|f| f.path.as_path())
+                .collect();
+            ctx.changeset_rw().mark_consumed_for_prerelease(
+                input.changeset_dir(),
+                &paths_refs,
+                first_release.new_version(),
+            )?;
+            input.consumed_state = super::saga_data::ChangesetConsumedState::Consumed;
         }
         Ok(input)
     }
@@ -906,18 +907,18 @@ where
     }
 
     fn compensate(&self, ctx: &Self::Context, input: Self::Input) -> Result<(), Self::Error> {
-        if let Some(update) = input.prerelease_state_update() {
-            if let Some(original) = &update.original {
-                ctx.release_state_io()
-                    .save_prerelease_state(input.changeset_dir(), original)?;
-            }
+        if let Some(update) = input.prerelease_state_update()
+            && let Some(original) = &update.original
+        {
+            ctx.release_state_io()
+                .save_prerelease_state(input.changeset_dir(), original)?;
         }
 
-        if let Some(update) = input.graduation_state_update() {
-            if let Some(original) = &update.original {
-                ctx.release_state_io()
-                    .save_graduation_state(input.changeset_dir(), original)?;
-            }
+        if let Some(update) = input.graduation_state_update()
+            && let Some(original) = &update.original
+        {
+            ctx.release_state_io()
+                .save_graduation_state(input.changeset_dir(), original)?;
         }
 
         Ok(())

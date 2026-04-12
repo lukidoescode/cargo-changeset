@@ -169,19 +169,18 @@ pub fn update_dependency_version(
     let mut doc = read_document(path)?;
     let mut changed = false;
 
-    if let Some(workspace) = doc.get_mut("workspace") {
-        if let Some(deps) = workspace.get_mut("dependencies") {
-            if update_dep_entry(deps, dependency_name, new_version) {
-                changed = true;
-            }
-        }
+    if let Some(workspace) = doc.get_mut("workspace")
+        && let Some(deps) = workspace.get_mut("dependencies")
+        && update_dep_entry(deps, dependency_name, new_version)
+    {
+        changed = true;
     }
 
     for section in &DEPENDENCY_SECTIONS {
-        if let Some(deps) = doc.get_mut(section) {
-            if update_dep_entry(deps, dependency_name, new_version) {
-                changed = true;
-            }
+        if let Some(deps) = doc.get_mut(section)
+            && update_dep_entry(deps, dependency_name, new_version)
+        {
+            changed = true;
         }
     }
 
@@ -342,14 +341,14 @@ fn populate_changeset_table(changeset_table: &mut Table, config: &InitConfig) {
         );
     }
 
-    if let Some(ref ignored_files) = config.ignored_files {
-        if !ignored_files.is_empty() {
-            let mut arr = toml_edit::Array::new();
-            for pattern in ignored_files {
-                arr.push(pattern.as_str());
-            }
-            changeset_table.insert("ignored-files", Item::Value(toml_edit::Value::Array(arr)));
+    if let Some(ref ignored_files) = config.ignored_files
+        && !ignored_files.is_empty()
+    {
+        let mut arr = toml_edit::Array::new();
+        for pattern in ignored_files {
+            arr.push(pattern.as_str());
         }
+        changeset_table.insert("ignored-files", Item::Value(toml_edit::Value::Array(arr)));
     }
 }
 

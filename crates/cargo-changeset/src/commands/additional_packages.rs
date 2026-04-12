@@ -257,20 +257,26 @@ pub(crate) fn run(args: AdditionalPackagesArgs, start_path: &Path) -> Result<()>
 }
 
 fn run_add(args: AddAdditionalPackageArgs, start_path: &Path) -> Result<()> {
-    let all_provided = args.name.is_some()
-        && args.path.is_some()
-        && args.manifest_file.is_some()
-        && args.manifest_format.is_some()
-        && args.version_path.is_some();
-
-    let events = if all_provided {
+    let events = if let (
+        Some(name),
+        Some(path),
+        Some(manifest_file),
+        Some(manifest_format),
+        Some(version_path),
+    ) = (
+        args.name,
+        args.path,
+        args.manifest_file,
+        args.manifest_format,
+        args.version_path,
+    ) {
         let input = AdditionalPackageAddInput {
-            name: args.name.expect("checked above"),
-            path: args.path.expect("checked above"),
+            name,
+            path,
             influence: args.influence,
-            manifest_file_path: args.manifest_file.expect("checked above"),
-            manifest_format: args.manifest_format.expect("checked above"),
-            manifest_version_path: args.version_path.expect("checked above"),
+            manifest_file_path: manifest_file,
+            manifest_format,
+            manifest_version_path: version_path,
         };
         let op = AdditionalPackageDirectAddOperation::new(
             FileSystemProjectProvider::new(),
@@ -321,7 +327,7 @@ fn run_edit(args: EditAdditionalPackageArgs, start_path: &Path) -> Result<()> {
         || args.manifest_format.is_some()
         || args.version_path.is_some();
 
-    let events = if args.name.is_some() && has_updates {
+    let events = if let Some(name) = args.name.filter(|_| has_updates) {
         let updates = AdditionalPackageUpdate {
             path: args.path,
             influence: if args.influence.is_empty() {
@@ -333,10 +339,7 @@ fn run_edit(args: EditAdditionalPackageArgs, start_path: &Path) -> Result<()> {
             manifest_format: args.manifest_format,
             manifest_version_path: args.version_path,
         };
-        let input = AdditionalPackageEditInput {
-            name: args.name.expect("checked above"),
-            updates,
-        };
+        let input = AdditionalPackageEditInput { name, updates };
         let op = AdditionalPackageDirectEditOperation::new(
             FileSystemProjectProvider::new(),
             FileSystemManifestWriter::new(),

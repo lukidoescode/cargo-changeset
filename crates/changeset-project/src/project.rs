@@ -170,34 +170,34 @@ fn collect_packages(
 
     let mut packages = Vec::new();
 
-    if *kind == ProjectKind::WorkspaceWithRoot {
-        if let Some(pkg) = &manifest.package {
-            let version = resolve_version(
-                pkg.version.as_ref(),
-                workspace_version,
-                &root.join(CARGO_MANIFEST_FILENAME),
-            )?;
-            packages.push(PackageInfo::new(
-                pkg.name.clone(),
-                version,
-                root.to_path_buf(),
-            ));
-        }
+    if *kind == ProjectKind::WorkspaceWithRoot
+        && let Some(pkg) = &manifest.package
+    {
+        let version = resolve_version(
+            pkg.version.as_ref(),
+            workspace_version,
+            &root.join(CARGO_MANIFEST_FILENAME),
+        )?;
+        packages.push(PackageInfo::new(
+            pkg.name.clone(),
+            version,
+            root.to_path_buf(),
+        ));
     }
 
-    if *kind == ProjectKind::SinglePackage {
-        if let Some(pkg) = &manifest.package {
-            let version = resolve_version(
-                pkg.version.as_ref(),
-                workspace_version,
-                &root.join(CARGO_MANIFEST_FILENAME),
-            )?;
-            return Ok(vec![PackageInfo::new(
-                pkg.name.clone(),
-                version,
-                root.to_path_buf(),
-            )]);
-        }
+    if *kind == ProjectKind::SinglePackage
+        && let Some(pkg) = &manifest.package
+    {
+        let version = resolve_version(
+            pkg.version.as_ref(),
+            workspace_version,
+            &root.join(CARGO_MANIFEST_FILENAME),
+        )?;
+        return Ok(vec![PackageInfo::new(
+            pkg.name.clone(),
+            version,
+            root.to_path_buf(),
+        )]);
     }
 
     if let Some(workspace) = &manifest.workspace {

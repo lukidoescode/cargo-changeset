@@ -175,13 +175,13 @@ where
             validate_influence_patterns(&input.name, influence)?;
         }
 
-        if let Some(ref manifest_path) = input.updates.manifest_file_path {
-            if !manifest_path.exists() {
-                return Err(OperationError::AdditionalPackageManifestNotFound {
-                    name: input.name,
-                    path: manifest_path.clone(),
-                });
-            }
+        if let Some(ref manifest_path) = input.updates.manifest_file_path
+            && !manifest_path.exists()
+        {
+            return Err(OperationError::AdditionalPackageManifestNotFound {
+                name: input.name,
+                path: manifest_path.clone(),
+            });
         }
 
         let (manifest_path, section) = resolve_manifest_and_section(&project);
