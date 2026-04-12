@@ -10,6 +10,11 @@ pub fn init_git_repo(dir: &TempDir) {
         .output()
         .expect("failed to init git repo");
     Command::new("git")
+        .args(["config", "core.autocrlf", "false"])
+        .current_dir(dir.path())
+        .output()
+        .expect("failed to configure git autocrlf");
+    Command::new("git")
         .args(["config", "user.email", "test@example.com"])
         .current_dir(dir.path())
         .output()
