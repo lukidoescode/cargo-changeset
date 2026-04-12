@@ -62,8 +62,8 @@ pub(crate) struct AddAdditionalPackageArgs {
     pub manifest_format: Option<ManifestFormat>,
 
     /// JSONPath-style path to the version field in the manifest
-    #[arg(long = "version-path")]
-    pub version_path: Option<String>,
+    #[arg(long = "version-field-path")]
+    pub version_field_path: Option<String>,
 }
 
 #[derive(Args)]
@@ -95,9 +95,9 @@ pub(crate) struct EditAdditionalPackageArgs {
     #[arg(long = "manifest-format", value_enum)]
     pub manifest_format: Option<ManifestFormat>,
 
-    /// New version path
-    #[arg(long = "version-path")]
-    pub version_path: Option<String>,
+    /// New version field path
+    #[arg(long = "version-field-path")]
+    pub version_field_path: Option<String>,
 }
 
 struct TerminalAdditionalPackageInteractionProvider;
@@ -175,7 +175,7 @@ impl AdditionalPackageInteractionProvider for TerminalAdditionalPackageInteracti
         }
     }
 
-    fn prompt_manifest_version_path(&self) -> changeset_operations::Result<String> {
+    fn prompt_manifest_version_field_path(&self) -> changeset_operations::Result<String> {
         Input::new()
             .with_prompt("Path to version field in manifest (e.g. 'version' or 'info.version')")
             .interact_text()
@@ -247,7 +247,7 @@ impl AdditionalPackageInteractionProvider for TerminalAdditionalPackageInteracti
             Some(1) => MenuSelection::Selected(AdditionalPackageField::Influence),
             Some(2) => MenuSelection::Selected(AdditionalPackageField::ManifestFilePath),
             Some(3) => MenuSelection::Selected(AdditionalPackageField::ManifestFormat),
-            Some(4) => MenuSelection::Selected(AdditionalPackageField::ManifestVersionPath),
+            Some(4) => MenuSelection::Selected(AdditionalPackageField::ManifestVersionFieldPath),
             _ => MenuSelection::Cancelled,
         })
     }
@@ -276,13 +276,13 @@ fn run_add(args: AddAdditionalPackageArgs, start_path: &Path) -> Result<()> {
         Some(path),
         Some(manifest_file),
         Some(manifest_format),
-        Some(version_path),
+        Some(version_field_path),
     ) = (
         args.name,
         args.path,
         args.manifest_file,
         args.manifest_format,
-        args.version_path,
+        args.version_field_path,
     ) {
         let input = AdditionalPackageAddInput {
             name,
@@ -290,7 +290,7 @@ fn run_add(args: AddAdditionalPackageArgs, start_path: &Path) -> Result<()> {
             influence: args.influence,
             manifest_file_path: manifest_file,
             manifest_format,
-            manifest_version_path: version_path,
+            manifest_version_field_path: version_field_path,
         };
         let op = AdditionalPackageDirectAddOperation::new(
             FileSystemProjectProvider::new(),
@@ -339,7 +339,7 @@ fn run_edit(args: EditAdditionalPackageArgs, start_path: &Path) -> Result<()> {
         || !args.influence.is_empty()
         || args.manifest_file.is_some()
         || args.manifest_format.is_some()
-        || args.version_path.is_some();
+        || args.version_field_path.is_some();
 
     let events = if let Some(name) = args.name.filter(|_| has_updates) {
         let updates = AdditionalPackageUpdate {
@@ -351,7 +351,7 @@ fn run_edit(args: EditAdditionalPackageArgs, start_path: &Path) -> Result<()> {
             },
             manifest_file_path: args.manifest_file,
             manifest_format: args.manifest_format,
-            manifest_version_path: args.version_path,
+            manifest_version_field_path: args.version_field_path,
         };
         let input = AdditionalPackageEditInput { name, updates };
         let op = AdditionalPackageDirectEditOperation::new(

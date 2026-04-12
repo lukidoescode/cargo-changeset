@@ -23,7 +23,7 @@ pub(super) enum ManifestKind {
     #[allow(dead_code)]
     Additional {
         format: ManifestFormat,
-        version_path: String,
+        version_field_path: String,
     },
 }
 
@@ -31,7 +31,7 @@ pub(super) enum ManifestKind {
 pub(super) struct AdditionalManifestInfo {
     pub(super) manifest_path: PathBuf,
     pub(super) format: ManifestFormat,
-    pub(super) version_path: String,
+    pub(super) version_field_path: String,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]

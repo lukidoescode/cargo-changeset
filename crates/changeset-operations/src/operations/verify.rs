@@ -1059,7 +1059,7 @@ mod tests {
             .collect::<Vec<_>>()
             .join(",");
         let json = format!(
-            r#"{{"name":"{name}","path":"{name}","influence":[{influence_json}],"manifest":{{"file-path":"/{name}/manifest.yaml","format":"yaml","version-path":"version"}}}}"#
+            r#"{{"name":"{name}","path":"{name}","influence":[{influence_json}],"manifest":{{"file-path":"/{name}/manifest.yaml","format":"yaml","version-field-path":"version"}}}}"#
         );
         serde_json::from_str(&json).expect("valid declaration JSON")
     }

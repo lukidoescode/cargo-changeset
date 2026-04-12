@@ -147,13 +147,13 @@ impl ExternalManifestVersionWriter for FileSystemManifestWriter {
         &self,
         manifest_path: &Path,
         format: ManifestFormat,
-        version_path: &str,
+        version_field_path: &str,
         new_version: &Version,
     ) -> Result<()> {
         Ok(changeset_manifest::write_external_version(
             manifest_path,
             format,
-            version_path,
+            version_field_path,
             new_version,
         )?)
     }
@@ -162,13 +162,13 @@ impl ExternalManifestVersionWriter for FileSystemManifestWriter {
         &self,
         manifest_path: &Path,
         format: ManifestFormat,
-        version_path: &str,
+        version_field_path: &str,
         expected: &Version,
     ) -> Result<()> {
         Ok(changeset_manifest::verify_external_version(
             manifest_path,
             format,
-            version_path,
+            version_field_path,
             expected,
         )?)
     }

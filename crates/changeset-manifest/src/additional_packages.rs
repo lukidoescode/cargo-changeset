@@ -13,7 +13,7 @@ pub struct AdditionalPackageUpdate {
     pub influence: Option<Vec<String>>,
     pub manifest_file_path: Option<PathBuf>,
     pub manifest_format: Option<ManifestFormat>,
-    pub manifest_version_path: Option<String>,
+    pub manifest_version_field_path: Option<String>,
 }
 
 /// # Errors
@@ -65,8 +65,8 @@ pub fn add_additional_package(
         value(declaration.manifest().format().to_string().as_str()),
     );
     manifest_table.insert(
-        "version-path",
-        value(declaration.manifest().version_path().as_str()),
+        "version-field-path",
+        value(declaration.manifest().version_field_path().as_str()),
     );
     table.insert("manifest", Item::Table(manifest_table));
 
@@ -175,7 +175,7 @@ pub fn update_additional_package(
 
     if updates.manifest_file_path.is_some()
         || updates.manifest_format.is_some()
-        || updates.manifest_version_path.is_some()
+        || updates.manifest_version_field_path.is_some()
     {
         let manifest_item = table
             .entry("manifest")
@@ -197,8 +197,8 @@ pub fn update_additional_package(
             manifest_table.insert("format", value(new_format.to_string().as_str()));
         }
 
-        if let Some(ref new_version_path) = updates.manifest_version_path {
-            manifest_table.insert("version-path", value(new_version_path.as_str()));
+        if let Some(ref new_version_path) = updates.manifest_version_field_path {
+            manifest_table.insert("version-field-path", value(new_version_path.as_str()));
         }
     }
 
@@ -325,7 +325,7 @@ members = ["crates/*"]
         let content = std::fs::read_to_string(&path).expect("read file");
         assert!(content.contains(r#"file-path = "charts/my-chart/Chart.yaml""#));
         assert!(content.contains(r#"format = "yaml""#));
-        assert!(content.contains(r#"version-path = "version""#));
+        assert!(content.contains(r#"version-field-path = "version""#));
     }
 
     #[test]
@@ -466,7 +466,7 @@ members = ["crates/*"]
             influence: None,
             manifest_file_path: None,
             manifest_format: None,
-            manifest_version_path: None,
+            manifest_version_field_path: None,
         };
         let result =
             update_additional_package(&path, MetadataSection::Workspace, "my-chart", &updates)
@@ -497,7 +497,7 @@ members = ["crates/*"]
             influence: Some(vec!["new/pattern/**".to_string()]),
             manifest_file_path: None,
             manifest_format: None,
-            manifest_version_path: None,
+            manifest_version_field_path: None,
         };
         update_additional_package(&path, MetadataSection::Workspace, "my-chart", &updates)
             .expect("update should succeed");
@@ -526,14 +526,14 @@ members = ["crates/*"]
             influence: None,
             manifest_file_path: None,
             manifest_format: Some(ManifestFormat::Json),
-            manifest_version_path: Some("info.version".to_string()),
+            manifest_version_field_path: Some("info.version".to_string()),
         };
         update_additional_package(&path, MetadataSection::Workspace, "my-chart", &updates)
             .expect("update should succeed");
 
         let content = std::fs::read_to_string(&path).expect("read file");
         assert!(content.contains(r#"format = "json""#));
-        assert!(content.contains(r#"version-path = "info.version""#));
+        assert!(content.contains(r#"version-field-path = "info.version""#));
     }
 
     #[test]
@@ -550,7 +550,7 @@ members = ["crates/*"]
             influence: None,
             manifest_file_path: None,
             manifest_format: None,
-            manifest_version_path: None,
+            manifest_version_field_path: None,
         };
         let result =
             update_additional_package(&path, MetadataSection::Workspace, "nonexistent", &updates)
@@ -580,7 +580,7 @@ members = ["crates/*"]
             influence: None,
             manifest_file_path: None,
             manifest_format: None,
-            manifest_version_path: None,
+            manifest_version_field_path: None,
         };
         update_additional_package(&path, MetadataSection::Workspace, "my-chart", &updates)
             .expect("update");

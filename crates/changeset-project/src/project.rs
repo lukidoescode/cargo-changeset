@@ -108,7 +108,7 @@ pub fn discover_additional_packages(
             let version = read_external_version(
                 &manifest_path,
                 decl.manifest().format(),
-                decl.manifest().version_path(),
+                decl.manifest().version_field_path(),
             )?;
             Ok(PackageInfo::new(
                 decl.name().clone(),
@@ -340,7 +340,7 @@ mod tests {
             "manifest": {
                 "file-path": "charts/my-chart/Chart.yaml",
                 "format": "yaml",
-                "version-path": "version"
+                "version-field-path": "version"
             }
         }"#,
         );
@@ -381,7 +381,7 @@ mod tests {
                 "manifest": {
                     "file-path": "charts/chart-a/Chart.yaml",
                     "format": "yaml",
-                    "version-path": "version"
+                    "version-field-path": "version"
                 }
             }"#,
             ),
@@ -393,7 +393,7 @@ mod tests {
                 "manifest": {
                     "file-path": "apps/app-b/package.json",
                     "format": "json",
-                    "version-path": "version"
+                    "version-field-path": "version"
                 }
             }"#,
             ),
@@ -421,7 +421,7 @@ mod tests {
             "manifest": {
                 "file-path": "charts/missing/Chart.yaml",
                 "format": "yaml",
-                "version-path": "version"
+                "version-field-path": "version"
             }
         }"#,
         );
@@ -451,7 +451,7 @@ mod tests {
             "manifest": {
                 "file-path": "charts/bad/Chart.yaml",
                 "format": "yaml",
-                "version-path": "version"
+                "version-field-path": "version"
             }
         }"#,
         );

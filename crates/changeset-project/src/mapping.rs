@@ -250,7 +250,7 @@ mod tests {
                 "manifest": {{
                     "file-path": "{path}/manifest.yaml",
                     "format": "yaml",
-                    "version-path": "version"
+                    "version-field-path": "version"
                 }}
             }}"#,
             patterns = influence_json.join(", ")

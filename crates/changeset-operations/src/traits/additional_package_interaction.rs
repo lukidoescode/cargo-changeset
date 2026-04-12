@@ -11,7 +11,7 @@ pub enum AdditionalPackageField {
     Influence,
     ManifestFilePath,
     ManifestFormat,
-    ManifestVersionPath,
+    ManifestVersionFieldPath,
 }
 
 pub trait AdditionalPackageInteractionProvider: Send + Sync {
@@ -37,7 +37,7 @@ pub trait AdditionalPackageInteractionProvider: Send + Sync {
 
     /// # Errors
     /// Returns an error if the terminal interaction fails.
-    fn prompt_manifest_version_path(&self) -> Result<String>;
+    fn prompt_manifest_version_field_path(&self) -> Result<String>;
 
     /// # Errors
     /// Returns an error if the terminal interaction fails.

@@ -1098,7 +1098,7 @@ influence = ["charts/my-chart/**"]
 [workspace.metadata.changeset.additional-packages.manifest]
 file-path = "charts/my-chart/Chart.yaml"
 format = "yaml"
-version-path = "version"
+version-field-path = "version"
 "#;
         let dir = setup_with_config(toml)?;
 
@@ -1117,7 +1117,7 @@ version-path = "version"
             packages[0].manifest().format(),
             changeset_core::ManifestFormat::Yaml
         );
-        assert_eq!(packages[0].manifest().version_path(), "version");
+        assert_eq!(packages[0].manifest().version_field_path(), "version");
 
         Ok(())
     }
@@ -1151,7 +1151,7 @@ influence = ["charts/my-chart/**"]
 [workspace.metadata.changeset.additional-packages.manifest]
 file-path = "charts/my-chart/Chart.yaml"
 format = "yaml"
-version-path = "version"
+version-field-path = "version"
 
 [[workspace.metadata.changeset.additional-packages]]
 name = "my-npm-package"
@@ -1161,7 +1161,7 @@ influence = ["frontend/**"]
 [workspace.metadata.changeset.additional-packages.manifest]
 file-path = "frontend/package.json"
 format = "json"
-version-path = "version"
+version-field-path = "version"
 "#;
         let dir = setup_with_config(toml)?;
 
@@ -1198,7 +1198,7 @@ influence = ["frontend/**"]
 [package.metadata.changeset.additional-packages.manifest]
 file-path = "frontend/package.json"
 format = "json"
-version-path = "version"
+version-field-path = "version"
 "#;
         let dir = setup_with_config(toml)?;
 
@@ -1217,7 +1217,7 @@ version-path = "version"
             packages[0].manifest().format(),
             changeset_core::ManifestFormat::Json
         );
-        assert_eq!(packages[0].manifest().version_path(), "version");
+        assert_eq!(packages[0].manifest().version_field_path(), "version");
 
         Ok(())
     }

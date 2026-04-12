@@ -49,16 +49,16 @@ pub struct AdditionalPackageManifest {
     #[getset(get_copy, vis = "pub")]
     format: ManifestFormat,
     #[getset(get, vis = "pub")]
-    version_path: String,
+    version_field_path: String,
 }
 
 impl AdditionalPackageManifest {
     #[must_use]
-    pub fn new(file_path: PathBuf, format: ManifestFormat, version_path: String) -> Self {
+    pub fn new(file_path: PathBuf, format: ManifestFormat, version_field_path: String) -> Self {
         Self {
             file_path,
             format,
-            version_path,
+            version_field_path,
         }
     }
 }
@@ -600,11 +600,11 @@ mod tests {
         let manifest = AdditionalPackageManifest {
             file_path: PathBuf::from("charts/my-chart/Chart.yaml"),
             format: ManifestFormat::Yaml,
-            version_path: "version".to_string(),
+            version_field_path: "version".to_string(),
         };
         let serialized = serde_json::to_string(&manifest).unwrap();
         assert!(serialized.contains(r#""file-path""#));
-        assert!(serialized.contains(r#""version-path""#));
+        assert!(serialized.contains(r#""version-field-path""#));
         let deserialized: AdditionalPackageManifest = serde_json::from_str(&serialized).unwrap();
         assert_eq!(deserialized, manifest);
     }
@@ -618,7 +618,7 @@ mod tests {
             manifest: AdditionalPackageManifest {
                 file_path: PathBuf::from("charts/my-chart/Chart.yaml"),
                 format: ManifestFormat::Yaml,
-                version_path: "version".to_string(),
+                version_field_path: "version".to_string(),
             },
         };
         let serialized = serde_json::to_string(&decl).unwrap();
@@ -643,7 +643,7 @@ mod tests {
             "manifest": {
                 "file-path": "charts/my-chart/Chart.yaml",
                 "format": "yaml",
-                "version-path": "version"
+                "version-field-path": "version"
             }
         }"#;
         let result = serde_json::from_str::<AdditionalPackageDeclaration>(json);

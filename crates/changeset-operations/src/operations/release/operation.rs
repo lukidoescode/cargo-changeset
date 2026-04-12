@@ -395,7 +395,7 @@ where
                     AdditionalManifestInfo {
                         manifest_path: context.project.root().join(decl.manifest().file_path()),
                         format: decl.manifest().format(),
-                        version_path: decl.manifest().version_path().clone(),
+                        version_field_path: decl.manifest().version_field_path().clone(),
                     },
                 )
             })

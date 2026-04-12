@@ -137,7 +137,7 @@ influence = ["charts/my-chart/**"]
 [workspace.metadata.changeset.additional-packages.manifest]
 file-path = "charts/my-chart/Chart.yaml"
 format = "yaml"
-version-path = "version"
+version-field-path = "version"
 "#
     )
     .expect("failed to append helm chart config to Cargo.toml");
@@ -168,7 +168,7 @@ influence = ["charts/my-chart/**"]
 [workspace.metadata.changeset.additional-packages.manifest]
 file-path = "charts/my-chart/Chart.yaml"
 format = "yaml"
-version-path = "version"
+version-field-path = "version"
 "#,
     )
     .expect("failed to write workspace Cargo.toml");

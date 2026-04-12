@@ -62,14 +62,14 @@ impl ValueAccess for toml::Value {
 fn resolve_dot_path<V: ValueAccess>(
     root: &V,
     path: &Path,
-    version_path: &str,
+    version_field_path: &str,
 ) -> Result<String, ProjectError> {
     let mut current = root;
-    for segment in version_path.split('.') {
+    for segment in version_field_path.split('.') {
         current = current.get_field(segment).ok_or_else(|| {
             ProjectError::ExternalVersionPathNotFound {
                 path: path.to_path_buf(),
-                version_path: version_path.to_string(),
+                version_field_path: version_field_path.to_string(),
             }
         })?;
     }
@@ -77,14 +77,14 @@ fn resolve_dot_path<V: ValueAccess>(
         .as_str_value()
         .ok_or_else(|| ProjectError::ExternalVersionNotString {
             path: path.to_path_buf(),
-            version_path: version_path.to_string(),
+            version_field_path: version_field_path.to_string(),
         })
 }
 
 pub(crate) fn read_external_version(
     path: &Path,
     format: ManifestFormat,
-    version_path: &str,
+    version_field_path: &str,
 ) -> Result<Version, ProjectError> {
     let content = std::fs::read_to_string(path).map_err(|source| ProjectError::ManifestRead {
         path: path.to_path_buf(),
@@ -98,7 +98,7 @@ pub(crate) fn read_external_version(
                     path: path.to_path_buf(),
                     source,
                 })?;
-            resolve_dot_path(&value, path, version_path)?
+            resolve_dot_path(&value, path, version_field_path)?
         }
         ManifestFormat::Yaml => {
             let value: serde_yml::Value =
@@ -106,7 +106,7 @@ pub(crate) fn read_external_version(
                     path: path.to_path_buf(),
                     source,
                 })?;
-            resolve_dot_path(&value, path, version_path)?
+            resolve_dot_path(&value, path, version_field_path)?
         }
         ManifestFormat::Toml => {
             let value: toml::Value =
@@ -114,7 +114,7 @@ pub(crate) fn read_external_version(
                     path: path.to_path_buf(),
                     source,
                 })?;
-            resolve_dot_path(&value, path, version_path)?
+            resolve_dot_path(&value, path, version_field_path)?
         }
     };
 
@@ -180,7 +180,7 @@ mod tests {
     }
 
     #[test]
-    fn returns_error_for_missing_version_path() -> Result<()> {
+    fn returns_error_for_missing_version_field_path() -> Result<()> {
         let file = NamedTempFile::new()?;
         std::fs::write(file.path(), r#"{ "name": "my-pkg" }"#)?;
         let result = read_external_version(file.path(), ManifestFormat::Json, "version");

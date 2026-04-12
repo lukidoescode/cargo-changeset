@@ -107,7 +107,7 @@ mod tests {
                 "manifest": {
                     "file-path": "charts/my-chart/Chart.yaml",
                     "format": "yaml",
-                    "version-path": "version"
+                    "version-field-path": "version"
                 }
             }"#,
         );
@@ -135,7 +135,7 @@ mod tests {
                 "manifest": {
                     "file-path": "/nonexistent/path/Chart.yaml",
                     "format": "yaml",
-                    "version-path": "version"
+                    "version-field-path": "version"
                 }
             }"#,
         );

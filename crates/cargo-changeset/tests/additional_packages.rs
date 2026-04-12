@@ -29,7 +29,7 @@ mod add_tests {
                 "charts/my-chart/Chart.yaml",
                 "--manifest-format",
                 "yaml",
-                "--version-path",
+                "--version-field-path",
                 "version",
             ])
             .current_dir(dir.path())
@@ -41,7 +41,7 @@ mod add_tests {
             fs::read_to_string(dir.path().join("Cargo.toml")).expect("read Cargo.toml");
         assert!(cargo_toml.contains(r#"name = "my-helm-chart""#));
         assert!(cargo_toml.contains(r#"format = "yaml""#));
-        assert!(cargo_toml.contains(r#"version-path = "version""#));
+        assert!(cargo_toml.contains(r#"version-field-path = "version""#));
     }
 
     #[test]
@@ -63,7 +63,7 @@ mod add_tests {
                 "charts/my-chart/Chart.yaml",
                 "--manifest-format",
                 "yaml",
-                "--version-path",
+                "--version-field-path",
                 "version",
             ])
             .current_dir(dir.path())
@@ -90,7 +90,7 @@ mod add_tests {
                 "charts/my-chart/Chart.yaml",
                 "--manifest-format",
                 "yaml",
-                "--version-path",
+                "--version-field-path",
                 "version",
             ])
             .current_dir(dir.path())
@@ -117,7 +117,7 @@ mod add_tests {
                 "nonexistent/Chart.yaml",
                 "--manifest-format",
                 "yaml",
-                "--version-path",
+                "--version-field-path",
                 "version",
             ])
             .current_dir(dir.path())
@@ -143,7 +143,7 @@ mod add_tests {
                 "charts/my-chart/Chart.yaml",
                 "--manifest-format",
                 "yaml",
-                "--version-path",
+                "--version-field-path",
                 "version",
             ])
             .current_dir(dir.path())
@@ -285,7 +285,7 @@ mod workspace_rejection_tests {
                 "Cargo.toml",
                 "--manifest-format",
                 "toml",
-                "--version-path",
+                "--version-field-path",
                 "package.version",
                 "--influence",
                 "**",

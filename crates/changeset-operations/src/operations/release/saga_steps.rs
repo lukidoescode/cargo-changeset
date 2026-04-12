@@ -71,18 +71,18 @@ where
             {
                 let manifest_path = &additional_info.manifest_path;
                 let format = additional_info.format;
-                let version_path = &additional_info.version_path;
+                let version_field_path = &additional_info.version_field_path;
 
                 ctx.manifest_writer().write_external_version(
                     manifest_path,
                     format,
-                    version_path,
+                    version_field_path,
                     release.new_version(),
                 )?;
                 ctx.manifest_writer().verify_external_version(
                     manifest_path,
                     format,
-                    version_path,
+                    version_field_path,
                     release.new_version(),
                 )?;
 
@@ -93,7 +93,7 @@ where
                     written: true,
                     kind: ManifestKind::Additional {
                         format,
-                        version_path: version_path.clone(),
+                        version_field_path: version_field_path.clone(),
                     },
                 };
                 debug!(
@@ -144,7 +144,7 @@ where
                 ctx.manifest_writer().write_external_version(
                     &additional_info.manifest_path,
                     additional_info.format,
-                    &additional_info.version_path,
+                    &additional_info.version_field_path,
                     release.current_version(),
                 )?;
             } else if let Some(pkg_path) = input.package_paths().get(release.name()) {
@@ -1777,12 +1777,12 @@ mod tests {
     fn make_additional_manifest_info(
         manifest_path: &str,
         format: changeset_core::ManifestFormat,
-        version_path: &str,
+        version_field_path: &str,
     ) -> AdditionalManifestInfo {
         AdditionalManifestInfo {
             manifest_path: PathBuf::from(manifest_path),
             format,
-            version_path: version_path.to_string(),
+            version_field_path: version_field_path.to_string(),
         }
     }
 
@@ -2098,7 +2098,7 @@ mod tests {
             written: true,
             kind: ManifestKind::Additional {
                 format: changeset_core::ManifestFormat::Yaml,
-                version_path: "version".to_string(),
+                version_field_path: "version".to_string(),
             },
         });
 

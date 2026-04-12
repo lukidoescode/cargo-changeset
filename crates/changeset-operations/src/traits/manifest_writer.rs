@@ -98,7 +98,7 @@ pub trait ExternalManifestVersionWriter: Send + Sync {
         &self,
         manifest_path: &Path,
         format: ManifestFormat,
-        version_path: &str,
+        version_field_path: &str,
         new_version: &Version,
     ) -> Result<()>;
 
@@ -109,7 +109,7 @@ pub trait ExternalManifestVersionWriter: Send + Sync {
         &self,
         manifest_path: &Path,
         format: ManifestFormat,
-        version_path: &str,
+        version_field_path: &str,
         expected: &Version,
     ) -> Result<()>;
 }

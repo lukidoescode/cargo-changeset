@@ -21,7 +21,7 @@ pub struct AdditionalPackageAddInput {
     pub influence: Vec<String>,
     pub manifest_file_path: PathBuf,
     pub manifest_format: ManifestFormat,
-    pub manifest_version_path: String,
+    pub manifest_version_field_path: String,
 }
 
 pub struct AdditionalPackageEditInput {
@@ -278,7 +278,7 @@ where
         let influence = self.interaction.prompt_influence_patterns(&path)?;
         let manifest_file_path = self.interaction.prompt_manifest_file_path()?;
         let manifest_format = self.interaction.prompt_manifest_format()?;
-        let manifest_version_path = self.interaction.prompt_manifest_version_path()?;
+        let manifest_version_field_path = self.interaction.prompt_manifest_version_field_path()?;
 
         let (root_config, _) = self.project_provider.load_configs(&project)?;
         write_additional_package(
@@ -291,7 +291,7 @@ where
                 influence,
                 manifest_file_path,
                 manifest_format,
-                manifest_version_path,
+                manifest_version_field_path,
             },
         )
     }
@@ -402,7 +402,7 @@ where
             influence: None,
             manifest_file_path: None,
             manifest_format: None,
-            manifest_version_path: None,
+            manifest_version_field_path: None,
         };
         let mut changed_fields: Vec<String> = Vec::new();
 
@@ -435,10 +435,10 @@ where
                     updates.manifest_format = Some(self.interaction.prompt_manifest_format()?);
                     changed_fields.push("manifest.format".to_string());
                 }
-                AdditionalPackageField::ManifestVersionPath => {
-                    updates.manifest_version_path =
-                        Some(self.interaction.prompt_manifest_version_path()?);
-                    changed_fields.push("manifest.version-path".to_string());
+                AdditionalPackageField::ManifestVersionFieldPath => {
+                    updates.manifest_version_field_path =
+                        Some(self.interaction.prompt_manifest_version_field_path()?);
+                    changed_fields.push("manifest.version-field-path".to_string());
                 }
             }
         }
@@ -492,7 +492,7 @@ where
         AdditionalPackageManifest::new(
             input.manifest_file_path,
             input.manifest_format,
-            input.manifest_version_path,
+            input.manifest_version_field_path,
         ),
     );
 
@@ -552,8 +552,8 @@ fn describe_updated_fields(updates: &AdditionalPackageUpdate) -> String {
     if updates.manifest_format.is_some() {
         fields.push("manifest.format");
     }
-    if updates.manifest_version_path.is_some() {
-        fields.push("manifest.version-path");
+    if updates.manifest_version_field_path.is_some() {
+        fields.push("manifest.version-field-path");
     }
     if fields.is_empty() {
         "none".to_string()
@@ -613,7 +613,7 @@ mod tests {
             influence: vec!["charts/my-chart/**".to_string()],
             manifest_file_path: manifest_file,
             manifest_format: ManifestFormat::Yaml,
-            manifest_version_path: "version".to_string(),
+            manifest_version_field_path: "version".to_string(),
         };
 
         let events = op
@@ -639,7 +639,7 @@ mod tests {
             influence: vec![],
             manifest_file_path: manifest_file,
             manifest_format: ManifestFormat::Yaml,
-            manifest_version_path: "version".to_string(),
+            manifest_version_field_path: "version".to_string(),
         };
 
         let result = op.execute(Path::new("/any"), input);
@@ -662,7 +662,7 @@ mod tests {
             influence: vec![],
             manifest_file_path: manifest_file,
             manifest_format: ManifestFormat::Yaml,
-            manifest_version_path: "version".to_string(),
+            manifest_version_field_path: "version".to_string(),
         };
 
         let result = op.execute(Path::new("/any"), input);
@@ -684,7 +684,7 @@ mod tests {
             influence: vec![],
             manifest_file_path: PathBuf::from("/nonexistent/Chart.yaml"),
             manifest_format: ManifestFormat::Yaml,
-            manifest_version_path: "version".to_string(),
+            manifest_version_field_path: "version".to_string(),
         };
 
         let result = op.execute(Path::new("/any"), input);
@@ -707,7 +707,7 @@ mod tests {
             influence: vec!["[invalid".to_string()],
             manifest_file_path: manifest_file,
             manifest_format: ManifestFormat::Yaml,
-            manifest_version_path: "version".to_string(),
+            manifest_version_field_path: "version".to_string(),
         };
 
         let result = op.execute(Path::new("/any"), input);
@@ -761,7 +761,7 @@ mod tests {
                 influence: None,
                 manifest_file_path: None,
                 manifest_format: None,
-                manifest_version_path: None,
+                manifest_version_field_path: None,
             },
         };
 
@@ -786,7 +786,7 @@ mod tests {
                 influence: None,
                 manifest_file_path: None,
                 manifest_format: None,
-                manifest_version_path: None,
+                manifest_version_field_path: None,
             },
         };
 
@@ -861,7 +861,7 @@ mod tests {
             influence: vec![],
             manifest_file_path: manifest_file,
             manifest_format: ManifestFormat::Yaml,
-            manifest_version_path: "version".to_string(),
+            manifest_version_field_path: "version".to_string(),
         };
 
         let result = op.execute(Path::new("/any"), input);
@@ -897,7 +897,7 @@ mod tests {
                 influence: None,
                 manifest_file_path: None,
                 manifest_format: None,
-                manifest_version_path: None,
+                manifest_version_field_path: None,
             },
         };
 

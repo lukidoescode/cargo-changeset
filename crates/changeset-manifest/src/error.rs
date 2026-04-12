@@ -70,9 +70,15 @@ pub enum ManifestError {
         source: jsonc_parser::ParseStringErrorKind,
     },
 
-    #[error("version path '{version_path}' not found in manifest at '{path}'")]
-    VersionPathNotFound { path: PathBuf, version_path: String },
+    #[error("version path '{version_field_path}' not found in manifest at '{path}'")]
+    VersionPathNotFound {
+        path: PathBuf,
+        version_field_path: String,
+    },
 
-    #[error("expected string at version path '{version_path}' in manifest at '{path}'")]
-    VersionNotString { path: PathBuf, version_path: String },
+    #[error("expected string at version path '{version_field_path}' in manifest at '{path}'")]
+    VersionNotString {
+        path: PathBuf,
+        version_field_path: String,
+    },
 }

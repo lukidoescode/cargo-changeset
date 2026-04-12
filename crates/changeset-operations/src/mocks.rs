@@ -893,7 +893,7 @@ impl InteractionProvider for MockInteractionProvider {
 pub struct ExternalVersionWrite {
     pub manifest_path: PathBuf,
     pub format: ManifestFormat,
-    pub version_path: String,
+    pub version_field_path: String,
     pub version: Version,
 }
 
@@ -1148,7 +1148,7 @@ impl ExternalManifestVersionWriter for MockManifestWriter {
         &self,
         manifest_path: &Path,
         format: ManifestFormat,
-        version_path: &str,
+        version_field_path: &str,
         new_version: &Version,
     ) -> Result<()> {
         self.state
@@ -1158,7 +1158,7 @@ impl ExternalManifestVersionWriter for MockManifestWriter {
             .push(ExternalVersionWrite {
                 manifest_path: manifest_path.to_path_buf(),
                 format,
-                version_path: version_path.to_string(),
+                version_field_path: version_field_path.to_string(),
                 version: new_version.clone(),
             });
         Ok(())
@@ -1168,7 +1168,7 @@ impl ExternalManifestVersionWriter for MockManifestWriter {
         &self,
         _manifest_path: &Path,
         _format: ManifestFormat,
-        _version_path: &str,
+        _version_field_path: &str,
         _expected: &Version,
     ) -> Result<()> {
         Ok(())
@@ -1219,8 +1219,8 @@ impl_arc_delegation! {
 
 impl_arc_delegation! {
     impl ExternalManifestVersionWriter for Arc<MockManifestWriter> {
-        fn write_external_version(&self, manifest_path: &Path, format: ManifestFormat, version_path: &str, new_version: &Version) -> Result<()>;
-        fn verify_external_version(&self, manifest_path: &Path, format: ManifestFormat, version_path: &str, expected: &Version) -> Result<()>;
+        fn write_external_version(&self, manifest_path: &Path, format: ManifestFormat, version_field_path: &str, new_version: &Version) -> Result<()>;
+        fn verify_external_version(&self, manifest_path: &Path, format: ManifestFormat, version_field_path: &str, expected: &Version) -> Result<()>;
     }
 }
 
@@ -1807,7 +1807,7 @@ pub struct MockAdditionalPackageInteractionProvider {
     pub influence_patterns: Vec<String>,
     pub manifest_file_path: PathBuf,
     pub manifest_format: ManifestFormat,
-    pub manifest_version_path: String,
+    pub manifest_version_field_path: String,
     pub select_remove_result: MenuSelection<usize>,
     pub select_edit_result: MenuSelection<usize>,
     pub select_field_result: MenuSelection<AdditionalPackageField>,
@@ -1835,8 +1835,8 @@ impl AdditionalPackageInteractionProvider for MockAdditionalPackageInteractionPr
         Ok(self.manifest_format)
     }
 
-    fn prompt_manifest_version_path(&self) -> Result<String> {
-        Ok(self.manifest_version_path.clone())
+    fn prompt_manifest_version_field_path(&self) -> Result<String> {
+        Ok(self.manifest_version_field_path.clone())
     }
 
     fn select_package_to_remove(
@@ -1885,8 +1885,8 @@ impl AdditionalPackageInteractionProvider for PanickingAdditionalPackageInteract
         panic!("prompt_manifest_format must not be called");
     }
 
-    fn prompt_manifest_version_path(&self) -> Result<String> {
-        panic!("prompt_manifest_version_path must not be called");
+    fn prompt_manifest_version_field_path(&self) -> Result<String> {
+        panic!("prompt_manifest_version_field_path must not be called");
     }
 
     fn select_package_to_remove(
