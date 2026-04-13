@@ -37,6 +37,59 @@ pub fn write_external_version(
 
 /// # Errors
 ///
+/// Returns an error if the manifest cannot be read, updated, or written.
+pub fn restore_external_version(
+    path: &Path,
+    format: ManifestFormat,
+    version_field_path: &str,
+    version_str: &str,
+) -> Result<(), ManifestError> {
+    let content = std::fs::read_to_string(path).map_err(|source| ManifestError::Read {
+        path: path.to_path_buf(),
+        source,
+    })?;
+
+    let new_content = match format {
+        ManifestFormat::Toml => {
+            restore_toml_version(&content, path, version_field_path, version_str)?
+        }
+        ManifestFormat::Yaml => {
+            restore_yaml_version(&content, path, version_field_path, version_str)?
+        }
+        ManifestFormat::Json => {
+            restore_json_version(&content, path, version_field_path, version_str)?
+        }
+    };
+
+    std::fs::write(path, new_content).map_err(|source| ManifestError::Write {
+        path: path.to_path_buf(),
+        source,
+    })
+}
+
+/// # Errors
+///
+/// Returns an error if the manifest cannot be read or the version field path
+/// does not resolve to a string value.
+pub fn read_external_version_string(
+    path: &Path,
+    format: ManifestFormat,
+    version_field_path: &str,
+) -> Result<String, ManifestError> {
+    let content = std::fs::read_to_string(path).map_err(|source| ManifestError::Read {
+        path: path.to_path_buf(),
+        source,
+    })?;
+
+    match format {
+        ManifestFormat::Toml => read_toml_version(&content, path, version_field_path),
+        ManifestFormat::Yaml => read_yaml_version(&content, path, version_field_path),
+        ManifestFormat::Json => read_json_version(&content, path, version_field_path),
+    }
+}
+
+/// # Errors
+///
 /// Returns `ManifestError::VerificationFailed` if the version does not match the expected value.
 pub fn verify_external_version(
     path: &Path,
@@ -381,6 +434,151 @@ fn read_json_version(
             path: path.to_path_buf(),
             source,
         })
+}
+
+fn restore_toml_version(
+    content: &str,
+    path: &Path,
+    version_field_path: &str,
+    version_str: &str,
+) -> Result<String, ManifestError> {
+    let mut doc = content
+        .parse::<DocumentMut>()
+        .map_err(|source| ManifestError::Parse {
+            path: path.to_path_buf(),
+            source,
+        })?;
+
+    let segments: Vec<&str> = version_field_path.split('.').collect();
+    let (leaf_key, parent_segments) =
+        segments
+            .split_last()
+            .ok_or_else(|| ManifestError::VersionPathNotFound {
+                path: path.to_path_buf(),
+                version_field_path: version_field_path.to_string(),
+            })?;
+
+    let mut current = doc.as_item_mut();
+    for segment in parent_segments {
+        current = current
+            .get_mut(*segment)
+            .ok_or_else(|| ManifestError::VersionPathNotFound {
+                path: path.to_path_buf(),
+                version_field_path: version_field_path.to_string(),
+            })?;
+    }
+
+    let table = current
+        .as_table_like_mut()
+        .ok_or_else(|| ManifestError::VersionPathNotFound {
+            path: path.to_path_buf(),
+            version_field_path: version_field_path.to_string(),
+        })?;
+
+    if table.get(leaf_key).is_none() {
+        return Err(ManifestError::VersionPathNotFound {
+            path: path.to_path_buf(),
+            version_field_path: version_field_path.to_string(),
+        });
+    }
+
+    table.insert(leaf_key, toml_edit::value(version_str));
+
+    Ok(doc.to_string())
+}
+
+fn restore_yaml_version(
+    content: &str,
+    path: &Path,
+    version_field_path: &str,
+    version_str: &str,
+) -> Result<String, ManifestError> {
+    let doc = content
+        .parse::<Document>()
+        .map_err(|source| ManifestError::YamlParse {
+            path: path.to_path_buf(),
+            source,
+        })?;
+
+    let segments: Vec<&str> = version_field_path.split('.').collect();
+    let (leaf_key, parent_segments) =
+        segments
+            .split_last()
+            .ok_or_else(|| ManifestError::VersionPathNotFound {
+                path: path.to_path_buf(),
+                version_field_path: version_field_path.to_string(),
+            })?;
+
+    let mapping = doc
+        .as_mapping()
+        .ok_or_else(|| ManifestError::VersionPathNotFound {
+            path: path.to_path_buf(),
+            version_field_path: version_field_path.to_string(),
+        })?;
+
+    let mut current_mapping = mapping;
+    for segment in parent_segments {
+        current_mapping = current_mapping.get_mapping(*segment).ok_or_else(|| {
+            ManifestError::VersionPathNotFound {
+                path: path.to_path_buf(),
+                version_field_path: version_field_path.to_string(),
+            }
+        })?;
+    }
+
+    if !current_mapping.contains_key(*leaf_key) {
+        return Err(ManifestError::VersionPathNotFound {
+            path: path.to_path_buf(),
+            version_field_path: version_field_path.to_string(),
+        });
+    }
+
+    current_mapping.set(*leaf_key, version_str);
+
+    Ok(doc.to_string())
+}
+
+fn restore_json_version(
+    content: &str,
+    path: &Path,
+    version_field_path: &str,
+    version_str: &str,
+) -> Result<String, ManifestError> {
+    let root = CstRootNode::parse(content, &ParseOptions::default()).map_err(|source| {
+        ManifestError::JsonParse {
+            path: path.to_path_buf(),
+            source,
+        }
+    })?;
+
+    let root_obj = root
+        .object_value()
+        .ok_or_else(|| ManifestError::VersionPathNotFound {
+            path: path.to_path_buf(),
+            version_field_path: version_field_path.to_string(),
+        })?;
+
+    let segments: Vec<&str> = version_field_path.split('.').collect();
+    let (leaf_key, parent_segments) =
+        segments
+            .split_last()
+            .ok_or_else(|| ManifestError::VersionPathNotFound {
+                path: path.to_path_buf(),
+                version_field_path: version_field_path.to_string(),
+            })?;
+
+    let target_obj = navigate_json_to_object(&root_obj, path, version_field_path, parent_segments)?;
+
+    let prop = target_obj
+        .get(leaf_key)
+        .ok_or_else(|| ManifestError::VersionPathNotFound {
+            path: path.to_path_buf(),
+            version_field_path: version_field_path.to_string(),
+        })?;
+
+    prop.set_value(CstInputValue::String(version_str.to_string()));
+
+    Ok(root.to_string())
 }
 
 #[cfg(test)]

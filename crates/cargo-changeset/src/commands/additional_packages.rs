@@ -11,7 +11,10 @@ use changeset_operations::operations::{
     AdditionalPackageDirectEditOperation, AdditionalPackageDirectRemoveOperation,
     AdditionalPackageEditInput, AdditionalPackageEvent, AdditionalPackageInteractiveAddOperation,
     AdditionalPackageInteractiveEditOperation, AdditionalPackageInteractiveRemoveOperation,
-    AdditionalPackageListOperation,
+    AdditionalPackageListOperation, VersionTrackingDependencyAddInput,
+    VersionTrackingDependencyAddOperation, VersionTrackingDependencyEvent,
+    VersionTrackingDependencyListOperation, VersionTrackingDependencyRemoveInput,
+    VersionTrackingDependencyRemoveOperation,
 };
 use changeset_operations::providers::{FileSystemManifestWriter, FileSystemProjectProvider};
 use changeset_operations::traits::{
@@ -37,6 +40,65 @@ pub(crate) enum AdditionalPackageCommand {
     Edit(EditAdditionalPackageArgs),
     /// List all non-Rust package declarations
     List,
+    /// Manage version-tracking dependencies for a package
+    Dependencies(DependenciesArgs),
+}
+
+#[derive(Args)]
+pub(crate) struct DependenciesArgs {
+    #[command(subcommand)]
+    pub command: DependencySubcommand,
+}
+
+#[derive(Subcommand)]
+pub(crate) enum DependencySubcommand {
+    /// Add a version-tracking dependency to a package
+    Add(AddDependencyArgs),
+    /// Remove a version-tracking dependency from a package
+    Remove(RemoveDependencyArgs),
+    /// List version-tracking dependencies for a package
+    List(ListDependencyArgs),
+}
+
+#[derive(Args)]
+pub(crate) struct AddDependencyArgs {
+    /// Name of the package that owns the dependency
+    #[arg(long)]
+    pub package: String,
+
+    /// Name of the dependency to track
+    #[arg(long)]
+    pub dependency: String,
+
+    /// Path to the manifest file where the dependency version is tracked
+    #[arg(long = "manifest-file")]
+    pub manifest_file: PathBuf,
+
+    /// Format of the manifest file
+    #[arg(long = "manifest-format", value_enum)]
+    pub manifest_format: ManifestFormat,
+
+    /// Path to the version field inside the manifest
+    #[arg(long = "version-field-path")]
+    pub version_field_path: String,
+}
+
+#[derive(Args)]
+pub(crate) struct RemoveDependencyArgs {
+    /// Name of the package that owns the dependency
+    #[arg(long)]
+    pub package: String,
+
+    /// Name of the dependency to remove
+    #[arg(long)]
+    pub dependency: String,
+}
+
+#[derive(Args)]
+pub(crate) struct ListDependencyArgs {
+    /// Name of the package to list dependencies for
+    #[arg(long)]
+    pub package: String,
 }
 
 #[derive(Args)]
@@ -267,6 +329,7 @@ pub(crate) fn run(args: AdditionalPackagesArgs, start_path: &Path) -> Result<()>
         AdditionalPackageCommand::Remove(args) => run_remove(args, start_path),
         AdditionalPackageCommand::Edit(args) => run_edit(args, start_path),
         AdditionalPackageCommand::List => run_list(start_path),
+        AdditionalPackageCommand::Dependencies(args) => run_dependencies(args, start_path),
     }
 }
 
@@ -379,6 +442,89 @@ fn run_list(start_path: &Path) -> Result<()> {
     let events = op.execute(start_path)?;
     print_additional_package_events(&events);
     Ok(())
+}
+
+fn run_dependencies(args: DependenciesArgs, start_path: &Path) -> Result<()> {
+    match args.command {
+        DependencySubcommand::Add(args) => run_dependency_add(args, start_path),
+        DependencySubcommand::Remove(args) => run_dependency_remove(args, start_path),
+        DependencySubcommand::List(args) => run_dependency_list(args, start_path),
+    }
+}
+
+fn run_dependency_add(args: AddDependencyArgs, start_path: &Path) -> Result<()> {
+    let input = VersionTrackingDependencyAddInput::new(
+        args.package,
+        args.dependency,
+        args.manifest_file,
+        args.manifest_format,
+        args.version_field_path,
+    );
+    let op = VersionTrackingDependencyAddOperation::new(
+        FileSystemProjectProvider::new(),
+        FileSystemManifestWriter::new(),
+    );
+    let events = op.execute(start_path, input)?;
+    print_dependency_events(&events);
+    Ok(())
+}
+
+fn run_dependency_remove(args: RemoveDependencyArgs, start_path: &Path) -> Result<()> {
+    let input = VersionTrackingDependencyRemoveInput::new(args.package, args.dependency);
+    let op = VersionTrackingDependencyRemoveOperation::new(
+        FileSystemProjectProvider::new(),
+        FileSystemManifestWriter::new(),
+    );
+    let events = op.execute(start_path, input)?;
+    print_dependency_events(&events);
+    Ok(())
+}
+
+fn run_dependency_list(args: ListDependencyArgs, start_path: &Path) -> Result<()> {
+    let op = VersionTrackingDependencyListOperation::new(FileSystemProjectProvider::new());
+    let events = op.execute(start_path, &args.package)?;
+    print_dependency_events(&events);
+    Ok(())
+}
+
+fn print_dependency_events(events: &[VersionTrackingDependencyEvent]) {
+    for event in events {
+        match event {
+            VersionTrackingDependencyEvent::Added {
+                package_name,
+                dependency_name,
+            } => {
+                println!(
+                    "Added version-tracking dependency '{dependency_name}' to package '{package_name}'"
+                );
+            }
+            VersionTrackingDependencyEvent::Removed {
+                package_name,
+                dependency_name,
+            } => {
+                println!(
+                    "Removed version-tracking dependency '{dependency_name}' from package '{package_name}'"
+                );
+            }
+            VersionTrackingDependencyEvent::Listed(summaries) => {
+                println!();
+                println!("Version-tracking dependencies:");
+                for s in summaries {
+                    println!(
+                        "  {} -> {} [{}]",
+                        s.dependency_name(),
+                        s.manifest_file_path().display(),
+                        s.manifest_format()
+                    );
+                    println!("    version field: {}", s.version_field_path());
+                }
+                println!();
+            }
+            VersionTrackingDependencyEvent::NoDependencies { package_name } => {
+                println!("No version-tracking dependencies configured for '{package_name}'.");
+            }
+        }
+    }
 }
 
 fn print_additional_package_events(events: &[AdditionalPackageEvent]) {

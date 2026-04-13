@@ -9,12 +9,14 @@ use indexmap::IndexMap;
 
 use super::classifiers::{self, EarlyReturnDecision};
 use super::context::ReleaseSagaContext;
-use super::saga_data::{AdditionalManifestInfo, ReleaseSagaData, SagaReleaseOptions};
+use super::saga_data::{
+    AdditionalManifestInfo, ReleaseSagaData, SagaReleaseOptions, VersionTrackingWrite,
+};
 use super::saga_steps::{
     ClearChangesetsConsumedStep, CreateCommitStep, CreateTagsStep, DeleteChangesetFilesStep,
     MarkChangesetsConsumedStep, RemoveWorkspaceVersionStep, RestoreChangelogsStep, StageFilesStep,
     UpdateDependencyVersionsStep, UpdateLockfileStep, UpdateReleaseStateStep,
-    WriteManifestVersionsStep,
+    WriteManifestVersionsStep, WriteVersionTrackingStep,
 };
 use super::types::{
     ChangelogUpdate, GitOptions, PrepareResult, ReleaseClassification, ReleaseContext,
@@ -28,8 +30,8 @@ use crate::operations::changelog_aggregation::ChangesetAggregator;
 use crate::planner::VersionPlanner;
 use crate::traits::{
     ChangelogWriter, ChangesetReader, ChangesetWriter, DependencyGraphProvider,
-    ExternalManifestVersionWriter, FullGitProvider, FullManifestWriter, ProjectProvider,
-    ReleaseStateIO,
+    ExternalManifestVersionReader, ExternalManifestVersionWriter, FullGitProvider,
+    FullManifestWriter, ProjectProvider, ReleaseStateIO,
 };
 use crate::types::PackageVersion;
 
@@ -46,7 +48,12 @@ impl<P, RW, M, C, G, S> ReleaseOperation<P, RW, M, C, G, S>
 where
     P: ProjectProvider + DependencyGraphProvider,
     RW: ChangesetReader + ChangesetWriter + Send + Sync + 'static,
-    M: FullManifestWriter + ExternalManifestVersionWriter + Send + Sync + 'static,
+    M: FullManifestWriter
+        + ExternalManifestVersionWriter
+        + ExternalManifestVersionReader
+        + Send
+        + Sync
+        + 'static,
     C: ChangelogWriter + Send + Sync + 'static,
     G: FullGitProvider + Send + Sync + 'static,
     S: ReleaseStateIO + Send + Sync + 'static,
@@ -168,7 +175,7 @@ where
         input: &ReleaseInput,
     ) -> Result<PrepareResult> {
         let project = self.project_provider.discover_project(start_path)?;
-        let (root_config, _) = self.project_provider.load_configs(&project)?;
+        let (root_config, package_configs) = self.project_provider.load_configs(&project)?;
 
         let additional_packages = crate::operations::discover_additional_packages_if_workspace(
             &self.project_provider,
@@ -255,9 +262,11 @@ where
             inherited_packages,
             additional_packages,
             all_packages,
+            package_configs,
         })))
     }
 
+    #[allow(clippy::too_many_lines)]
     fn plan_release(&self, context: &ReleaseContext, dry_run: bool) -> Result<ReleasePlan> {
         let (changesets, mut aggregator) = super::loading::load_changesets(
             self.changeset_io.as_ref(),
@@ -300,13 +309,24 @@ where
             .releases()
             .clone();
 
-            let graph = self
+            let mut graph = self
                 .project_provider
                 .build_dependency_graph(&context.project)?;
+
+            let additional_names = context.additional_packages.iter().map(|p| p.name().clone());
+            graph.add_members(additional_names);
+
+            let tracking_info = changeset_project::collect_version_tracking_info(
+                &context.root_config,
+                &context.package_configs,
+            );
+            let edges = changeset_project::tracking_edges(&tracking_info);
+            graph.extend_with_edges(&edges);
+
             let expanded = super::dependency_expansion::expand_with_reverse_dependencies(
                 base_releases,
                 &graph,
-                context.project.packages(),
+                &context.all_packages,
                 context.root_config.zero_version_behavior(),
             )?;
 
@@ -401,6 +421,28 @@ where
             })
             .collect();
 
+        let tracking_info = changeset_project::collect_version_tracking_info(
+            &context.root_config,
+            &context.package_configs,
+        );
+
+        let project_root = context.project.root();
+        let version_tracking_writes: Vec<VersionTrackingWrite> = tracking_info
+            .iter()
+            .filter_map(|entry| {
+                plan.output
+                    .planned_releases()
+                    .iter()
+                    .find(|r| r.name() == entry.dependency_name())
+                    .map(|release| VersionTrackingWrite {
+                        manifest_path: project_root.join(entry.manifest().file_path()),
+                        format: entry.manifest().format(),
+                        version_field_path: entry.manifest().version_field_path().clone(),
+                        new_dependency_version: release.new_version().clone(),
+                    })
+            })
+            .collect();
+
         let saga_data = ReleaseSagaData::new(
             context.changeset_dir.clone(),
             context.project.root().join(CARGO_MANIFEST_FILENAME),
@@ -417,7 +459,8 @@ where
         .with_prerelease_state(context.prerelease_state.as_ref())
         .with_graduation_state(context.graduation_state.as_ref())
         .with_additional_packages(additional_package_manifests)
-        .with_changelog_backups(plan.changelog_backups);
+        .with_changelog_backups(plan.changelog_backups)
+        .with_version_tracking_writes(version_tracking_writes);
 
         let result = self.execute_release_saga(context, saga_data)?;
 
@@ -433,6 +476,7 @@ where
     ) -> Result<ReleaseSagaData> {
         type RestoreChangelogs<G, M, RW, S, CW> = RestoreChangelogsStep<G, M, RW, S, CW>;
         type WriteManifests<G, M, RW, S, CW> = WriteManifestVersionsStep<G, M, RW, S, CW>;
+        type WriteVersionTracking<G, M, RW, S, CW> = WriteVersionTrackingStep<G, M, RW, S, CW>;
         type UpdateDeps<G, M, RW, S, CW> = UpdateDependencyVersionsStep<G, M, RW, S, CW>;
         type RemoveWorkspace<G, M, RW, S, CW> = RemoveWorkspaceVersionStep<G, M, RW, S, CW>;
         type UpdateLockfile<G, M, RW, S, CW> = UpdateLockfileStep<G, M, RW, S, CW>;
@@ -453,6 +497,7 @@ where
         let saga = SagaBuilder::new()
             .first_step(RestoreChangelogs::<G, M, RW, S, C>::new())
             .then(WriteManifests::<G, M, RW, S, C>::new())
+            .then(WriteVersionTracking::<G, M, RW, S, C>::new())
             .then(UpdateDeps::<G, M, RW, S, C>::new())
             .then(RemoveWorkspace::<G, M, RW, S, C>::new())
             .then(UpdateLockfile::<G, M, RW, S, C>::new())
@@ -545,7 +590,12 @@ mod tests {
     where
         P: ProjectProvider + DependencyGraphProvider,
         RW: ChangesetReader + ChangesetWriter + Send + Sync + 'static,
-        M: FullManifestWriter + ExternalManifestVersionWriter + Send + Sync + 'static,
+        M: FullManifestWriter
+            + ExternalManifestVersionWriter
+            + ExternalManifestVersionReader
+            + Send
+            + Sync
+            + 'static,
     {
         ReleaseOperation::new(
             project_provider,

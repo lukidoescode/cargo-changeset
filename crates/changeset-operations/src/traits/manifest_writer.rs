@@ -112,6 +112,29 @@ pub trait ExternalManifestVersionWriter: Send + Sync {
         version_field_path: &str,
         expected: &Version,
     ) -> Result<()>;
+
+    /// # Errors
+    ///
+    /// Propagates external manifest write errors.
+    fn restore_external_version(
+        &self,
+        manifest_path: &Path,
+        format: ManifestFormat,
+        version_field_path: &str,
+        version_str: &str,
+    ) -> Result<()>;
+}
+
+pub trait ExternalManifestVersionReader: Send + Sync {
+    /// # Errors
+    ///
+    /// Propagates external manifest read errors.
+    fn read_external_version(
+        &self,
+        manifest_path: &Path,
+        format: ManifestFormat,
+        version_field_path: &str,
+    ) -> Result<String>;
 }
 
 pub trait ManifestMetadataWriter: Send + Sync {

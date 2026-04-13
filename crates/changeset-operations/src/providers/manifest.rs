@@ -7,10 +7,12 @@ use semver::Version;
 
 use crate::Result;
 use crate::error::OperationError;
+use changeset_core::VersionTrackingDependency;
+
 use crate::traits::{
-    AdditionalPackageConfigWriter, ExternalManifestVersionWriter, InheritedVersionChecker,
-    LockfileUpdater, ManifestDependencyWriter, ManifestMetadataWriter, ManifestVersionWriter,
-    WorkspaceVersionManager,
+    AdditionalPackageConfigWriter, ExternalManifestVersionReader, ExternalManifestVersionWriter,
+    InheritedVersionChecker, LockfileUpdater, ManifestDependencyWriter, ManifestMetadataWriter,
+    ManifestVersionWriter, VersionTrackingDependencyWriter, WorkspaceVersionManager,
 };
 
 pub struct FileSystemManifestWriter;
@@ -142,6 +144,21 @@ impl LockfileUpdater for FileSystemManifestWriter {
     }
 }
 
+impl ExternalManifestVersionReader for FileSystemManifestWriter {
+    fn read_external_version(
+        &self,
+        manifest_path: &Path,
+        format: ManifestFormat,
+        version_field_path: &str,
+    ) -> Result<String> {
+        Ok(changeset_manifest::read_external_version_string(
+            manifest_path,
+            format,
+            version_field_path,
+        )?)
+    }
+}
+
 impl ExternalManifestVersionWriter for FileSystemManifestWriter {
     fn write_external_version(
         &self,
@@ -172,6 +189,21 @@ impl ExternalManifestVersionWriter for FileSystemManifestWriter {
             expected,
         )?)
     }
+
+    fn restore_external_version(
+        &self,
+        manifest_path: &Path,
+        format: ManifestFormat,
+        version_field_path: &str,
+        version_str: &str,
+    ) -> Result<()> {
+        Ok(changeset_manifest::restore_external_version(
+            manifest_path,
+            format,
+            version_field_path,
+            version_str,
+        )?)
+    }
 }
 
 impl ManifestMetadataWriter for FileSystemManifestWriter {
@@ -186,6 +218,68 @@ impl ManifestMetadataWriter for FileSystemManifestWriter {
             section,
             config,
         )?)
+    }
+}
+
+impl VersionTrackingDependencyWriter for FileSystemManifestWriter {
+    fn add_dependency_to_additional_package(
+        &self,
+        manifest_path: &Path,
+        section: MetadataSection,
+        package_name: &str,
+        dependency: &VersionTrackingDependency,
+    ) -> Result<bool> {
+        Ok(
+            changeset_manifest::add_version_tracking_dependency_to_additional_package(
+                manifest_path,
+                section,
+                package_name,
+                dependency,
+            )?,
+        )
+    }
+
+    fn remove_dependency_from_additional_package(
+        &self,
+        manifest_path: &Path,
+        section: MetadataSection,
+        package_name: &str,
+        dependency_name: &str,
+    ) -> Result<bool> {
+        Ok(
+            changeset_manifest::remove_version_tracking_dependency_from_additional_package(
+                manifest_path,
+                section,
+                package_name,
+                dependency_name,
+            )?,
+        )
+    }
+
+    fn add_dependency_to_crate(
+        &self,
+        manifest_path: &Path,
+        dependency: &VersionTrackingDependency,
+    ) -> Result<()> {
+        Ok(
+            changeset_manifest::add_version_tracking_dependency_to_crate(
+                manifest_path,
+                dependency,
+            )?,
+        )
+    }
+
+    fn remove_dependency_from_crate(
+        &self,
+        manifest_path: &Path,
+        dependency_name: &str,
+    ) -> Result<bool> {
+        Ok(
+            changeset_manifest::remove_version_tracking_dependency_from_crate(
+                manifest_path,
+                dependency_name,
+            )?,
+        )
     }
 }
 

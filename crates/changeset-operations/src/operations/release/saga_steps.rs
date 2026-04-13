@@ -8,13 +8,16 @@ use semver::Version;
 use tracing::debug;
 
 use super::context::ReleaseSagaContext;
-use super::saga_data::{DependencyUpdate, ManifestKind, ManifestUpdate, ReleaseSagaData};
+use super::saga_data::{
+    DependencyUpdate, ManifestKind, ManifestUpdate, ReleaseSagaData, VersionTrackingWriteRecord,
+};
 use super::{CommitResult, TagResult};
 use crate::OperationError;
 use crate::traits::{
-    ChangelogWriter, ChangesetReader, ChangesetWriter, ExternalManifestVersionWriter,
-    GitCommitProvider, GitStagingProvider, GitTagProvider, LockfileUpdater,
-    ManifestDependencyWriter, ManifestVersionWriter, ReleaseStateIO, WorkspaceVersionManager,
+    ChangelogWriter, ChangesetReader, ChangesetWriter, ExternalManifestVersionReader,
+    ExternalManifestVersionWriter, GitCommitProvider, GitStagingProvider, GitTagProvider,
+    LockfileUpdater, ManifestDependencyWriter, ManifestVersionWriter, ReleaseStateIO,
+    WorkspaceVersionManager,
 };
 
 macro_rules! saga_step_struct {
@@ -273,6 +276,81 @@ where
 
     fn compensation_description(&self) -> String {
         "restore original dependency versions in Cargo.toml files".to_string()
+    }
+}
+
+saga_step_struct!(WriteVersionTrackingStep);
+
+impl<G, M, RW, S, C> SagaStep for WriteVersionTrackingStep<G, M, RW, S, C>
+where
+    G: Send + Sync,
+    M: ExternalManifestVersionWriter + ExternalManifestVersionReader,
+    RW: Send + Sync,
+    S: Send + Sync,
+    C: Send + Sync,
+{
+    type Input = ReleaseSagaData;
+    type Output = ReleaseSagaData;
+    type Context = ReleaseSagaContext<G, M, RW, S, C>;
+    type Error = OperationError;
+
+    fn name(&self) -> &'static str {
+        "write_version_tracking"
+    }
+
+    fn execute(
+        &self,
+        ctx: &Self::Context,
+        mut input: Self::Input,
+    ) -> Result<Self::Output, Self::Error> {
+        let mut records = Vec::new();
+        for write in &input.version_tracking_writes {
+            let old_value = ctx.manifest_writer().read_external_version(
+                &write.manifest_path,
+                write.format,
+                &write.version_field_path,
+            )?;
+            ctx.manifest_writer().write_external_version(
+                &write.manifest_path,
+                write.format,
+                &write.version_field_path,
+                &write.new_dependency_version,
+            )?;
+            ctx.manifest_writer().verify_external_version(
+                &write.manifest_path,
+                write.format,
+                &write.version_field_path,
+                &write.new_dependency_version,
+            )?;
+            records.push(VersionTrackingWriteRecord {
+                manifest_path: write.manifest_path.clone(),
+                format: write.format,
+                version_field_path: write.version_field_path.clone(),
+                old_value,
+                new_version: write.new_dependency_version.clone(),
+                written: true,
+            });
+        }
+        input.version_tracking_records = records;
+        Ok(input)
+    }
+
+    fn compensate(&self, ctx: &Self::Context, input: Self::Input) -> Result<(), Self::Error> {
+        for record in &input.version_tracking_records {
+            if record.written {
+                ctx.manifest_writer().restore_external_version(
+                    &record.manifest_path,
+                    record.format,
+                    &record.version_field_path,
+                    &record.old_value,
+                )?;
+            }
+        }
+        Ok(())
+    }
+
+    fn compensation_description(&self) -> String {
+        "restore original version-tracking dependency versions".to_string()
     }
 }
 
@@ -625,6 +703,10 @@ where
 
         for update in &input.dependency_updates {
             files.push(update.manifest_path.clone());
+        }
+
+        for record in &input.version_tracking_records {
+            files.push(record.manifest_path.clone());
         }
 
         if !input.changesets_deleted.is_empty() {
@@ -2110,6 +2192,129 @@ mod tests {
                 .staged_files
                 .contains(&PathBuf::from("/mock/project/charts/my-chart/Chart.yaml")),
             "additional package manifest should be staged"
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn write_version_tracking_writes_dependency_version() -> anyhow::Result<()> {
+        let tracking_manifest_path = PathBuf::from("/mock/project/charts/my-chart/Chart.yaml");
+        let manifest_writer = Arc::new(MockManifestWriter::new().with_external_version_to_read(
+            tracking_manifest_path.clone(),
+            changeset_core::ManifestFormat::Yaml,
+            "appVersion".to_string(),
+            "0.0.0".to_string(),
+        ));
+        let ctx = make_test_context(
+            Arc::new(MockGitProvider::new()),
+            Arc::clone(&manifest_writer),
+            Arc::new(MockChangesetReader::new()),
+            Arc::new(MockReleaseStateIO::new()),
+        );
+
+        let step: WriteVersionTrackingStep<
+            MockGitProvider,
+            MockManifestWriter,
+            MockChangesetReader,
+            MockReleaseStateIO,
+            MockChangelogWriter,
+        > = WriteVersionTrackingStep::new();
+        let mut input = make_test_data();
+        input.version_tracking_writes = vec![super::super::saga_data::VersionTrackingWrite {
+            manifest_path: tracking_manifest_path,
+            format: changeset_core::ManifestFormat::Yaml,
+            version_field_path: "appVersion".to_string(),
+            new_dependency_version: "1.0.1".parse()?,
+        }];
+
+        let result = SagaStep::execute(&step, &ctx, input)?;
+
+        assert_eq!(result.version_tracking_records.len(), 1);
+        assert_eq!(result.version_tracking_records[0].old_value, "0.0.0");
+        assert!(result.version_tracking_records[0].written);
+        assert_eq!(manifest_writer.external_written_versions().len(), 1);
+
+        Ok(())
+    }
+
+    #[test]
+    fn write_version_tracking_compensate_restores_old_version() -> anyhow::Result<()> {
+        let tracking_manifest_path = PathBuf::from("/mock/project/charts/my-chart/Chart.yaml");
+        let manifest_writer = Arc::new(MockManifestWriter::new().with_external_version_to_read(
+            tracking_manifest_path.clone(),
+            changeset_core::ManifestFormat::Yaml,
+            "appVersion".to_string(),
+            "0.5.0".to_string(),
+        ));
+        let ctx = make_test_context(
+            Arc::new(MockGitProvider::new()),
+            Arc::clone(&manifest_writer),
+            Arc::new(MockChangesetReader::new()),
+            Arc::new(MockReleaseStateIO::new()),
+        );
+
+        let step: WriteVersionTrackingStep<
+            MockGitProvider,
+            MockManifestWriter,
+            MockChangesetReader,
+            MockReleaseStateIO,
+            MockChangelogWriter,
+        > = WriteVersionTrackingStep::new();
+        let mut input = make_test_data();
+        input.version_tracking_writes = vec![super::super::saga_data::VersionTrackingWrite {
+            manifest_path: tracking_manifest_path.clone(),
+            format: changeset_core::ManifestFormat::Yaml,
+            version_field_path: "appVersion".to_string(),
+            new_dependency_version: "1.0.1".parse()?,
+        }];
+
+        let result = SagaStep::execute(&step, &ctx, input)?;
+        assert_eq!(manifest_writer.external_written_versions().len(), 1);
+
+        SagaStep::compensate(&step, &ctx, result)?;
+
+        assert_eq!(manifest_writer.external_written_versions().len(), 1);
+
+        Ok(())
+    }
+
+    #[test]
+    fn stage_files_includes_version_tracking_paths() -> anyhow::Result<()> {
+        let git_provider = Arc::new(MockGitProvider::new());
+        let ctx = make_test_context(
+            Arc::clone(&git_provider),
+            Arc::new(MockManifestWriter::new()),
+            Arc::new(MockChangesetReader::new()),
+            Arc::new(MockReleaseStateIO::new()),
+        );
+
+        let step: StageFilesStep<
+            MockGitProvider,
+            MockManifestWriter,
+            MockChangesetReader,
+            MockReleaseStateIO,
+            MockChangelogWriter,
+        > = StageFilesStep::new();
+        let mut input = make_test_data();
+        input.version_tracking_records =
+            vec![super::super::saga_data::VersionTrackingWriteRecord {
+                manifest_path: PathBuf::from("/mock/project/charts/dep/values.yaml"),
+                format: changeset_core::ManifestFormat::Yaml,
+                version_field_path: "appVersion".to_string(),
+                old_value: "0.0.0".to_string(),
+                new_version: "1.0.1".parse()?,
+                written: true,
+            }];
+
+        let result = SagaStep::execute(&step, &ctx, input)?;
+
+        assert!(result.files_were_staged);
+        assert!(
+            result
+                .staged_files
+                .contains(&PathBuf::from("/mock/project/charts/dep/values.yaml")),
+            "version tracking manifest should be staged"
         );
 
         Ok(())

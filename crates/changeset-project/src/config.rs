@@ -238,6 +238,16 @@ impl PackageChangesetConfig {
     pub fn additional_package_dependencies(&self) -> &[VersionTrackingDependency] {
         &self.additional_package_dependencies
     }
+
+    #[cfg(any(test, feature = "testing"))]
+    #[must_use]
+    pub fn with_additional_package_dependencies(
+        mut self,
+        deps: Vec<VersionTrackingDependency>,
+    ) -> Self {
+        self.additional_package_dependencies = deps;
+        self
+    }
 }
 
 #[derive(Copy, Clone)]

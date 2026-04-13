@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 
 pub const CARGO_MANIFEST_FILENAME: &str = "Cargo.toml";
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ValueEnum)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, ValueEnum)]
 #[serde(rename_all = "lowercase")]
 pub enum ManifestFormat {
     Toml,

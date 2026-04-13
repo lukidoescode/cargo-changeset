@@ -91,6 +91,9 @@ pub struct ReleaseSagaData {
     #[getset(get, vis = "pub(super)")]
     changelog_backups: Vec<ChangelogFileState>,
     changelogs_written: bool,
+
+    pub(super) version_tracking_writes: Vec<VersionTrackingWrite>,
+    pub(super) version_tracking_records: Vec<VersionTrackingWriteRecord>,
 }
 
 #[derive(Debug, Clone)]
@@ -109,6 +112,24 @@ pub(super) struct DependencyUpdate {
     pub(super) dependency_name: String,
     pub(super) old_version: Version,
     pub(super) new_version: Version,
+}
+
+#[derive(Debug, Clone)]
+pub(super) struct VersionTrackingWrite {
+    pub(super) manifest_path: PathBuf,
+    pub(super) format: ManifestFormat,
+    pub(super) version_field_path: String,
+    pub(super) new_dependency_version: Version,
+}
+
+#[derive(Debug, Clone)]
+pub(super) struct VersionTrackingWriteRecord {
+    pub(super) manifest_path: PathBuf,
+    pub(super) format: ManifestFormat,
+    pub(super) version_field_path: String,
+    pub(super) old_value: String,
+    pub(super) new_version: Version,
+    pub(super) written: bool,
 }
 
 impl ReleaseSagaData {
@@ -196,6 +217,11 @@ impl ReleaseSagaData {
     pub fn with_changelog_backups(mut self, backups: Vec<ChangelogFileState>) -> Self {
         self.changelogs_written = !backups.is_empty();
         self.changelog_backups = backups;
+        self
+    }
+
+    pub fn with_version_tracking_writes(mut self, writes: Vec<VersionTrackingWrite>) -> Self {
+        self.version_tracking_writes = writes;
         self
     }
 

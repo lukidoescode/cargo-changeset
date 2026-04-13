@@ -6,6 +6,7 @@ mod manage;
 pub mod release;
 mod status;
 mod verify;
+mod version_tracking_deps;
 
 use changeset_core::PackageInfo;
 use changeset_project::ProjectKind;
@@ -39,6 +40,12 @@ pub use release::{
 };
 pub use status::{StatusOperation, StatusOutput, StatusOutputBuilder};
 pub use verify::{VerifyInput, VerifyInputBuilder, VerifyOperation, VerifyOutcome, VerifyResult};
+pub use version_tracking_deps::{
+    VersionTrackingDependencyAddInput, VersionTrackingDependencyAddOperation,
+    VersionTrackingDependencyEvent, VersionTrackingDependencyListOperation,
+    VersionTrackingDependencyRemoveInput, VersionTrackingDependencyRemoveOperation,
+    VersionTrackingDependencySummary,
+};
 
 pub(crate) fn discover_additional_packages_if_workspace<P: ProjectProvider>(
     provider: &P,

@@ -6,6 +6,7 @@ mod manifest;
 mod mapping;
 mod project;
 mod release_state;
+mod version_tracking;
 
 pub use config::{
     GitConfig, PackageChangesetConfig, RootChangesetConfig, TagFormat, load_changeset_configs,
@@ -21,6 +22,9 @@ pub use project::{
     CargoProject, ProjectKind, discover_additional_packages, discover_project, ensure_changeset_dir,
 };
 pub use release_state::{GraduationState, PrereleaseState};
+pub use version_tracking::{
+    ResolvedVersionTracking, collect_version_tracking_info, tracking_edges,
+};
 
 pub const DEFAULT_CHANGESET_DIR: &str = ".changeset";
 

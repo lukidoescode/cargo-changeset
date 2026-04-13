@@ -15,17 +15,20 @@ use changeset_project::{
 use semver::Version;
 
 use crate::Result;
+use changeset_core::VersionTrackingDependency;
+
 use crate::traits::{
     AdditionalPackageConfigWriter, AdditionalPackageField, AdditionalPackageInteractionProvider,
     BumpSelection, CategorySelection, ChangelogSettingsInput, ChangelogWriteResult,
     ChangelogWriter, ChangesetReader, ChangesetWriter, DependencyGraphProvider, DescriptionInput,
-    ExternalManifestVersionWriter, FilteringSettingsInput, GitCommitProvider, GitDiffProvider,
-    GitSettingsInput, GitStagingProvider, GitStatusProvider, GitTagProvider,
-    GitWorkdirDiffProvider, GraduationAction, GraduationInteractionProvider,
+    ExternalManifestVersionReader, ExternalManifestVersionWriter, FilteringSettingsInput,
+    GitCommitProvider, GitDiffProvider, GitSettingsInput, GitStagingProvider, GitStatusProvider,
+    GitTagProvider, GitWorkdirDiffProvider, GraduationAction, GraduationInteractionProvider,
     InheritedVersionChecker, InitInteractionProvider, InteractionProvider, LockfileUpdater,
     ManifestDependencyWriter, ManifestMetadataWriter, ManifestVersionWriter, MenuSelection,
     PackageSelection, PrereleaseAction, PrereleaseInteractionProvider, ProjectContext,
-    ProjectProvider, ReleaseStateIO, VersionSettingsInput, WorkspaceVersionManager,
+    ProjectProvider, ReleaseStateIO, VersionSettingsInput, VersionTrackingDependencyWriter,
+    WorkspaceVersionManager,
 };
 
 macro_rules! impl_arc_delegation {
@@ -908,6 +911,7 @@ struct MockManifestState {
     lockfile_restored: Option<Vec<u8>>,
     lockfile_removed: bool,
     external_written_versions: Vec<ExternalVersionWrite>,
+    external_version_to_read: HashMap<(PathBuf, ManifestFormat, String), String>,
 }
 
 pub struct MockManifestWriter {
@@ -930,9 +934,26 @@ impl MockManifestWriter {
                 lockfile_restored: None,
                 lockfile_removed: false,
                 external_written_versions: Vec::new(),
+                external_version_to_read: HashMap::new(),
             }),
             inherited_paths: HashSet::new(),
         }
+    }
+
+    #[must_use]
+    pub fn with_external_version_to_read(
+        self,
+        path: PathBuf,
+        format: ManifestFormat,
+        version_field_path: String,
+        version: String,
+    ) -> Self {
+        self.state
+            .lock()
+            .expect("lock poisoned")
+            .external_version_to_read
+            .insert((path, format, version_field_path), version);
+        self
     }
 
     #[must_use]
@@ -1143,6 +1164,29 @@ impl ManifestMetadataWriter for MockManifestWriter {
     }
 }
 
+impl ExternalManifestVersionReader for MockManifestWriter {
+    fn read_external_version(
+        &self,
+        manifest_path: &Path,
+        format: ManifestFormat,
+        version_field_path: &str,
+    ) -> Result<String> {
+        let key = (
+            manifest_path.to_path_buf(),
+            format,
+            version_field_path.to_string(),
+        );
+        Ok(self
+            .state
+            .lock()
+            .expect("lock poisoned")
+            .external_version_to_read
+            .get(&key)
+            .cloned()
+            .unwrap_or_else(|| "0.0.0".to_string()))
+    }
+}
+
 impl ExternalManifestVersionWriter for MockManifestWriter {
     fn write_external_version(
         &self,
@@ -1170,6 +1214,16 @@ impl ExternalManifestVersionWriter for MockManifestWriter {
         _format: ManifestFormat,
         _version_field_path: &str,
         _expected: &Version,
+    ) -> Result<()> {
+        Ok(())
+    }
+
+    fn restore_external_version(
+        &self,
+        _manifest_path: &Path,
+        _format: ManifestFormat,
+        _version_field_path: &str,
+        _version_str: &str,
     ) -> Result<()> {
         Ok(())
     }
@@ -1218,9 +1272,63 @@ impl_arc_delegation! {
 }
 
 impl_arc_delegation! {
+    impl ExternalManifestVersionReader for Arc<MockManifestWriter> {
+        fn read_external_version(&self, manifest_path: &Path, format: ManifestFormat, version_field_path: &str) -> Result<String>;
+    }
+}
+
+impl_arc_delegation! {
     impl ExternalManifestVersionWriter for Arc<MockManifestWriter> {
         fn write_external_version(&self, manifest_path: &Path, format: ManifestFormat, version_field_path: &str, new_version: &Version) -> Result<()>;
         fn verify_external_version(&self, manifest_path: &Path, format: ManifestFormat, version_field_path: &str, expected: &Version) -> Result<()>;
+        fn restore_external_version(&self, manifest_path: &Path, format: ManifestFormat, version_field_path: &str, version_str: &str) -> Result<()>;
+    }
+}
+
+impl VersionTrackingDependencyWriter for MockManifestWriter {
+    fn add_dependency_to_additional_package(
+        &self,
+        _manifest_path: &Path,
+        _section: MetadataSection,
+        _package_name: &str,
+        _dependency: &VersionTrackingDependency,
+    ) -> Result<bool> {
+        Ok(true)
+    }
+
+    fn remove_dependency_from_additional_package(
+        &self,
+        _manifest_path: &Path,
+        _section: MetadataSection,
+        _package_name: &str,
+        _dependency_name: &str,
+    ) -> Result<bool> {
+        Ok(true)
+    }
+
+    fn add_dependency_to_crate(
+        &self,
+        _manifest_path: &Path,
+        _dependency: &VersionTrackingDependency,
+    ) -> Result<()> {
+        Ok(())
+    }
+
+    fn remove_dependency_from_crate(
+        &self,
+        _manifest_path: &Path,
+        _dependency_name: &str,
+    ) -> Result<bool> {
+        Ok(true)
+    }
+}
+
+impl_arc_delegation! {
+    impl VersionTrackingDependencyWriter for Arc<MockManifestWriter> {
+        fn add_dependency_to_additional_package(&self, manifest_path: &Path, section: MetadataSection, package_name: &str, dependency: &VersionTrackingDependency) -> Result<bool>;
+        fn remove_dependency_from_additional_package(&self, manifest_path: &Path, section: MetadataSection, package_name: &str, dependency_name: &str) -> Result<bool>;
+        fn add_dependency_to_crate(&self, manifest_path: &Path, dependency: &VersionTrackingDependency) -> Result<()>;
+        fn remove_dependency_from_crate(&self, manifest_path: &Path, dependency_name: &str) -> Result<bool>;
     }
 }
 
