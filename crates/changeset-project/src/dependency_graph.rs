@@ -138,6 +138,30 @@ impl WorkspaceDependencyGraph {
         result
     }
 
+    pub fn add_members(&mut self, names: impl IntoIterator<Item = String>) {
+        for name in names {
+            self.depended_on_by.entry(name.clone()).or_default();
+            self.depends_on.entry(name).or_default();
+        }
+    }
+
+    pub fn extend_with_edges(&mut self, edges: &[(String, String)]) {
+        for (dependent, dependency) in edges {
+            if self.depended_on_by.contains_key(dependent.as_str())
+                && self.depended_on_by.contains_key(dependency.as_str())
+            {
+                self.depends_on
+                    .entry(dependent.clone())
+                    .or_default()
+                    .insert(dependency.clone());
+                self.depended_on_by
+                    .entry(dependency.clone())
+                    .or_default()
+                    .insert(dependent.clone());
+            }
+        }
+    }
+
     #[must_use]
     pub fn direct_dependencies(&self, package: &str) -> HashSet<&str> {
         self.depends_on
@@ -320,5 +344,81 @@ mod tests {
             package: Some("actual-name".to_string()),
         });
         assert_eq!(resolve_package_name("alias", &entry), "actual-name");
+    }
+
+    #[test]
+    fn extend_with_edges_adds_forward_and_reverse_edges() {
+        let mut graph = WorkspaceDependencyGraph::from_edges(
+            &member_set(&["a", "b", "c"]),
+            &edges(&[("b", "a")]),
+        );
+
+        graph.extend_with_edges(&edges(&[("c", "b")]));
+
+        let deps_c = graph.direct_dependencies("c");
+        assert_eq!(deps_c, HashSet::from(["b"]));
+
+        let dependents_b = graph.transitive_dependents("b");
+        assert!(dependents_b.contains("c"));
+    }
+
+    #[test]
+    fn extend_with_edges_ignores_unknown_members() {
+        let mut graph =
+            WorkspaceDependencyGraph::from_edges(&member_set(&["a", "b"]), &edges(&[("b", "a")]));
+
+        graph.extend_with_edges(&edges(&[("a", "unknown"), ("unknown", "b")]));
+
+        assert!(graph.direct_dependencies("a").is_empty());
+        assert_eq!(graph.direct_dependencies("b"), HashSet::from(["a"]));
+        assert!(graph.transitive_dependents("b").is_empty());
+    }
+
+    #[test]
+    fn add_members_then_extend_with_edges_allows_cross_type_dependencies() {
+        let mut graph = WorkspaceDependencyGraph::from_edges(&member_set(&["rust-crate"]), &[]);
+
+        graph.add_members(vec!["helm-chart".to_string()]);
+        graph.extend_with_edges(&edges(&[("helm-chart", "rust-crate")]));
+
+        let deps = graph.direct_dependencies("helm-chart");
+        assert_eq!(deps, HashSet::from(["rust-crate"]));
+    }
+
+    #[test]
+    fn transitive_dependents_works_across_extended_edges() {
+        let mut graph = WorkspaceDependencyGraph::from_edges(
+            &member_set(&["core", "lib"]),
+            &edges(&[("lib", "core")]),
+        );
+
+        graph.add_members(vec!["chart".to_string()]);
+        graph.extend_with_edges(&edges(&[("chart", "lib")]));
+
+        let result = graph.transitive_dependents_of_set(&["core"]);
+        assert!(result.contains("lib"));
+        assert!(result.contains("chart"));
+        assert_eq!(result.len(), 2);
+    }
+
+    #[test]
+    fn add_members_is_idempotent_for_existing_names() {
+        let mut graph =
+            WorkspaceDependencyGraph::from_edges(&member_set(&["a", "b"]), &edges(&[("a", "b")]));
+
+        graph.add_members(vec!["a".to_string()]);
+
+        assert_eq!(graph.direct_dependencies("a"), HashSet::from(["b"]));
+        assert_eq!(graph.transitive_dependents("b"), HashSet::from(["a"]));
+    }
+
+    #[test]
+    fn add_members_with_empty_iterator_is_noop() {
+        let mut graph =
+            WorkspaceDependencyGraph::from_edges(&member_set(&["a", "b"]), &edges(&[("a", "b")]));
+
+        graph.add_members(Vec::<String>::new());
+
+        assert_eq!(graph.direct_dependencies("a"), HashSet::from(["b"]));
     }
 }
