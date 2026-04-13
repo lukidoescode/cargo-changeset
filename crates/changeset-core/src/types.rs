@@ -758,6 +758,101 @@ mod tests {
     }
 
     #[test]
+    fn version_tracking_manifest_serde_key_names() {
+        let manifest = VersionTrackingManifest::new(
+            PathBuf::from("path/to/manifest.json"),
+            ManifestFormat::Json,
+            "version".to_string(),
+        );
+        let serialized = serde_json::to_string(&manifest).expect("serialize to JSON");
+        assert!(
+            serialized.contains(r#""file-path""#),
+            "expected kebab-case key 'file-path' in JSON output: {serialized}"
+        );
+        assert!(
+            serialized.contains(r#""version-field-path""#),
+            "expected kebab-case key 'version-field-path' in JSON output: {serialized}"
+        );
+    }
+
+    #[test]
+    fn version_tracking_dependency_serde_key_names() {
+        let dep = VersionTrackingDependency::new(
+            "some-dep".to_string(),
+            VersionTrackingManifest::new(
+                PathBuf::from("tracking.json"),
+                ManifestFormat::Json,
+                "ver".to_string(),
+            ),
+        );
+        let serialized = serde_json::to_string(&dep).expect("serialize to JSON");
+        assert!(
+            serialized.contains(r#""dependency-name""#),
+            "expected kebab-case key 'dependency-name' in JSON output: {serialized}"
+        );
+        assert!(
+            serialized.contains(r#""version-tracking-manifest""#),
+            "expected kebab-case key 'version-tracking-manifest' in JSON output: {serialized}"
+        );
+    }
+
+    #[test]
+    fn additional_package_declaration_with_multiple_dependencies() {
+        let decl = AdditionalPackageDeclaration::new(
+            "multi-dep-pkg".to_string(),
+            PathBuf::from("packages/multi"),
+            vec!["packages/multi/**".to_string()],
+            AdditionalPackageManifest::new(
+                PathBuf::from("packages/multi/manifest.yaml"),
+                ManifestFormat::Yaml,
+                "version".to_string(),
+            ),
+            vec![
+                VersionTrackingDependency::new(
+                    "dep-alpha".to_string(),
+                    VersionTrackingManifest::new(
+                        PathBuf::from("tracking/alpha.json"),
+                        ManifestFormat::Json,
+                        "alphaVersion".to_string(),
+                    ),
+                ),
+                VersionTrackingDependency::new(
+                    "dep-beta".to_string(),
+                    VersionTrackingManifest::new(
+                        PathBuf::from("tracking/beta.yaml"),
+                        ManifestFormat::Yaml,
+                        "betaVersion".to_string(),
+                    ),
+                ),
+            ],
+        );
+
+        let serialized = toml::to_string(&decl).expect("serialize to TOML");
+        let deserialized: AdditionalPackageDeclaration =
+            toml::from_str(&serialized).expect("deserialize from TOML");
+
+        assert_eq!(deserialized, decl);
+        assert_eq!(deserialized.dependencies().len(), 2);
+        assert_eq!(
+            deserialized.dependencies()[0].dependency_name(),
+            "dep-alpha"
+        );
+        assert_eq!(
+            deserialized.dependencies()[0]
+                .version_tracking_manifest()
+                .version_field_path(),
+            "alphaVersion"
+        );
+        assert_eq!(deserialized.dependencies()[1].dependency_name(), "dep-beta");
+        assert_eq!(
+            deserialized.dependencies()[1]
+                .version_tracking_manifest()
+                .version_field_path(),
+            "betaVersion"
+        );
+    }
+
+    #[test]
     fn additional_package_declaration_without_dependencies_defaults_to_empty() {
         let toml_str = r#"
 name = "my-helm-chart"

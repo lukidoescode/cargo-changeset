@@ -197,8 +197,8 @@ pub fn update_additional_package(
             manifest_table.insert("format", value(new_format.to_string().as_str()));
         }
 
-        if let Some(ref new_version_path) = updates.manifest_version_field_path {
-            manifest_table.insert("version-field-path", value(new_version_path.as_str()));
+        if let Some(ref new_version_field_path) = updates.manifest_version_field_path {
+            manifest_table.insert("version-field-path", value(new_version_field_path.as_str()));
         }
     }
 

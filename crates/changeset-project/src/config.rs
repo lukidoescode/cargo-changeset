@@ -3,13 +3,16 @@ use std::path::{Path, PathBuf};
 
 use changeset_changelog::{ChangelogConfig, ChangelogLocation, ComparisonLinksSetting};
 use changeset_core::{
-    AdditionalPackageDeclaration, CARGO_MANIFEST_FILENAME, NoneBumpBehavior, ZeroVersionBehavior,
+    AdditionalPackageDeclaration, CARGO_MANIFEST_FILENAME, NoneBumpBehavior,
+    VersionTrackingDependency, ZeroVersionBehavior,
 };
 use changeset_git::DEFAULT_BASE_BRANCH;
 use globset::{Glob, GlobSet, GlobSetBuilder};
 
 use crate::error::ProjectError;
-use crate::manifest::{CargoManifest, ChangesetMetadata, TagFormatValue, read_manifest};
+use crate::manifest::{
+    CargoManifest, ChangesetMetadata, TagFormatValue, read_manifest, read_package_level_manifest,
+};
 use crate::project::{CargoProject, ProjectKind};
 
 const DEFAULT_DEPENDENCY_BUMP_CHANGELOG_TEMPLATE: &str =
@@ -217,6 +220,7 @@ impl Default for RootChangesetConfig {
 #[derive(Debug, Default)]
 pub struct PackageChangesetConfig {
     ignored_files: GlobSet,
+    additional_package_dependencies: Vec<VersionTrackingDependency>,
 }
 
 impl PackageChangesetConfig {
@@ -228,6 +232,11 @@ impl PackageChangesetConfig {
     #[must_use]
     pub fn is_ignored(&self, path: &Path) -> bool {
         self.ignored_files.is_match(path)
+    }
+
+    #[must_use]
+    pub fn additional_package_dependencies(&self) -> &[VersionTrackingDependency] {
+        &self.additional_package_dependencies
     }
 }
 
@@ -276,18 +285,29 @@ pub fn parse_root_config(project: &CargoProject) -> Result<RootChangesetConfig, 
 /// Returns `ProjectError` if the manifest cannot be read or parsed, or if glob patterns are invalid.
 pub fn parse_package_config(package_path: &Path) -> Result<PackageChangesetConfig, ProjectError> {
     let manifest_path = package_path.join(CARGO_MANIFEST_FILENAME);
-    let manifest = read_manifest(&manifest_path)?;
+    let manifest = read_package_level_manifest(&manifest_path)?;
 
-    let patterns = manifest
+    let changeset_metadata = manifest
         .package
         .and_then(|pkg| pkg.metadata)
-        .and_then(|meta| meta.changeset)
-        .map(|cs| cs.ignored_files)
+        .and_then(|meta| meta.changeset);
+
+    let patterns = changeset_metadata
+        .as_ref()
+        .map(|cs| cs.ignored_files.clone())
+        .unwrap_or_default();
+
+    let additional_package_dependencies = changeset_metadata
+        .as_ref()
+        .map(|cs| cs.additional_package_dependencies.clone())
         .unwrap_or_default();
 
     let ignored_files = build_glob_set(&patterns)?;
 
-    Ok(PackageChangesetConfig { ignored_files })
+    Ok(PackageChangesetConfig {
+        ignored_files,
+        additional_package_dependencies,
+    })
 }
 
 /// # Errors
@@ -1218,6 +1238,115 @@ version-field-path = "version"
             changeset_core::ManifestFormat::Json
         );
         assert_eq!(packages[0].manifest().version_field_path(), "version");
+
+        Ok(())
+    }
+
+    #[test]
+    fn parse_package_config_with_additional_package_dependencies() -> anyhow::Result<()> {
+        let toml = r#"
+[package]
+name = "my-crate"
+version = "0.1.0"
+
+[[package.metadata.changeset.additional-package-dependencies]]
+dependency-name = "my-helm-chart"
+
+[package.metadata.changeset.additional-package-dependencies.version-tracking-manifest]
+file-path = "src/generated/upstream_version.json"
+format = "json"
+version-field-path = "upstream_version"
+"#;
+        let dir = setup_with_config(toml)?;
+
+        let config = parse_package_config(dir.path())?;
+        let deps = config.additional_package_dependencies();
+
+        assert_eq!(deps.len(), 1);
+        assert_eq!(deps[0].dependency_name(), "my-helm-chart");
+        assert_eq!(
+            deps[0].version_tracking_manifest().file_path(),
+            Path::new("src/generated/upstream_version.json")
+        );
+        assert_eq!(
+            deps[0].version_tracking_manifest().format(),
+            changeset_core::ManifestFormat::Json
+        );
+        assert_eq!(
+            deps[0].version_tracking_manifest().version_field_path(),
+            "upstream_version"
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn parse_package_config_without_additional_package_dependencies_defaults_to_empty()
+    -> anyhow::Result<()> {
+        let toml = r#"
+[package]
+name = "my-crate"
+version = "0.1.0"
+
+[package.metadata.changeset]
+ignored-files = ["benches/**"]
+"#;
+        let dir = setup_with_config(toml)?;
+
+        let config = parse_package_config(dir.path())?;
+
+        assert!(config.additional_package_dependencies().is_empty());
+
+        Ok(())
+    }
+
+    #[test]
+    fn parse_additional_packages_with_dependencies() -> anyhow::Result<()> {
+        let toml = r#"
+[workspace]
+members = ["crates/*"]
+
+[[workspace.metadata.changeset.additional-packages]]
+name = "my-helm-chart"
+path = "charts/my-chart"
+influence = ["charts/my-chart/**"]
+
+[workspace.metadata.changeset.additional-packages.manifest]
+file-path = "charts/my-chart/Chart.yaml"
+format = "yaml"
+version-field-path = "version"
+
+[[workspace.metadata.changeset.additional-packages.dependencies]]
+dependency-name = "upstream-service"
+
+[workspace.metadata.changeset.additional-packages.dependencies.version-tracking-manifest]
+file-path = "charts/my-chart/upstream_version.json"
+format = "json"
+version-field-path = "upstream_version"
+"#;
+        let dir = setup_with_config(toml)?;
+
+        let config = parse_cargo_root_config(dir.path(), CargoRootConfigType::Workspace)?;
+        let packages = config.additional_packages();
+
+        assert_eq!(packages.len(), 1);
+        assert_eq!(packages[0].name(), "my-helm-chart");
+
+        let deps = packages[0].dependencies();
+        assert_eq!(deps.len(), 1);
+        assert_eq!(deps[0].dependency_name(), "upstream-service");
+        assert_eq!(
+            deps[0].version_tracking_manifest().file_path(),
+            Path::new("charts/my-chart/upstream_version.json")
+        );
+        assert_eq!(
+            deps[0].version_tracking_manifest().format(),
+            changeset_core::ManifestFormat::Json
+        );
+        assert_eq!(
+            deps[0].version_tracking_manifest().version_field_path(),
+            "upstream_version"
+        );
 
         Ok(())
     }
