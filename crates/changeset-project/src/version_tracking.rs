@@ -30,20 +30,6 @@ impl ResolvedVersionTracking {
             manifest,
         }
     }
-
-    #[cfg(not(any(test, feature = "testing")))]
-    #[must_use]
-    pub(crate) fn new(
-        dependent_name: String,
-        dependency_name: String,
-        manifest: VersionTrackingManifest,
-    ) -> Self {
-        Self {
-            dependent_name,
-            dependency_name,
-            manifest,
-        }
-    }
 }
 
 #[must_use]

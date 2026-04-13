@@ -900,6 +900,14 @@ pub struct ExternalVersionWrite {
     pub version: Version,
 }
 
+#[derive(Clone)]
+pub struct ExternalVersionRestore {
+    pub manifest_path: PathBuf,
+    pub format: ManifestFormat,
+    pub version_field_path: String,
+    pub version_str: String,
+}
+
 struct MockManifestState {
     written_versions: Vec<(PathBuf, Version)>,
     dependency_version_updates: Vec<(PathBuf, String, Version)>,
@@ -912,6 +920,7 @@ struct MockManifestState {
     lockfile_removed: bool,
     external_written_versions: Vec<ExternalVersionWrite>,
     external_version_to_read: HashMap<(PathBuf, ManifestFormat, String), String>,
+    restore_calls: Vec<ExternalVersionRestore>,
 }
 
 pub struct MockManifestWriter {
@@ -935,6 +944,7 @@ impl MockManifestWriter {
                 lockfile_removed: false,
                 external_written_versions: Vec::new(),
                 external_version_to_read: HashMap::new(),
+                restore_calls: Vec::new(),
             }),
             inherited_paths: HashSet::new(),
         }
@@ -1047,6 +1057,15 @@ impl MockManifestWriter {
             .lock()
             .expect("lock poisoned")
             .external_written_versions
+            .clone()
+    }
+
+    #[must_use]
+    pub fn restore_calls(&self) -> Vec<ExternalVersionRestore> {
+        self.state
+            .lock()
+            .expect("lock poisoned")
+            .restore_calls
             .clone()
     }
 }
@@ -1220,11 +1239,21 @@ impl ExternalManifestVersionWriter for MockManifestWriter {
 
     fn restore_external_version(
         &self,
-        _manifest_path: &Path,
-        _format: ManifestFormat,
-        _version_field_path: &str,
-        _version_str: &str,
+        manifest_path: &Path,
+        format: ManifestFormat,
+        version_field_path: &str,
+        version_str: &str,
     ) -> Result<()> {
+        self.state
+            .lock()
+            .expect("lock poisoned")
+            .restore_calls
+            .push(ExternalVersionRestore {
+                manifest_path: manifest_path.to_path_buf(),
+                format,
+                version_field_path: version_field_path.to_string(),
+                version_str: version_str.to_string(),
+            });
         Ok(())
     }
 }

@@ -200,6 +200,14 @@ where
             .chain(additional_packages.iter().cloned())
             .collect();
 
+        let all_package_names: std::collections::HashSet<String> =
+            all_packages.iter().map(|p| p.name().clone()).collect();
+        changeset_project::validate_version_tracking_dependencies(
+            &root_config,
+            &package_configs,
+            &all_package_names,
+        )?;
+
         let cli_input = ReleaseCliInput::from(input);
         let validated_config = ReleaseValidator::validate(
             &cli_input,

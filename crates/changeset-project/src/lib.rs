@@ -1,4 +1,5 @@
 mod config;
+mod config_validation;
 mod dependency_graph;
 mod error;
 mod external_manifest;
@@ -12,6 +13,7 @@ pub use config::{
     GitConfig, PackageChangesetConfig, RootChangesetConfig, TagFormat, load_changeset_configs,
     parse_package_config, parse_root_config,
 };
+pub use config_validation::validate_version_tracking_dependencies;
 pub use dependency_graph::WorkspaceDependencyGraph;
 pub use error::ProjectError;
 pub use mapping::{

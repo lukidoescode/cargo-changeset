@@ -92,4 +92,22 @@ pub enum ProjectError {
         path: PathBuf,
         version_field_path: String,
     },
+
+    #[error("unknown version tracking dependency '{dependency}' referenced by '{dependent}'")]
+    UnknownVersionTrackingDependency {
+        dependent: String,
+        dependency: String,
+    },
+
+    #[error("circular version tracking dependency between '{package_a}' and '{package_b}'")]
+    CircularVersionTrackingDependency {
+        package_a: String,
+        package_b: String,
+    },
+
+    #[error("duplicate version tracking dependency '{dependency}' declared by '{dependent}'")]
+    DuplicateVersionTrackingDependency {
+        dependent: String,
+        dependency: String,
+    },
 }

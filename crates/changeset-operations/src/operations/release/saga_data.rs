@@ -18,16 +18,6 @@ pub struct SagaReleaseOptions {
 }
 
 #[derive(Debug, Clone)]
-pub(super) enum ManifestKind {
-    Cargo,
-    #[allow(dead_code)]
-    Additional {
-        format: ManifestFormat,
-        version_field_path: String,
-    },
-}
-
-#[derive(Debug, Clone)]
 pub(super) struct AdditionalManifestInfo {
     pub(super) manifest_path: PathBuf,
     pub(super) format: ManifestFormat,
@@ -102,8 +92,6 @@ pub(super) struct ManifestUpdate {
     pub(super) old_version: Version,
     pub(super) new_version: Version,
     pub(super) written: bool,
-    #[allow(dead_code)]
-    pub(super) kind: ManifestKind,
 }
 
 #[derive(Debug, Clone)]
@@ -128,7 +116,6 @@ pub(super) struct VersionTrackingWriteRecord {
     pub(super) format: ManifestFormat,
     pub(super) version_field_path: String,
     pub(super) old_value: String,
-    pub(super) new_version: Version,
     pub(super) written: bool,
 }
 
