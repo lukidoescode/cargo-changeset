@@ -41,58 +41,6 @@ impl FromStr for ManifestFormat {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Getset)]
-#[serde(rename_all = "kebab-case")]
-pub struct AdditionalPackageManifest {
-    #[getset(get, vis = "pub")]
-    file_path: PathBuf,
-    #[getset(get_copy, vis = "pub")]
-    format: ManifestFormat,
-    #[getset(get, vis = "pub")]
-    version_field_path: String,
-}
-
-impl AdditionalPackageManifest {
-    #[must_use]
-    pub fn new(file_path: PathBuf, format: ManifestFormat, version_field_path: String) -> Self {
-        Self {
-            file_path,
-            format,
-            version_field_path,
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Getset)]
-#[serde(rename_all = "kebab-case")]
-pub struct AdditionalPackageDeclaration {
-    #[getset(get, vis = "pub")]
-    name: String,
-    #[getset(get, vis = "pub")]
-    path: PathBuf,
-    #[getset(get, vis = "pub")]
-    influence: Vec<String>,
-    #[getset(get, vis = "pub")]
-    manifest: AdditionalPackageManifest,
-}
-
-impl AdditionalPackageDeclaration {
-    #[must_use]
-    pub fn new(
-        name: String,
-        path: PathBuf,
-        influence: Vec<String>,
-        manifest: AdditionalPackageManifest,
-    ) -> Self {
-        Self {
-            name,
-            path,
-            influence,
-            manifest,
-        }
-    }
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, ValueEnum)]
 #[serde(rename_all = "lowercase")]
 pub enum BumpType {
@@ -179,6 +127,169 @@ impl fmt::Display for ChangeCategory {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum PrereleaseSpec {
+    Alpha,
+    Beta,
+    Rc,
+    Custom(String),
+}
+
+impl PrereleaseSpec {
+    #[must_use]
+    pub fn identifier(&self) -> &str {
+        match self {
+            Self::Alpha => "alpha",
+            Self::Beta => "beta",
+            Self::Rc => "rc",
+            Self::Custom(s) => s,
+        }
+    }
+}
+
+impl fmt::Display for PrereleaseSpec {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.identifier())
+    }
+}
+
+impl FromStr for PrereleaseSpec {
+    type Err = crate::error::PrereleaseSpecParseError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        if s.is_empty() {
+            return Err(Self::Err::Empty);
+        }
+
+        if let Some(invalid_char) = s.chars().find(|c| !c.is_ascii_alphanumeric() && *c != '-') {
+            return Err(Self::Err::InvalidCharacter(s.to_string(), invalid_char));
+        }
+
+        Ok(match s.to_lowercase().as_str() {
+            "alpha" => Self::Alpha,
+            "beta" => Self::Beta,
+            "rc" => Self::Rc,
+            _ => Self::Custom(s.to_string()),
+        })
+    }
+}
+
+impl ValueEnum for PrereleaseSpec {
+    fn value_variants<'a>() -> &'a [Self] {
+        &[Self::Alpha, Self::Beta, Self::Rc]
+    }
+
+    fn to_possible_value(&self) -> Option<clap::builder::PossibleValue> {
+        match self {
+            Self::Alpha => Some(clap::builder::PossibleValue::new("alpha")),
+            Self::Beta => Some(clap::builder::PossibleValue::new("beta")),
+            Self::Rc => Some(clap::builder::PossibleValue::new("rc")),
+            Self::Custom(_) => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Getset)]
+#[serde(rename_all = "kebab-case")]
+pub struct AdditionalPackageManifest {
+    #[getset(get, vis = "pub")]
+    file_path: PathBuf,
+    #[getset(get_copy, vis = "pub")]
+    format: ManifestFormat,
+    #[getset(get, vis = "pub")]
+    version_field_path: String,
+}
+
+impl AdditionalPackageManifest {
+    #[must_use]
+    pub fn new(file_path: PathBuf, format: ManifestFormat, version_field_path: String) -> Self {
+        Self {
+            file_path,
+            format,
+            version_field_path,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Getset)]
+#[serde(rename_all = "kebab-case")]
+pub struct VersionTrackingManifest {
+    #[getset(get, vis = "pub")]
+    file_path: PathBuf,
+    #[getset(get_copy, vis = "pub")]
+    format: ManifestFormat,
+    #[getset(get, vis = "pub")]
+    version_field_path: String,
+}
+
+impl VersionTrackingManifest {
+    #[must_use]
+    pub fn new(file_path: PathBuf, format: ManifestFormat, version_field_path: String) -> Self {
+        Self {
+            file_path,
+            format,
+            version_field_path,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Getset)]
+#[serde(rename_all = "kebab-case")]
+pub struct VersionTrackingDependency {
+    #[getset(get, vis = "pub")]
+    dependency_name: String,
+    #[getset(get, vis = "pub")]
+    version_tracking_manifest: VersionTrackingManifest,
+}
+
+impl VersionTrackingDependency {
+    #[must_use]
+    pub fn new(
+        dependency_name: String,
+        version_tracking_manifest: VersionTrackingManifest,
+    ) -> Self {
+        Self {
+            dependency_name,
+            version_tracking_manifest,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Getset)]
+#[serde(rename_all = "kebab-case")]
+pub struct AdditionalPackageDeclaration {
+    #[getset(get, vis = "pub")]
+    name: String,
+    #[getset(get, vis = "pub")]
+    path: PathBuf,
+    #[getset(get, vis = "pub")]
+    influence: Vec<String>,
+    #[getset(get, vis = "pub")]
+    manifest: AdditionalPackageManifest,
+    #[serde(default)]
+    #[getset(get, vis = "pub")]
+    dependencies: Vec<VersionTrackingDependency>,
+}
+
+impl AdditionalPackageDeclaration {
+    #[must_use]
+    pub fn new(
+        name: String,
+        path: PathBuf,
+        influence: Vec<String>,
+        manifest: AdditionalPackageManifest,
+        dependencies: Vec<VersionTrackingDependency>,
+    ) -> Self {
+        Self {
+            name,
+            path,
+            influence,
+            manifest,
+            dependencies,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Getset)]
 pub struct PackageRelease {
     #[getset(get, vis = "pub")]
@@ -261,68 +372,6 @@ impl PackageInfo {
             name,
             version,
             path,
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub enum PrereleaseSpec {
-    Alpha,
-    Beta,
-    Rc,
-    Custom(String),
-}
-
-impl PrereleaseSpec {
-    #[must_use]
-    pub fn identifier(&self) -> &str {
-        match self {
-            Self::Alpha => "alpha",
-            Self::Beta => "beta",
-            Self::Rc => "rc",
-            Self::Custom(s) => s,
-        }
-    }
-}
-
-impl fmt::Display for PrereleaseSpec {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.identifier())
-    }
-}
-
-impl FromStr for PrereleaseSpec {
-    type Err = crate::error::PrereleaseSpecParseError;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        if s.is_empty() {
-            return Err(Self::Err::Empty);
-        }
-
-        if let Some(invalid_char) = s.chars().find(|c| !c.is_ascii_alphanumeric() && *c != '-') {
-            return Err(Self::Err::InvalidCharacter(s.to_string(), invalid_char));
-        }
-
-        Ok(match s.to_lowercase().as_str() {
-            "alpha" => Self::Alpha,
-            "beta" => Self::Beta,
-            "rc" => Self::Rc,
-            _ => Self::Custom(s.to_string()),
-        })
-    }
-}
-
-impl ValueEnum for PrereleaseSpec {
-    fn value_variants<'a>() -> &'a [Self] {
-        &[Self::Alpha, Self::Beta, Self::Rc]
-    }
-
-    fn to_possible_value(&self) -> Option<clap::builder::PossibleValue> {
-        match self {
-            Self::Alpha => Some(clap::builder::PossibleValue::new("alpha")),
-            Self::Beta => Some(clap::builder::PossibleValue::new("beta")),
-            Self::Rc => Some(clap::builder::PossibleValue::new("rc")),
-            Self::Custom(_) => None,
         }
     }
 }
@@ -620,6 +669,7 @@ mod tests {
                 format: ManifestFormat::Yaml,
                 version_field_path: "version".to_string(),
             },
+            dependencies: vec![],
         };
         let serialized = serde_json::to_string(&decl).unwrap();
         let deserialized: AdditionalPackageDeclaration = serde_json::from_str(&serialized).unwrap();
@@ -648,5 +698,80 @@ mod tests {
         }"#;
         let result = serde_json::from_str::<AdditionalPackageDeclaration>(json);
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn version_tracking_manifest_serde_round_trip() {
+        let manifest = VersionTrackingManifest::new(
+            PathBuf::from("charts/app/Chart.yaml"),
+            ManifestFormat::Yaml,
+            "appVersion".to_string(),
+        );
+        let serialized = toml::to_string(&manifest).expect("serialize to TOML");
+        let deserialized: VersionTrackingManifest =
+            toml::from_str(&serialized).expect("deserialize from TOML");
+        assert_eq!(deserialized, manifest);
+    }
+
+    #[test]
+    fn version_tracking_dependency_serde_round_trip() {
+        let dep = VersionTrackingDependency::new(
+            "my-lib".to_string(),
+            VersionTrackingManifest::new(
+                PathBuf::from("charts/app/Chart.yaml"),
+                ManifestFormat::Yaml,
+                "appVersion".to_string(),
+            ),
+        );
+        let serialized = toml::to_string(&dep).expect("serialize to TOML");
+        let deserialized: VersionTrackingDependency =
+            toml::from_str(&serialized).expect("deserialize from TOML");
+        assert_eq!(deserialized, dep);
+    }
+
+    #[test]
+    fn additional_package_declaration_with_dependencies_serde_round_trip() {
+        let decl = AdditionalPackageDeclaration::new(
+            "my-helm-chart".to_string(),
+            PathBuf::from("charts/my-chart"),
+            vec!["charts/my-chart/**".to_string()],
+            AdditionalPackageManifest::new(
+                PathBuf::from("charts/my-chart/Chart.yaml"),
+                ManifestFormat::Yaml,
+                "version".to_string(),
+            ),
+            vec![VersionTrackingDependency::new(
+                "my-lib".to_string(),
+                VersionTrackingManifest::new(
+                    PathBuf::from("charts/my-chart/Chart.yaml"),
+                    ManifestFormat::Yaml,
+                    "appVersion".to_string(),
+                ),
+            )],
+        );
+        let serialized = toml::to_string(&decl).expect("serialize to TOML");
+        let deserialized: AdditionalPackageDeclaration =
+            toml::from_str(&serialized).expect("deserialize from TOML");
+        assert_eq!(deserialized, decl);
+        assert_eq!(deserialized.dependencies().len(), 1);
+        assert_eq!(deserialized.dependencies()[0].dependency_name(), "my-lib");
+    }
+
+    #[test]
+    fn additional_package_declaration_without_dependencies_defaults_to_empty() {
+        let toml_str = r#"
+name = "my-helm-chart"
+path = "charts/my-chart"
+influence = ["charts/my-chart/**"]
+
+[manifest]
+file-path = "charts/my-chart/Chart.yaml"
+format = "yaml"
+version-field-path = "version"
+"#;
+        let deserialized: AdditionalPackageDeclaration =
+            toml::from_str(toml_str).expect("deserialize from TOML");
+        assert!(deserialized.dependencies().is_empty());
+        assert_eq!(deserialized.name(), "my-helm-chart");
     }
 }

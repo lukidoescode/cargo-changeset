@@ -5,5 +5,5 @@ pub use error::{ChangesetError, ManifestFormatParseError, PrereleaseSpecParseErr
 pub use types::{
     AdditionalPackageDeclaration, AdditionalPackageManifest, BumpType, CARGO_MANIFEST_FILENAME,
     ChangeCategory, Changeset, ManifestFormat, NoneBumpBehavior, PackageInfo, PackageRelease,
-    PrereleaseSpec, ZeroVersionBehavior,
+    PrereleaseSpec, VersionTrackingDependency, VersionTrackingManifest, ZeroVersionBehavior,
 };

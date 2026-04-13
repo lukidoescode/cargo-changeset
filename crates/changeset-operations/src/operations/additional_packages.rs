@@ -494,6 +494,7 @@ where
             input.manifest_format,
             input.manifest_version_field_path,
         ),
+        Vec::new(),
     );
 
     let (manifest_path, section) = resolve_manifest_and_section(project);
@@ -583,6 +584,7 @@ mod tests {
                 ManifestFormat::Yaml,
                 "version".to_string(),
             ),
+            Vec::new(),
         )
     }
 

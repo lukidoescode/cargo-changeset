@@ -226,6 +226,7 @@ mod tests {
                 ManifestFormat::Yaml,
                 "version".to_string(),
             ),
+            Vec::new(),
         )
     }
 
@@ -317,6 +318,7 @@ members = ["crates/*"]
                 ManifestFormat::Yaml,
                 "version".to_string(),
             ),
+            Vec::new(),
         );
 
         add_additional_package(&path, MetadataSection::Workspace, &decl)
@@ -345,6 +347,7 @@ members = ["crates/*"]
                 ManifestFormat::Yaml,
                 "version".to_string(),
             ),
+            Vec::new(),
         );
 
         add_additional_package(&path, MetadataSection::Workspace, &decl)
