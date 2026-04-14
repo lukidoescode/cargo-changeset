@@ -65,41 +65,41 @@ pub(crate) enum DependencySubcommand {
 pub(crate) struct AddDependencyArgs {
     /// Name of the package that owns the dependency
     #[arg(long)]
-    pub package: String,
+    pub package: Option<String>,
 
     /// Name of the dependency to track
     #[arg(long)]
-    pub dependency: String,
+    pub dependency: Option<String>,
 
     /// Path to the manifest file where the dependency version is tracked
     #[arg(long = "manifest-file")]
-    pub manifest_file: PathBuf,
+    pub manifest_file: Option<PathBuf>,
 
-    /// Format of the manifest file
+    /// Format of the manifest file (auto-detected from file extension if omitted)
     #[arg(long = "manifest-format", value_enum)]
-    pub manifest_format: ManifestFormat,
+    pub manifest_format: Option<ManifestFormat>,
 
     /// Path to the version field inside the manifest
     #[arg(long = "version-field-path")]
-    pub version_field_path: String,
+    pub version_field_path: Option<String>,
 }
 
 #[derive(Args)]
 pub(crate) struct RemoveDependencyArgs {
     /// Name of the package that owns the dependency
     #[arg(long)]
-    pub package: String,
+    pub package: Option<String>,
 
     /// Name of the dependency to remove
     #[arg(long)]
-    pub dependency: String,
+    pub dependency: Option<String>,
 }
 
 #[derive(Args)]
 pub(crate) struct ListDependencyArgs {
     /// Name of the package to list dependencies for
     #[arg(long)]
-    pub package: String,
+    pub package: Option<String>,
 }
 
 #[derive(Args)]
@@ -165,6 +165,15 @@ pub(crate) struct EditAdditionalPackageArgs {
 
 struct TerminalAdditionalPackageInteractionProvider {
     last_manifest_path: Mutex<Option<PathBuf>>,
+}
+
+impl TerminalAdditionalPackageInteractionProvider {
+    fn prompt_dependency_name(&self) -> changeset_operations::Result<String> {
+        Input::new()
+            .with_prompt("Dependency name")
+            .interact_text()
+            .map_err(dialoguer_to_operation_error)
+    }
 }
 
 impl AdditionalPackageInteractionProvider for TerminalAdditionalPackageInteractionProvider {
@@ -351,17 +360,28 @@ pub(crate) fn run(args: AdditionalPackagesArgs, start_path: &Path) -> Result<()>
 }
 
 fn run_add(args: AddAdditionalPackageArgs, start_path: &Path) -> Result<()> {
+    let manifest_format = args.manifest_format.or_else(|| {
+        args.manifest_file
+            .as_deref()
+            .and_then(ManifestFormat::from_path)
+    });
+
+    let has_all_required = args.name.is_some()
+        && args.path.is_some()
+        && args.manifest_file.is_some()
+        && args.version_field_path.is_some();
+
     let events = if let (
         Some(name),
         Some(path),
         Some(manifest_file),
-        Some(manifest_format),
+        Some(format),
         Some(version_field_path),
     ) = (
         args.name,
         args.path,
         args.manifest_file,
-        args.manifest_format,
+        manifest_format,
         args.version_field_path,
     ) {
         let input = AdditionalPackageAddInput {
@@ -369,7 +389,7 @@ fn run_add(args: AddAdditionalPackageArgs, start_path: &Path) -> Result<()> {
             path,
             influence: args.influence,
             manifest_file_path: manifest_file,
-            manifest_format,
+            manifest_format: format,
             manifest_version_field_path: version_field_path,
         };
         let op = AdditionalPackageDirectAddOperation::new(
@@ -386,8 +406,10 @@ fn run_add(args: AddAdditionalPackageArgs, start_path: &Path) -> Result<()> {
             },
         );
         op.execute(start_path)?
+    } else if has_all_required {
+        return Err(CliError::ManifestFormatRequired);
     } else {
-        return Err(CliError::NotATty);
+        return Err(CliError::IncompleteArgs);
     };
 
     print_additional_package_events(&events);
@@ -411,7 +433,7 @@ fn run_remove(args: RemoveAdditionalPackageArgs, start_path: &Path) -> Result<()
         );
         op.execute(start_path)?
     } else {
-        return Err(CliError::NotATty);
+        return Err(CliError::IncompleteArgs);
     };
 
     print_additional_package_events(&events);
@@ -453,7 +475,7 @@ fn run_edit(args: EditAdditionalPackageArgs, start_path: &Path) -> Result<()> {
         );
         op.execute(start_path)?
     } else {
-        return Err(CliError::NotATty);
+        return Err(CliError::IncompleteArgs);
     };
 
     print_additional_package_events(&events);
@@ -476,38 +498,138 @@ fn run_dependencies(args: DependenciesArgs, start_path: &Path) -> Result<()> {
 }
 
 fn run_dependency_add(args: AddDependencyArgs, start_path: &Path) -> Result<()> {
-    let input = VersionTrackingDependencyAddInput::new(
+    let manifest_format = args.manifest_format.or_else(|| {
+        args.manifest_file
+            .as_deref()
+            .and_then(ManifestFormat::from_path)
+    });
+
+    let has_all_required = args.package.is_some()
+        && args.dependency.is_some()
+        && args.manifest_file.is_some()
+        && args.version_field_path.is_some();
+
+    let events = if let (
+        Some(package),
+        Some(dependency),
+        Some(manifest_file),
+        Some(format),
+        Some(version_field_path),
+    ) = (
         args.package,
         args.dependency,
         args.manifest_file,
-        args.manifest_format,
+        manifest_format,
         args.version_field_path,
-    );
-    let op = VersionTrackingDependencyAddOperation::new(
-        FileSystemProjectProvider::new(),
-        FileSystemManifestWriter::new(),
-    );
-    let events = op.execute(start_path, input)?;
+    ) {
+        execute_dependency_add(
+            package,
+            dependency,
+            manifest_file,
+            format,
+            version_field_path,
+            start_path,
+        )?
+    } else if is_interactive() {
+        let interaction = TerminalAdditionalPackageInteractionProvider {
+            last_manifest_path: Mutex::new(None),
+        };
+        let package = interaction.prompt_package_name()?;
+        let dependency = interaction.prompt_dependency_name()?;
+        let manifest_file = interaction.prompt_manifest_file_path()?;
+        let format = interaction.prompt_manifest_format()?;
+        let version_field_path = interaction.prompt_manifest_version_field_path()?;
+
+        execute_dependency_add(
+            package,
+            dependency,
+            manifest_file,
+            format,
+            version_field_path,
+            start_path,
+        )?
+    } else if has_all_required {
+        return Err(CliError::ManifestFormatRequired);
+    } else {
+        return Err(CliError::IncompleteArgs);
+    };
+
     print_dependency_events(&events);
     Ok(())
 }
 
 fn run_dependency_remove(args: RemoveDependencyArgs, start_path: &Path) -> Result<()> {
-    let input = VersionTrackingDependencyRemoveInput::new(args.package, args.dependency);
-    let op = VersionTrackingDependencyRemoveOperation::new(
-        FileSystemProjectProvider::new(),
-        FileSystemManifestWriter::new(),
-    );
-    let events = op.execute(start_path, input)?;
+    let events = if let (Some(package), Some(dependency)) = (args.package, args.dependency) {
+        execute_dependency_remove(package, dependency, start_path)?
+    } else if is_interactive() {
+        let interaction = TerminalAdditionalPackageInteractionProvider {
+            last_manifest_path: Mutex::new(None),
+        };
+        let package = interaction.prompt_package_name()?;
+        let dependency = interaction.prompt_dependency_name()?;
+
+        execute_dependency_remove(package, dependency, start_path)?
+    } else {
+        return Err(CliError::IncompleteArgs);
+    };
+
     print_dependency_events(&events);
     Ok(())
 }
 
 fn run_dependency_list(args: ListDependencyArgs, start_path: &Path) -> Result<()> {
-    let op = VersionTrackingDependencyListOperation::new(FileSystemProjectProvider::new());
-    let events = op.execute(start_path, &args.package)?;
+    let events = if let Some(package) = args.package {
+        let op = VersionTrackingDependencyListOperation::new(FileSystemProjectProvider::new());
+        op.execute(start_path, &package)?
+    } else if is_interactive() {
+        let interaction = TerminalAdditionalPackageInteractionProvider {
+            last_manifest_path: Mutex::new(None),
+        };
+        let package = interaction.prompt_package_name()?;
+
+        let op = VersionTrackingDependencyListOperation::new(FileSystemProjectProvider::new());
+        op.execute(start_path, &package)?
+    } else {
+        return Err(CliError::IncompleteArgs);
+    };
+
     print_dependency_events(&events);
     Ok(())
+}
+
+fn execute_dependency_add(
+    package: String,
+    dependency: String,
+    manifest_file: PathBuf,
+    manifest_format: ManifestFormat,
+    version_field_path: String,
+    start_path: &Path,
+) -> Result<Vec<VersionTrackingDependencyEvent>> {
+    let input = VersionTrackingDependencyAddInput::new(
+        package,
+        dependency,
+        manifest_file,
+        manifest_format,
+        version_field_path,
+    );
+    let op = VersionTrackingDependencyAddOperation::new(
+        FileSystemProjectProvider::new(),
+        FileSystemManifestWriter::new(),
+    );
+    Ok(op.execute(start_path, input)?)
+}
+
+fn execute_dependency_remove(
+    package: String,
+    dependency: String,
+    start_path: &Path,
+) -> Result<Vec<VersionTrackingDependencyEvent>> {
+    let input = VersionTrackingDependencyRemoveInput::new(package, dependency);
+    let op = VersionTrackingDependencyRemoveOperation::new(
+        FileSystemProjectProvider::new(),
+        FileSystemManifestWriter::new(),
+    );
+    Ok(op.execute(start_path, input)?)
 }
 
 fn print_dependency_events(events: &[VersionTrackingDependencyEvent]) {

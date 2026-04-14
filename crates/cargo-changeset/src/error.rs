@@ -25,6 +25,14 @@ pub enum CliError {
     #[error("interactive mode requires a terminal")]
     NotATty,
 
+    #[error(
+        "not all required arguments were provided and no terminal is available for interactive prompts"
+    )]
+    IncompleteArgs,
+
+    #[error("could not determine manifest format from file extension; use --manifest-format")]
+    ManifestFormatRequired,
+
     #[error("invalid --package-bump format '{input}' (expected 'package-name:bump-type')")]
     InvalidPackageBumpFormat { input: String },
 
@@ -91,6 +99,16 @@ mod tests {
         let err = CliError::NotATty;
 
         assert!(err.to_string().contains("terminal"));
+    }
+
+    #[test]
+    fn incomplete_args_error_message() {
+        let err = CliError::IncompleteArgs;
+
+        let msg = err.to_string();
+
+        assert!(msg.contains("not all required arguments"));
+        assert!(msg.contains("interactive"));
     }
 
     #[test]

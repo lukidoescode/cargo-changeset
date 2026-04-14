@@ -345,6 +345,9 @@ fn cli_to_operation_error(e: CliError) -> changeset_operations::OperationError {
         CliError::Project(e) => OperationError::Project(e),
         CliError::Operation(e) => e,
         CliError::CurrentDir(io) => OperationError::Io(io),
+        CliError::ManifestFormatRequired | CliError::IncompleteArgs => {
+            OperationError::InteractionRequired
+        }
         CliError::InvalidPackageBumpFormat { .. }
         | CliError::InvalidBumpType { .. }
         | CliError::VerificationFailed { .. }

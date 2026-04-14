@@ -746,6 +746,240 @@ mod dependencies_advanced_tests {
     }
 }
 
+mod non_interactive_fallback_tests {
+    use super::*;
+
+    #[test]
+    fn dependencies_add_no_args_non_interactive_shows_incomplete_args_error() {
+        let workspace = create_workspace_with_helm_chart();
+        add_helm_chart_config(&workspace);
+
+        assert_cmd::cargo::cargo_bin_cmd!("cargo-changeset")
+            .args(["additional-packages", "dependencies", "add"])
+            .env("CARGO_CHANGESET_NO_TTY", "1")
+            .env("NO_COLOR", "1")
+            .current_dir(workspace.path())
+            .assert()
+            .failure()
+            .stderr(contains("not all required arguments"));
+    }
+
+    #[test]
+    fn dependencies_remove_no_args_non_interactive_shows_incomplete_args_error() {
+        let workspace = create_workspace_with_helm_chart();
+        add_helm_chart_config(&workspace);
+
+        assert_cmd::cargo::cargo_bin_cmd!("cargo-changeset")
+            .args(["additional-packages", "dependencies", "remove"])
+            .env("CARGO_CHANGESET_NO_TTY", "1")
+            .env("NO_COLOR", "1")
+            .current_dir(workspace.path())
+            .assert()
+            .failure()
+            .stderr(contains("not all required arguments"));
+    }
+
+    #[test]
+    fn dependencies_list_no_args_non_interactive_shows_incomplete_args_error() {
+        let workspace = create_workspace_with_helm_chart();
+        add_helm_chart_config(&workspace);
+
+        assert_cmd::cargo::cargo_bin_cmd!("cargo-changeset")
+            .args(["additional-packages", "dependencies", "list"])
+            .env("CARGO_CHANGESET_NO_TTY", "1")
+            .env("NO_COLOR", "1")
+            .current_dir(workspace.path())
+            .assert()
+            .failure()
+            .stderr(contains("not all required arguments"));
+    }
+
+    #[test]
+    fn dependencies_add_partial_args_non_interactive_shows_incomplete_args_error() {
+        let workspace = create_workspace_with_helm_chart();
+        add_helm_chart_config(&workspace);
+
+        assert_cmd::cargo::cargo_bin_cmd!("cargo-changeset")
+            .args([
+                "additional-packages",
+                "dependencies",
+                "add",
+                "--package",
+                "my-helm-chart",
+            ])
+            .env("CARGO_CHANGESET_NO_TTY", "1")
+            .env("NO_COLOR", "1")
+            .current_dir(workspace.path())
+            .assert()
+            .failure()
+            .stderr(contains("not all required arguments"));
+    }
+}
+
+mod auto_detect_format_tests {
+    use super::*;
+
+    #[test]
+    fn dependencies_add_auto_detects_yaml_format() {
+        let workspace = create_workspace_with_helm_chart();
+        add_helm_chart_config(&workspace);
+
+        assert_cmd::cargo::cargo_bin_cmd!("cargo-changeset")
+            .args([
+                "additional-packages",
+                "dependencies",
+                "add",
+                "--package",
+                "my-helm-chart",
+                "--dependency",
+                "crate-a",
+                "--manifest-file",
+                "charts/my-chart/Chart.yaml",
+                "--version-field-path",
+                "appVersion",
+            ])
+            .current_dir(workspace.path())
+            .assert()
+            .success()
+            .stdout(contains("Added version-tracking dependency"));
+
+        let cargo_toml =
+            fs::read_to_string(workspace.path().join("Cargo.toml")).expect("read Cargo.toml");
+        assert!(
+            cargo_toml.contains(r#"format = "yaml""#),
+            "expected auto-detected yaml format stored in Cargo.toml, got:\n{cargo_toml}"
+        );
+    }
+
+    #[test]
+    fn dependencies_add_auto_detects_json_format() {
+        let workspace = create_workspace_with_helm_chart();
+        add_helm_chart_config(&workspace);
+
+        fs::write(
+            workspace.path().join("charts/my-chart/versions.json"),
+            r#"{"appVersion": "1.0.0"}"#,
+        )
+        .expect("write json file");
+
+        assert_cmd::cargo::cargo_bin_cmd!("cargo-changeset")
+            .args([
+                "additional-packages",
+                "dependencies",
+                "add",
+                "--package",
+                "my-helm-chart",
+                "--dependency",
+                "crate-a",
+                "--manifest-file",
+                "charts/my-chart/versions.json",
+                "--version-field-path",
+                "appVersion",
+            ])
+            .current_dir(workspace.path())
+            .assert()
+            .success()
+            .stdout(contains("Added version-tracking dependency"));
+
+        let cargo_toml =
+            fs::read_to_string(workspace.path().join("Cargo.toml")).expect("read Cargo.toml");
+        assert!(
+            cargo_toml.contains(r#"format = "json""#),
+            "expected auto-detected json format stored in Cargo.toml, got:\n{cargo_toml}"
+        );
+    }
+
+    #[test]
+    fn dependencies_add_auto_detects_toml_format() {
+        let workspace = create_workspace_with_helm_chart();
+        add_helm_chart_config(&workspace);
+
+        fs::write(
+            workspace.path().join("charts/my-chart/versions.toml"),
+            "[versions]\nappVersion = \"1.0.0\"\n",
+        )
+        .expect("write toml file");
+
+        assert_cmd::cargo::cargo_bin_cmd!("cargo-changeset")
+            .args([
+                "additional-packages",
+                "dependencies",
+                "add",
+                "--package",
+                "my-helm-chart",
+                "--dependency",
+                "crate-a",
+                "--manifest-file",
+                "charts/my-chart/versions.toml",
+                "--version-field-path",
+                "appVersion",
+            ])
+            .current_dir(workspace.path())
+            .assert()
+            .success()
+            .stdout(contains("Added version-tracking dependency"));
+
+        let cargo_toml =
+            fs::read_to_string(workspace.path().join("Cargo.toml")).expect("read Cargo.toml");
+        assert!(
+            cargo_toml.contains(r#"format = "toml""#),
+            "expected auto-detected toml format stored in Cargo.toml, got:\n{cargo_toml}"
+        );
+    }
+
+    #[test]
+    fn additional_packages_add_auto_detects_manifest_format() {
+        let workspace = create_workspace_with_helm_chart();
+
+        assert_cmd::cargo::cargo_bin_cmd!("cargo-changeset")
+            .args([
+                "additional-packages",
+                "add",
+                "--name",
+                "my-helm-chart",
+                "--path",
+                "charts/my-chart",
+                "--influence",
+                "charts/my-chart/**",
+                "--manifest-file",
+                "charts/my-chart/Chart.yaml",
+                "--version-field-path",
+                "version",
+            ])
+            .current_dir(workspace.path())
+            .assert()
+            .success()
+            .stdout(contains("Added additional package 'my-helm-chart'"));
+
+        let cargo_toml =
+            fs::read_to_string(workspace.path().join("Cargo.toml")).expect("read Cargo.toml");
+        assert!(
+            cargo_toml.contains(r#"format = "yaml""#),
+            "expected auto-detected yaml format stored in Cargo.toml, got:\n{cargo_toml}"
+        );
+    }
+}
+
+mod direct_binary_invocation_tests {
+    use super::*;
+
+    #[test]
+    fn direct_invocation_additional_packages_dependencies_add_no_args_shows_proper_error() {
+        let workspace = create_workspace_with_helm_chart();
+        add_helm_chart_config(&workspace);
+
+        assert_cmd::Command::cargo_bin("cargo-changeset")
+            .expect("binary exists")
+            .args(["additional-packages", "dependencies", "add"])
+            .env("CARGO_CHANGESET_NO_TTY", "1")
+            .env("NO_COLOR", "1")
+            .current_dir(workspace.path())
+            .assert()
+            .failure()
+            .stderr(contains("not all required arguments"));
+    }
+}
+
 mod help_and_ux_tests {
     use super::*;
 
