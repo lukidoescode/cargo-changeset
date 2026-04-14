@@ -1,4 +1,5 @@
 use std::path::{Path, PathBuf};
+use std::sync::Mutex;
 
 use clap::{Args, Subcommand, ValueEnum};
 use dialoguer::{Confirm, Input, Select};
@@ -162,7 +163,9 @@ pub(crate) struct EditAdditionalPackageArgs {
     pub version_field_path: Option<String>,
 }
 
-struct TerminalAdditionalPackageInteractionProvider;
+struct TerminalAdditionalPackageInteractionProvider {
+    last_manifest_path: Mutex<Option<PathBuf>>,
+}
 
 impl AdditionalPackageInteractionProvider for TerminalAdditionalPackageInteractionProvider {
     fn prompt_package_name(&self) -> changeset_operations::Result<String> {
@@ -218,16 +221,30 @@ impl AdditionalPackageInteractionProvider for TerminalAdditionalPackageInteracti
             .with_prompt("Path to version manifest file")
             .interact_text()
             .map_err(dialoguer_to_operation_error)?;
-        Ok(PathBuf::from(s))
+        let path = PathBuf::from(s);
+        if let Ok(mut guard) = self.last_manifest_path.lock() {
+            *guard = Some(path.clone());
+        }
+        Ok(path)
     }
 
     fn prompt_manifest_format(&self) -> changeset_operations::Result<ManifestFormat> {
         let variants = ManifestFormat::value_variants();
         let items: Vec<String> = variants.iter().map(ToString::to_string).collect();
+
+        let default_index = self
+            .last_manifest_path
+            .lock()
+            .ok()
+            .as_ref()
+            .and_then(|guard| guard.as_deref().and_then(ManifestFormat::from_path))
+            .and_then(|detected| variants.iter().position(|v| *v == detected))
+            .unwrap_or(0);
+
         let selection = Select::new()
             .with_prompt("Manifest format")
             .items(&items)
-            .default(0)
+            .default(default_index)
             .interact_opt()
             .map_err(dialoguer_to_operation_error)?;
 
@@ -364,7 +381,9 @@ fn run_add(args: AddAdditionalPackageArgs, start_path: &Path) -> Result<()> {
         let op = AdditionalPackageInteractiveAddOperation::new(
             FileSystemProjectProvider::new(),
             FileSystemManifestWriter::new(),
-            TerminalAdditionalPackageInteractionProvider,
+            TerminalAdditionalPackageInteractionProvider {
+                last_manifest_path: Mutex::new(None),
+            },
         );
         op.execute(start_path)?
     } else {
@@ -386,7 +405,9 @@ fn run_remove(args: RemoveAdditionalPackageArgs, start_path: &Path) -> Result<()
         let op = AdditionalPackageInteractiveRemoveOperation::new(
             FileSystemProjectProvider::new(),
             FileSystemManifestWriter::new(),
-            TerminalAdditionalPackageInteractionProvider,
+            TerminalAdditionalPackageInteractionProvider {
+                last_manifest_path: Mutex::new(None),
+            },
         );
         op.execute(start_path)?
     } else {
@@ -426,7 +447,9 @@ fn run_edit(args: EditAdditionalPackageArgs, start_path: &Path) -> Result<()> {
         let op = AdditionalPackageInteractiveEditOperation::new(
             FileSystemProjectProvider::new(),
             FileSystemManifestWriter::new(),
-            TerminalAdditionalPackageInteractionProvider,
+            TerminalAdditionalPackageInteractionProvider {
+                last_manifest_path: Mutex::new(None),
+            },
         );
         op.execute(start_path)?
     } else {
@@ -568,5 +591,54 @@ fn print_additional_package_events(events: &[AdditionalPackageEvent]) {
 fn dialoguer_to_operation_error(e: dialoguer::Error) -> OperationError {
     match e {
         dialoguer::Error::IO(io_err) => OperationError::Io(io_err),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::Path;
+
+    use changeset_core::ManifestFormat;
+
+    #[test]
+    fn manifest_format_from_path_detects_toml() {
+        assert_eq!(
+            ManifestFormat::from_path(Path::new("Cargo.toml")),
+            Some(ManifestFormat::Toml)
+        );
+    }
+
+    #[test]
+    fn manifest_format_from_path_detects_yaml() {
+        assert_eq!(
+            ManifestFormat::from_path(Path::new("Chart.yaml")),
+            Some(ManifestFormat::Yaml)
+        );
+    }
+
+    #[test]
+    fn manifest_format_from_path_detects_yml() {
+        assert_eq!(
+            ManifestFormat::from_path(Path::new("config.yml")),
+            Some(ManifestFormat::Yaml)
+        );
+    }
+
+    #[test]
+    fn manifest_format_from_path_detects_json() {
+        assert_eq!(
+            ManifestFormat::from_path(Path::new("package.json")),
+            Some(ManifestFormat::Json)
+        );
+    }
+
+    #[test]
+    fn manifest_format_from_path_returns_none_for_unknown_extension() {
+        assert_eq!(ManifestFormat::from_path(Path::new("readme.txt")), None);
+    }
+
+    #[test]
+    fn manifest_format_from_path_returns_none_for_no_extension() {
+        assert_eq!(ManifestFormat::from_path(Path::new("Makefile")), None);
     }
 }

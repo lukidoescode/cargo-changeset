@@ -17,6 +17,18 @@ pub enum ManifestFormat {
     Json,
 }
 
+impl ManifestFormat {
+    #[must_use]
+    pub fn from_path(path: &std::path::Path) -> Option<Self> {
+        match path.extension()?.to_str()? {
+            "toml" => Some(Self::Toml),
+            "yaml" | "yml" => Some(Self::Yaml),
+            "json" => Some(Self::Json),
+            _ => None,
+        }
+    }
+}
+
 impl fmt::Display for ManifestFormat {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let s = match self {
