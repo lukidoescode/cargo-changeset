@@ -1,8 +1,9 @@
+#![allow(dead_code)]
+
 use std::fs;
 
 use tempfile::TempDir;
 
-#[allow(dead_code)]
 pub fn write_changeset(dir: &TempDir, filename: &str, package: &str, bump: &str, summary: &str) {
     let changeset_dir = dir.path().join(".changeset/changesets");
     fs::create_dir_all(&changeset_dir).expect("failed to create .changeset/changesets dir");
@@ -17,7 +18,6 @@ pub fn write_changeset(dir: &TempDir, filename: &str, package: &str, bump: &str,
     fs::write(changeset_dir.join(filename), content).expect("failed to write changeset");
 }
 
-#[allow(dead_code)]
 pub fn write_multi_changeset(
     dir: &TempDir,
     filename: &str,

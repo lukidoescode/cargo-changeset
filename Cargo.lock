@@ -150,6 +150,7 @@ dependencies = [
  "indexmap 2.13.0",
  "predicates",
  "semver",
+ "serde_json",
  "tempfile",
  "thiserror",
 ]

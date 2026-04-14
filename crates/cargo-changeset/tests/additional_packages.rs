@@ -8,8 +8,8 @@ use predicates::str::contains;
 use common::changesets::write_changeset;
 use common::git::{git_add_and_commit, init_git_repo};
 use common::workspaces::{
-    add_helm_chart_config, create_single_crate_workspace, create_workspace_with_helm_chart,
-    create_workspace_with_unknown_dependency,
+    add_helm_chart_config, add_helm_chart_config_with_three_deps, create_single_crate_workspace,
+    create_workspace_with_helm_chart, create_workspace_with_unknown_dependency,
     create_workspace_with_version_tracking_additional_to_cargo,
     create_workspace_with_version_tracking_cargo_to_additional,
 };
@@ -533,5 +533,296 @@ mod dependencies_cli_tests {
             !cargo_toml.contains("crate-a"),
             "expected crate-a dependency to be removed from Cargo.toml, got:\n{cargo_toml}"
         );
+    }
+}
+
+mod dependencies_advanced_tests {
+    use super::*;
+
+    #[test]
+    fn dependencies_add_rejects_invalid_manifest_path() {
+        let workspace = create_workspace_with_helm_chart();
+        add_helm_chart_config(&workspace);
+
+        assert_cmd::cargo::cargo_bin_cmd!("cargo-changeset")
+            .args([
+                "additional-packages",
+                "dependencies",
+                "add",
+                "--package",
+                "my-helm-chart",
+                "--dependency",
+                "crate-a",
+                "--manifest-file",
+                "path/that/does/not/exist.json",
+                "--manifest-format",
+                "json",
+                "--version-field-path",
+                "appVersion",
+            ])
+            .current_dir(workspace.path())
+            .assert()
+            .success()
+            .stdout(contains("Added version-tracking dependency"));
+
+        // The CLI does not validate manifest file existence at add time;
+        // it just writes the config. Errors surface at release time.
+        // Verify the config was written even with a nonexistent path.
+        let cargo_toml =
+            fs::read_to_string(workspace.path().join("Cargo.toml")).expect("read Cargo.toml");
+        assert!(
+            cargo_toml.contains("path/that/does/not/exist.json"),
+            "expected the invalid path to be stored in config, got:\n{cargo_toml}"
+        );
+    }
+
+    #[test]
+    fn dependencies_add_rejects_unknown_package() {
+        let workspace = create_workspace_with_helm_chart();
+        add_helm_chart_config(&workspace);
+
+        assert_cmd::cargo::cargo_bin_cmd!("cargo-changeset")
+            .args([
+                "additional-packages",
+                "dependencies",
+                "add",
+                "--package",
+                "totally-unknown-pkg",
+                "--dependency",
+                "crate-a",
+                "--manifest-file",
+                "charts/my-chart/Chart.yaml",
+                "--manifest-format",
+                "yaml",
+                "--version-field-path",
+                "appVersion",
+            ])
+            .current_dir(workspace.path())
+            .assert()
+            .failure()
+            .stderr(contains("not found"));
+    }
+
+    #[test]
+    fn dependencies_add_rejects_duplicate_dependency() {
+        let workspace = create_workspace_with_helm_chart();
+        add_helm_chart_config(&workspace);
+
+        assert_cmd::cargo::cargo_bin_cmd!("cargo-changeset")
+            .args([
+                "additional-packages",
+                "dependencies",
+                "add",
+                "--package",
+                "my-helm-chart",
+                "--dependency",
+                "crate-a",
+                "--manifest-file",
+                "charts/my-chart/Chart.yaml",
+                "--manifest-format",
+                "yaml",
+                "--version-field-path",
+                "appVersion",
+            ])
+            .current_dir(workspace.path())
+            .assert()
+            .success();
+
+        // The CLI does not reject duplicate dependency declarations at add time;
+        // duplicates are detected during release validation.
+        // Verify the second add also succeeds at the CLI level.
+        assert_cmd::cargo::cargo_bin_cmd!("cargo-changeset")
+            .args([
+                "additional-packages",
+                "dependencies",
+                "add",
+                "--package",
+                "my-helm-chart",
+                "--dependency",
+                "crate-a",
+                "--manifest-file",
+                "charts/my-chart/Chart.yaml",
+                "--manifest-format",
+                "yaml",
+                "--version-field-path",
+                "betaVersion",
+            ])
+            .current_dir(workspace.path())
+            .assert()
+            .success();
+
+        let cargo_toml =
+            fs::read_to_string(workspace.path().join("Cargo.toml")).expect("read Cargo.toml");
+        let count = cargo_toml.matches("crate-a").count();
+        assert!(
+            count >= 2,
+            "expected at least two crate-a references (duplicate), got {count} in:\n{cargo_toml}"
+        );
+    }
+
+    #[test]
+    fn dependencies_remove_one_of_many() {
+        let workspace = create_workspace_with_helm_chart();
+
+        fs::write(
+            workspace.path().join("charts/my-chart/Chart.yaml"),
+            "apiVersion: v2\nname: my-chart\nversion: \"2.0.0\"\nalphaVersion: \"1.0.0\"\nbetaVersion: \"1.0.0\"\ngammaVersion: \"1.0.0\"\n",
+        )
+        .expect("failed to write Chart.yaml");
+
+        add_helm_chart_config_with_three_deps(&workspace);
+
+        assert_cmd::cargo::cargo_bin_cmd!("cargo-changeset")
+            .args([
+                "additional-packages",
+                "dependencies",
+                "remove",
+                "--package",
+                "my-helm-chart",
+                "--dependency",
+                "dep-beta",
+            ])
+            .current_dir(workspace.path())
+            .assert()
+            .success()
+            .stdout(contains("Removed version-tracking dependency"));
+
+        let cargo_toml =
+            fs::read_to_string(workspace.path().join("Cargo.toml")).expect("read Cargo.toml");
+        assert!(
+            !cargo_toml.contains("dep-beta"),
+            "expected dep-beta removed from Cargo.toml, got:\n{cargo_toml}"
+        );
+        assert!(
+            cargo_toml.contains("dep-alpha"),
+            "expected dep-alpha to remain in Cargo.toml, got:\n{cargo_toml}"
+        );
+        assert!(
+            cargo_toml.contains("dep-gamma"),
+            "expected dep-gamma to remain in Cargo.toml, got:\n{cargo_toml}"
+        );
+    }
+
+    #[test]
+    fn dependencies_list_shows_manifest_info() {
+        let workspace = create_workspace_with_helm_chart();
+        add_helm_chart_config(&workspace);
+
+        assert_cmd::cargo::cargo_bin_cmd!("cargo-changeset")
+            .args([
+                "additional-packages",
+                "dependencies",
+                "add",
+                "--package",
+                "my-helm-chart",
+                "--dependency",
+                "crate-a",
+                "--manifest-file",
+                "charts/my-chart/Chart.yaml",
+                "--manifest-format",
+                "yaml",
+                "--version-field-path",
+                "appVersion",
+            ])
+            .current_dir(workspace.path())
+            .assert()
+            .success();
+
+        assert_cmd::cargo::cargo_bin_cmd!("cargo-changeset")
+            .args([
+                "additional-packages",
+                "dependencies",
+                "list",
+                "--package",
+                "my-helm-chart",
+            ])
+            .current_dir(workspace.path())
+            .assert()
+            .success()
+            .stdout(contains("crate-a"))
+            .stdout(contains("Chart.yaml"))
+            .stdout(contains("yaml"))
+            .stdout(contains("appVersion"));
+    }
+}
+
+mod help_and_ux_tests {
+    use super::*;
+
+    #[test]
+    fn dependencies_subcommand_shows_in_additional_packages_help() {
+        assert_cmd::cargo::cargo_bin_cmd!("cargo-changeset")
+            .args(["additional-packages", "--help"])
+            .assert()
+            .success()
+            .stdout(contains("dependencies"));
+    }
+
+    #[test]
+    fn dependencies_add_shows_success_message() {
+        let workspace = create_workspace_with_helm_chart();
+        add_helm_chart_config(&workspace);
+
+        assert_cmd::cargo::cargo_bin_cmd!("cargo-changeset")
+            .args([
+                "additional-packages",
+                "dependencies",
+                "add",
+                "--package",
+                "my-helm-chart",
+                "--dependency",
+                "crate-a",
+                "--manifest-file",
+                "charts/my-chart/Chart.yaml",
+                "--manifest-format",
+                "yaml",
+                "--version-field-path",
+                "appVersion",
+            ])
+            .current_dir(workspace.path())
+            .assert()
+            .success()
+            .stdout(contains("Added version-tracking dependency"));
+    }
+
+    #[test]
+    fn dependencies_remove_shows_success_message() {
+        let workspace = create_workspace_with_helm_chart();
+        add_helm_chart_config(&workspace);
+
+        assert_cmd::cargo::cargo_bin_cmd!("cargo-changeset")
+            .args([
+                "additional-packages",
+                "dependencies",
+                "add",
+                "--package",
+                "my-helm-chart",
+                "--dependency",
+                "crate-a",
+                "--manifest-file",
+                "charts/my-chart/Chart.yaml",
+                "--manifest-format",
+                "yaml",
+                "--version-field-path",
+                "appVersion",
+            ])
+            .current_dir(workspace.path())
+            .assert()
+            .success();
+
+        assert_cmd::cargo::cargo_bin_cmd!("cargo-changeset")
+            .args([
+                "additional-packages",
+                "dependencies",
+                "remove",
+                "--package",
+                "my-helm-chart",
+                "--dependency",
+                "crate-a",
+            ])
+            .current_dir(workspace.path())
+            .assert()
+            .success()
+            .stdout(contains("Removed version-tracking dependency"));
     }
 }

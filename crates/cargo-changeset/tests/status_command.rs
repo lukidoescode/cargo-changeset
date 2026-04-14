@@ -6,7 +6,10 @@ use predicates::str::contains;
 use tempfile::TempDir;
 
 use common::changesets::write_changeset;
-use common::workspaces::create_workspace_with_additional_package;
+use common::workspaces::{
+    create_workspace_with_additional_package,
+    create_workspace_with_version_tracking_additional_to_cargo,
+};
 
 fn create_single_package_project() -> TempDir {
     let dir = TempDir::new().expect("create temp dir");
@@ -280,4 +283,51 @@ fn status_lists_additional_package_without_changeset() {
         .success()
         .stdout(contains("Packages without changesets:"))
         .stdout(contains("my-helm-chart (2.0.0)"));
+}
+
+#[test]
+fn status_shows_projected_auto_patch_for_version_tracking_deps() {
+    let workspace = create_workspace_with_version_tracking_additional_to_cargo();
+    write_changeset(
+        &workspace,
+        "bump-rust.md",
+        "my-rust-crate",
+        "patch",
+        "Fix a bug",
+    );
+
+    let output = assert_cmd::cargo::cargo_bin_cmd!("cargo-changeset")
+        .arg("status")
+        .current_dir(workspace.path())
+        .assert()
+        .success();
+
+    let stdout = String::from_utf8_lossy(&output.get_output().stdout);
+
+    assert!(
+        stdout.contains("my-rust-crate: 1.0.0 -> 1.0.1"),
+        "expected my-rust-crate projected release in status output, got:\n{stdout}"
+    );
+    assert!(
+        stdout.contains("my-helm-chart"),
+        "expected my-helm-chart (auto-patch dependent) in status output, got:\n{stdout}"
+    );
+}
+
+#[test]
+fn status_untracked_dep_not_releasing_does_not_auto_patch() {
+    let workspace = create_workspace_with_version_tracking_additional_to_cargo();
+
+    let output = assert_cmd::cargo::cargo_bin_cmd!("cargo-changeset")
+        .arg("status")
+        .current_dir(workspace.path())
+        .assert()
+        .success();
+
+    let stdout = String::from_utf8_lossy(&output.get_output().stdout);
+
+    assert!(
+        !stdout.contains("my-helm-chart: 0.1.0 ->"),
+        "expected my-helm-chart NOT to have a projected release when its dependency is not releasing, got:\n{stdout}"
+    );
 }

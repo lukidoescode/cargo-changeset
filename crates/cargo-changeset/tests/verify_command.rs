@@ -1434,3 +1434,204 @@ fn verify_mixed_coverage_only_rust_uncovered() {
         .stderr(contains("crate-a"))
         .stderr(contains("✗ my-helm-chart").not());
 }
+
+fn create_workspace_with_version_tracking_and_git() -> TempDir {
+    let dir = TempDir::new().expect("failed to create temp dir");
+
+    fs::create_dir_all(dir.path().join("crates/crate-a/src"))
+        .expect("failed to create crate-a src dir");
+    fs::create_dir_all(dir.path().join("charts/my-chart"))
+        .expect("failed to create charts/my-chart dir");
+    fs::create_dir_all(dir.path().join(".changeset/changesets"))
+        .expect("failed to create .changeset/changesets dir");
+
+    fs::write(
+        dir.path().join("Cargo.toml"),
+        r#"[workspace]
+members = ["crates/*"]
+resolver = "2"
+
+[[workspace.metadata.changeset.additional-packages]]
+name = "my-helm-chart"
+path = "charts/my-chart"
+influence = ["charts/my-chart/**"]
+
+[workspace.metadata.changeset.additional-packages.manifest]
+file-path = "charts/my-chart/Chart.yaml"
+format = "yaml"
+version-field-path = "version"
+
+[[workspace.metadata.changeset.additional-packages.dependencies]]
+dependency-name = "crate-a"
+
+[workspace.metadata.changeset.additional-packages.dependencies.version-tracking-manifest]
+file-path = "charts/my-chart/Chart.yaml"
+format = "yaml"
+version-field-path = "appVersion"
+"#,
+    )
+    .expect("failed to write workspace Cargo.toml");
+
+    fs::write(
+        dir.path().join("crates/crate-a/Cargo.toml"),
+        r#"[package]
+name = "crate-a"
+version = "1.0.0"
+edition = "2021"
+"#,
+    )
+    .expect("failed to write crate-a Cargo.toml");
+
+    fs::write(dir.path().join("crates/crate-a/src/lib.rs"), "")
+        .expect("failed to write crate-a lib.rs");
+
+    fs::write(
+        dir.path().join("charts/my-chart/Chart.yaml"),
+        "apiVersion: v2\nname: my-chart\nversion: \"2.0.0\"\nappVersion: \"1.0.0\"\n",
+    )
+    .expect("failed to write Chart.yaml");
+
+    fs::write(
+        dir.path().join("charts/my-chart/values.yaml"),
+        "replicaCount: 1\n",
+    )
+    .expect("failed to write values.yaml");
+
+    init_git_repo(&dir);
+    git_add_and_commit(&dir, "Initial commit");
+
+    dir
+}
+
+#[test]
+fn verify_detects_change_in_version_tracking_manifest_requires_coverage() {
+    let workspace = create_workspace_with_version_tracking_and_git();
+    create_branch(&workspace, "feature");
+
+    let mut chart = OpenOptions::new()
+        .append(true)
+        .open(workspace.path().join("charts/my-chart/Chart.yaml"))
+        .expect("failed to open Chart.yaml for appending");
+    writeln!(chart, "extraField: true").expect("failed to append to Chart.yaml");
+    drop(chart);
+
+    git_add_and_commit(&workspace, "Modify version-tracking manifest");
+
+    assert_cmd::cargo::cargo_bin_cmd!("cargo-changeset")
+        .arg("verify")
+        .arg("--base")
+        .arg("main")
+        .current_dir(workspace.path())
+        .assert()
+        .failure()
+        .stderr(contains("my-helm-chart"));
+}
+
+#[test]
+fn verify_changeset_covers_version_tracking_manifest_change() {
+    let workspace = create_workspace_with_version_tracking_and_git();
+    create_branch(&workspace, "feature");
+
+    let mut chart = OpenOptions::new()
+        .append(true)
+        .open(workspace.path().join("charts/my-chart/Chart.yaml"))
+        .expect("failed to open Chart.yaml for appending");
+    writeln!(chart, "extraField: true").expect("failed to append to Chart.yaml");
+    drop(chart);
+
+    add_changeset(&workspace, "my-helm-chart");
+    git_add_and_commit(&workspace, "Modify manifest and add changeset");
+
+    assert_cmd::cargo::cargo_bin_cmd!("cargo-changeset")
+        .arg("verify")
+        .arg("--base")
+        .arg("main")
+        .current_dir(workspace.path())
+        .assert()
+        .success();
+}
+
+#[test]
+fn verify_ignores_changes_outside_version_tracking_manifests() {
+    let dir = TempDir::new().expect("failed to create temp dir");
+
+    fs::create_dir_all(dir.path().join("crates/crate-a/src"))
+        .expect("failed to create crate-a src dir");
+    fs::create_dir_all(dir.path().join("charts/my-chart"))
+        .expect("failed to create charts/my-chart dir");
+    fs::create_dir_all(dir.path().join("external")).expect("failed to create external dir");
+    fs::create_dir_all(dir.path().join(".changeset/changesets"))
+        .expect("failed to create .changeset/changesets dir");
+
+    fs::write(
+        dir.path().join("Cargo.toml"),
+        r#"[workspace]
+members = ["crates/*"]
+resolver = "2"
+
+[[workspace.metadata.changeset.additional-packages]]
+name = "my-helm-chart"
+path = "charts/my-chart"
+influence = ["charts/my-chart/**"]
+
+[workspace.metadata.changeset.additional-packages.manifest]
+file-path = "charts/my-chart/Chart.yaml"
+format = "yaml"
+version-field-path = "version"
+
+[[workspace.metadata.changeset.additional-packages.dependencies]]
+dependency-name = "crate-a"
+
+[workspace.metadata.changeset.additional-packages.dependencies.version-tracking-manifest]
+file-path = "external/tracking.json"
+format = "json"
+version-field-path = "version"
+"#,
+    )
+    .expect("failed to write workspace Cargo.toml");
+
+    fs::write(
+        dir.path().join("crates/crate-a/Cargo.toml"),
+        r#"[package]
+name = "crate-a"
+version = "1.0.0"
+edition = "2021"
+"#,
+    )
+    .expect("failed to write crate-a Cargo.toml");
+
+    fs::write(dir.path().join("crates/crate-a/src/lib.rs"), "")
+        .expect("failed to write crate-a lib.rs");
+
+    fs::write(
+        dir.path().join("charts/my-chart/Chart.yaml"),
+        "apiVersion: v2\nname: my-chart\nversion: \"2.0.0\"\n",
+    )
+    .expect("failed to write Chart.yaml");
+
+    fs::write(
+        dir.path().join("external/tracking.json"),
+        r#"{"version": "1.0.0"}"#,
+    )
+    .expect("failed to write tracking.json");
+
+    init_git_repo(&dir);
+    git_add_and_commit(&dir, "Initial commit");
+    create_branch(&dir, "feature");
+
+    fs::write(
+        dir.path().join("external/tracking.json"),
+        r#"{"version": "1.0.1"}"#,
+    )
+    .expect("failed to modify tracking.json");
+
+    git_add_and_commit(&dir, "Modify tracking file outside influence");
+
+    assert_cmd::cargo::cargo_bin_cmd!("cargo-changeset")
+        .arg("verify")
+        .arg("--base")
+        .arg("main")
+        .current_dir(dir.path())
+        .assert()
+        .success();
+}
