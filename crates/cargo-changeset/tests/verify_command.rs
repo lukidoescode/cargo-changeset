@@ -1,28 +1,25 @@
-mod common;
-
 use std::fs;
 use std::fs::OpenOptions;
 use std::io::Write as IoWrite;
 
-use predicates::prelude::PredicateBooleanExt as _;
-use predicates::str::contains;
-use tempfile::TempDir;
-
-use common::changesets::write_multi_changeset;
-use common::git::{create_branch, git_add_and_commit, init_git_repo};
-use common::workspaces::{
+use changeset_test_helpers::changesets::write_multi_changeset;
+use changeset_test_helpers::git::{create_branch, git_add_and_commit, init_git_repo};
+use changeset_test_helpers::workspaces::{
     create_virtual_workspace_with_git, create_workspace_with_circular_version_tracking,
     create_workspace_with_duplicate_dependency, create_workspace_with_helm_chart_and_git,
     create_workspace_with_three_crates_and_git, create_workspace_with_unknown_dependency,
     create_workspace_with_version_tracking_and_git,
 };
+use predicates::prelude::PredicateBooleanExt as _;
+use predicates::str::contains;
+use tempfile::TempDir;
 
 fn add_changeset(dir: &TempDir, package_name: &str) {
     add_changeset_with_name(dir, package_name, &format!("{package_name}-changeset"));
 }
 
 fn add_changeset_with_name(dir: &TempDir, package_name: &str, changeset_name: &str) {
-    common::changesets::write_changeset(
+    changeset_test_helpers::changesets::write_changeset(
         dir,
         &format!("{changeset_name}.md"),
         package_name,

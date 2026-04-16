@@ -1,11 +1,8 @@
-mod common;
-
 use std::fs;
 
+use changeset_test_helpers::git::{create_branch, git_add_and_commit, init_git_repo};
 use predicates::str::contains;
 use tempfile::TempDir;
-
-use common::git::{create_branch, git_add_and_commit, init_git_repo};
 
 fn setup_single_package() -> TempDir {
     let dir = TempDir::new().expect("create temp dir");

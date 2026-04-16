@@ -1,15 +1,12 @@
-mod common;
-
 use std::fs;
 
-use predicates::str::contains;
-use tempfile::TempDir;
-
-use common::changesets::write_changeset;
-use common::workspaces::{
+use changeset_test_helpers::changesets::write_changeset;
+use changeset_test_helpers::workspaces::{
     create_workspace_with_additional_package,
     create_workspace_with_version_tracking_additional_to_cargo,
 };
+use predicates::str::contains;
+use tempfile::TempDir;
 
 fn create_single_package_project() -> TempDir {
     let dir = TempDir::new().expect("create temp dir");

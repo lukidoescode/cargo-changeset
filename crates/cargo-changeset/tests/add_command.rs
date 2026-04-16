@@ -1,16 +1,13 @@
-mod common;
-
 use std::fs;
 use std::process::Command;
 use std::time::Duration;
 
-use predicates::str::contains;
-use tempfile::TempDir;
-
-use common::workspaces::{
+use changeset_test_helpers::workspaces::{
     create_single_crate_workspace, create_virtual_workspace,
     create_workspace_with_additional_package,
 };
+use predicates::str::contains;
+use tempfile::TempDir;
 
 fn create_workspace_with_underscored_crate() -> TempDir {
     let dir = TempDir::new().expect("failed to create temp dir");

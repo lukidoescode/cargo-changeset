@@ -148,6 +148,7 @@ dependencies = [
  "changeset-manifest",
  "changeset-operations",
  "changeset-project",
+ "changeset-test-helpers",
  "changeset-version",
  "chrono",
  "clap",
@@ -160,7 +161,6 @@ dependencies = [
  "serde_json",
  "tempfile",
  "thiserror",
- "vt100",
 ]
 
 [[package]]
@@ -302,6 +302,15 @@ version = "0.0.2"
 dependencies = [
  "anyhow",
  "thiserror",
+]
+
+[[package]]
+name = "changeset-test-helpers"
+version = "0.0.0"
+dependencies = [
+ "expectrl",
+ "tempfile",
+ "vt100",
 ]
 
 [[package]]

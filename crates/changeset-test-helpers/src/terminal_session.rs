@@ -1,5 +1,4 @@
-#![allow(dead_code)]
-
+use std::path::Path;
 use std::process::Command;
 use std::time::{Duration, Instant};
 
@@ -20,8 +19,7 @@ pub struct TerminalSession {
 }
 
 impl TerminalSession {
-    pub fn spawn(workspace: &TempDir, args: &[&str]) -> Self {
-        let bin_path = assert_cmd::cargo::cargo_bin!("cargo-changeset");
+    pub fn spawn(bin_path: &Path, workspace: &TempDir, args: &[&str]) -> Self {
         let mut cmd = Command::new(bin_path);
         cmd.args(args);
         cmd.current_dir(workspace.path());
@@ -61,12 +59,11 @@ impl TerminalSession {
             if self.vt.screen().contents().contains(needle) {
                 return self;
             }
-            if start.elapsed() > TIMEOUT {
-                panic!(
-                    "Timed out waiting for {needle:?}\nScreen:\n{}",
-                    self.screen()
-                );
-            }
+            assert!(
+                start.elapsed() <= TIMEOUT,
+                "Timed out waiting for {needle:?}\nScreen:\n{}",
+                self.screen()
+            );
             std::thread::sleep(POLL_INTERVAL);
         }
     }
@@ -101,12 +98,6 @@ impl TerminalSession {
         assert_eq!(actual, expected_trimmed, "{message}");
     }
 
-    /// Select an item from a `dialoguer::Select` menu by index.
-    ///
-    /// `dialoguer::Select` without `.default()` starts with `sel = !0`.
-    /// The first Down press moves from `!0` to `0`, so we need `index + 1`
-    /// presses. Delays between presses ensure the `console` crate's
-    /// zero-timeout poll parses `\x1b[B` as ArrowDown rather than bare ESC.
     pub fn select_item(&mut self, index: usize) -> &mut Self {
         for _ in 0..=index {
             self.pty.send(ARROW_DOWN).expect("send arrow-down key");

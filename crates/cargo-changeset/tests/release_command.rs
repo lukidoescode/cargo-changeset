@@ -1,13 +1,9 @@
-mod common;
-
 use std::fs;
 use std::process::Command;
 
-use predicates::str::is_match;
-
-use common::changesets::{write_changeset, write_multi_changeset};
-use common::git::{git_add_and_commit, init_git_repo};
-use common::workspaces::{
+use changeset_test_helpers::changesets::{write_changeset, write_multi_changeset};
+use changeset_test_helpers::git::{git_add_and_commit, init_git_repo};
+use changeset_test_helpers::workspaces::{
     add_helm_chart_config, create_workspace_with_cascade_chain,
     create_workspace_with_circular_version_tracking,
     create_workspace_with_deeply_nested_json_field, create_workspace_with_duplicate_dependency,
@@ -16,6 +12,7 @@ use common::workspaces::{
     create_workspace_with_prerelease_dependency,
     create_workspace_with_version_tracking_additional_to_cargo,
 };
+use predicates::str::is_match;
 
 #[test]
 fn release_bumps_chart_yaml_version_and_preserves_inline_comments() {

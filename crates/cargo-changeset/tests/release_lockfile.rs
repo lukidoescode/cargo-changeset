@@ -1,12 +1,9 @@
-mod common;
-
 use std::fs;
 use std::process::Command;
 
+use changeset_test_helpers::changesets::write_changeset;
+use changeset_test_helpers::git::{git_add_and_commit, init_git_repo};
 use tempfile::TempDir;
-
-use common::changesets::write_changeset;
-use common::git::{git_add_and_commit, init_git_repo};
 
 fn lockfile_hash(dir: &TempDir) -> Vec<u8> {
     let output = Command::new("git")

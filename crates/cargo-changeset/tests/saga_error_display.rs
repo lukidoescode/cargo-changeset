@@ -1,12 +1,9 @@
-mod common;
-
 use std::fs;
 
+use changeset_test_helpers::changesets::{write_changeset, write_multi_changeset};
+use changeset_test_helpers::git::{create_tag, git_add_and_commit, init_git_repo};
 use predicates::str::contains;
 use tempfile::TempDir;
-
-use common::changesets::{write_changeset, write_multi_changeset};
-use common::git::{create_tag, git_add_and_commit, init_git_repo};
 
 fn create_single_package_with_git() -> TempDir {
     let dir = TempDir::new().expect("create temp dir");

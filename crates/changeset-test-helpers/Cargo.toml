@@ -1,0 +1,15 @@
+[package]
+name = "changeset-test-helpers"
+version = "0.0.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+expectrl = "0.8"
+tempfile = "3.25"
+vt100 = "0.16.2"
+
+[lints]
+workspace = true

@@ -1,8 +1,6 @@
-mod common;
-
 use std::fs;
 
-use common::git::{git_add_and_commit, init_git_repo};
+use changeset_test_helpers::git::{git_add_and_commit, init_git_repo};
 use tempfile::TempDir;
 
 fn create_single_package_project() -> TempDir {

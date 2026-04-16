@@ -1,5 +1,3 @@
-#![allow(dead_code)]
-
 use std::fs;
 use std::fs::OpenOptions;
 use std::io::Write;
@@ -7,7 +5,7 @@ use std::path::Path;
 
 use tempfile::TempDir;
 
-use super::git::{git_add_and_commit, init_git_repo};
+use crate::git::{git_add_and_commit, init_git_repo};
 
 pub fn create_single_crate_workspace() -> TempDir {
     let dir = TempDir::new().expect("failed to create temp dir");
@@ -1219,7 +1217,7 @@ edition = "2021"
     dir
 }
 
-fn write_file(base: &Path, relative: &str, content: &str) {
+pub fn write_file(base: &Path, relative: &str, content: &str) {
     let path = base.join(relative);
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).expect("failed to create parent dirs");

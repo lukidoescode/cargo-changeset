@@ -1,11 +1,8 @@
-mod common;
-
 use std::fs;
 
+use changeset_test_helpers::workspaces::create_virtual_workspace;
 use predicates::str::contains;
 use tempfile::TempDir;
-
-use common::workspaces::create_virtual_workspace;
 
 fn create_workspace_with_stable_version() -> TempDir {
     let dir = TempDir::new().expect("failed to create temp dir");
