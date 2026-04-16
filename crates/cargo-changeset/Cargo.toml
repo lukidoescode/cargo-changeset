@@ -38,3 +38,5 @@ expectrl = "0.8"
 indexmap = { workspace = true }
 semver = { workspace = true }
 serde_json = { workspace = true }
+vt100 = "0.16.2"
+indoc = "2.0.7"

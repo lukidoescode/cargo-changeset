@@ -97,6 +97,19 @@ where
             &project,
             &root_config,
         )?;
+
+        let all_package_names: HashSet<String> = project
+            .packages()
+            .iter()
+            .map(|p| p.name().clone())
+            .chain(additional_packages.iter().map(|p| p.name().clone()))
+            .collect();
+        changeset_project::validate_version_tracking_dependencies(
+            &root_config,
+            &package_configs,
+            &all_package_names,
+        )?;
+
         let additional_with_patterns: Vec<_> = if additional_packages.is_empty() {
             Vec::new()
         } else {

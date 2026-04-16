@@ -19,7 +19,7 @@ use changeset_operations::operations::{
 };
 use changeset_operations::providers::{FileSystemManifestWriter, FileSystemProjectProvider};
 use changeset_operations::traits::{
-    AdditionalPackageField, AdditionalPackageInteractionProvider, MenuSelection,
+    AdditionalPackageField, AdditionalPackageInteractionProvider, MenuSelection, ProjectProvider,
 };
 
 use crate::environment::is_interactive;
@@ -48,7 +48,7 @@ pub(crate) enum AdditionalPackageCommand {
 #[derive(Args)]
 pub(crate) struct DependenciesArgs {
     #[command(subcommand)]
-    pub command: DependencySubcommand,
+    pub(crate) command: DependencySubcommand,
 }
 
 #[derive(Subcommand)]
@@ -163,16 +163,35 @@ pub(crate) struct EditAdditionalPackageArgs {
     pub version_field_path: Option<String>,
 }
 
+struct PackageDependenciesSelectionMenuItem {
+    name: String,
+    label: String,
+}
+
+#[derive(Default)]
 struct TerminalAdditionalPackageInteractionProvider {
+    default_manifest_path: Mutex<Option<PathBuf>>,
     last_manifest_path: Mutex<Option<PathBuf>>,
 }
 
 impl TerminalAdditionalPackageInteractionProvider {
-    fn prompt_dependency_name(&self) -> changeset_operations::Result<String> {
-        Input::new()
-            .with_prompt("Dependency name")
-            .interact_text()
-            .map_err(dialoguer_to_operation_error)
+    fn select_package(
+        &self,
+        prompt: &str,
+        items: &[PackageDependenciesSelectionMenuItem],
+    ) -> changeset_operations::Result<MenuSelection<String>> {
+        let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
+
+        let selection = Select::new()
+            .with_prompt(prompt)
+            .items(&labels)
+            .interact_opt()
+            .map_err(super::dialoguer_to_operation_error)?;
+
+        Ok(match selection {
+            Some(index) => MenuSelection::Selected(items[index].name.clone()),
+            None => MenuSelection::Cancelled,
+        })
     }
 }
 
@@ -181,14 +200,14 @@ impl AdditionalPackageInteractionProvider for TerminalAdditionalPackageInteracti
         Input::new()
             .with_prompt("Package name")
             .interact_text()
-            .map_err(dialoguer_to_operation_error)
+            .map_err(super::dialoguer_to_operation_error)
     }
 
     fn prompt_package_path(&self) -> changeset_operations::Result<PathBuf> {
         let s: String = Input::new()
             .with_prompt("Package directory path (relative to workspace root)")
             .interact_text()
-            .map_err(dialoguer_to_operation_error)?;
+            .map_err(super::dialoguer_to_operation_error)?;
         Ok(PathBuf::from(s))
     }
 
@@ -206,7 +225,7 @@ impl AdditionalPackageInteractionProvider for TerminalAdditionalPackageInteracti
             .default(default)
             .allow_empty(true)
             .interact_text()
-            .map_err(dialoguer_to_operation_error)?;
+            .map_err(super::dialoguer_to_operation_error)?;
         if first.is_empty() {
             return Ok(patterns);
         }
@@ -216,7 +235,7 @@ impl AdditionalPackageInteractionProvider for TerminalAdditionalPackageInteracti
                 .with_prompt("Additional pattern")
                 .allow_empty(true)
                 .interact_text()
-                .map_err(dialoguer_to_operation_error)?;
+                .map_err(super::dialoguer_to_operation_error)?;
             if s.is_empty() {
                 break;
             }
@@ -226,10 +245,21 @@ impl AdditionalPackageInteractionProvider for TerminalAdditionalPackageInteracti
     }
 
     fn prompt_manifest_file_path(&self) -> changeset_operations::Result<PathBuf> {
-        let s: String = Input::new()
-            .with_prompt("Path to version manifest file")
-            .interact_text()
-            .map_err(dialoguer_to_operation_error)?;
+        let default_path = if let Ok(guard) = self.default_manifest_path.lock() {
+            guard.as_ref().map(|p| p.display().to_string())
+        } else {
+            None
+        };
+
+        let input = Input::<String>::new().with_prompt("Path to version manifest file");
+        let s: String = if let Some(default) = default_path {
+            input.default(default)
+        } else {
+            input
+        }
+        .interact_text()
+        .map_err(super::dialoguer_to_operation_error)?;
+
         let path = PathBuf::from(s);
         if let Ok(mut guard) = self.last_manifest_path.lock() {
             *guard = Some(path.clone());
@@ -241,21 +271,22 @@ impl AdditionalPackageInteractionProvider for TerminalAdditionalPackageInteracti
         let variants = ManifestFormat::value_variants();
         let items: Vec<String> = variants.iter().map(ToString::to_string).collect();
 
-        let default_index = self
-            .last_manifest_path
-            .lock()
-            .ok()
-            .as_ref()
-            .and_then(|guard| guard.as_deref().and_then(ManifestFormat::from_path))
-            .and_then(|detected| variants.iter().position(|v| *v == detected))
-            .unwrap_or(0);
+        let default_index = if let Ok(guard) = self.last_manifest_path.lock() {
+            guard
+                .as_deref()
+                .and_then(ManifestFormat::from_path)
+                .and_then(|detected| variants.iter().position(|v| *v == detected))
+                .unwrap_or(0)
+        } else {
+            0
+        };
 
         let selection = Select::new()
             .with_prompt("Manifest format")
             .items(&items)
             .default(default_index)
             .interact_opt()
-            .map_err(dialoguer_to_operation_error)?;
+            .map_err(super::dialoguer_to_operation_error)?;
 
         match selection {
             Some(index) => Ok(variants[index]),
@@ -267,7 +298,7 @@ impl AdditionalPackageInteractionProvider for TerminalAdditionalPackageInteracti
         Input::new()
             .with_prompt("Path to version field in manifest (e.g. 'version' or 'info.version')")
             .interact_text()
-            .map_err(dialoguer_to_operation_error)
+            .map_err(super::dialoguer_to_operation_error)
     }
 
     fn select_package_to_remove(
@@ -283,7 +314,7 @@ impl AdditionalPackageInteractionProvider for TerminalAdditionalPackageInteracti
             .with_prompt("Select package to remove")
             .items(&items)
             .interact_opt()
-            .map_err(dialoguer_to_operation_error)?;
+            .map_err(super::dialoguer_to_operation_error)?;
 
         Ok(match selection {
             Some(index) => MenuSelection::Selected(index),
@@ -304,7 +335,7 @@ impl AdditionalPackageInteractionProvider for TerminalAdditionalPackageInteracti
             .with_prompt("Select package to edit")
             .items(&items)
             .interact_opt()
-            .map_err(dialoguer_to_operation_error)?;
+            .map_err(super::dialoguer_to_operation_error)?;
 
         Ok(match selection {
             Some(index) => MenuSelection::Selected(index),
@@ -328,7 +359,7 @@ impl AdditionalPackageInteractionProvider for TerminalAdditionalPackageInteracti
             .with_prompt("Which field would you like to edit?")
             .items(options)
             .interact_opt()
-            .map_err(dialoguer_to_operation_error)?;
+            .map_err(super::dialoguer_to_operation_error)?;
 
         Ok(match selection {
             Some(0) => MenuSelection::Selected(AdditionalPackageField::Path),
@@ -345,7 +376,7 @@ impl AdditionalPackageInteractionProvider for TerminalAdditionalPackageInteracti
             .with_prompt(format!("Remove additional package '{name}'?"))
             .default(false)
             .interact()
-            .map_err(dialoguer_to_operation_error)
+            .map_err(super::dialoguer_to_operation_error)
     }
 }
 
@@ -392,18 +423,13 @@ fn run_add(args: AddAdditionalPackageArgs, start_path: &Path) -> Result<()> {
             manifest_format: format,
             manifest_version_field_path: version_field_path,
         };
-        let op = AdditionalPackageDirectAddOperation::new(
-            FileSystemProjectProvider::new(),
-            FileSystemManifestWriter::new(),
-        );
+        let op = AdditionalPackageDirectAddOperation::new(project_provider(), manifest_writer());
         op.execute(start_path, input)?
     } else if is_interactive() {
         let op = AdditionalPackageInteractiveAddOperation::new(
-            FileSystemProjectProvider::new(),
-            FileSystemManifestWriter::new(),
-            TerminalAdditionalPackageInteractionProvider {
-                last_manifest_path: Mutex::new(None),
-            },
+            project_provider(),
+            manifest_writer(),
+            TerminalAdditionalPackageInteractionProvider::default(),
         );
         op.execute(start_path)?
     } else if has_all_required {
@@ -418,18 +444,13 @@ fn run_add(args: AddAdditionalPackageArgs, start_path: &Path) -> Result<()> {
 
 fn run_remove(args: RemoveAdditionalPackageArgs, start_path: &Path) -> Result<()> {
     let events = if let Some(name) = args.name {
-        let op = AdditionalPackageDirectRemoveOperation::new(
-            FileSystemProjectProvider::new(),
-            FileSystemManifestWriter::new(),
-        );
+        let op = AdditionalPackageDirectRemoveOperation::new(project_provider(), manifest_writer());
         op.execute(start_path, &name)?
     } else if is_interactive() {
         let op = AdditionalPackageInteractiveRemoveOperation::new(
-            FileSystemProjectProvider::new(),
-            FileSystemManifestWriter::new(),
-            TerminalAdditionalPackageInteractionProvider {
-                last_manifest_path: Mutex::new(None),
-            },
+            project_provider(),
+            manifest_writer(),
+            TerminalAdditionalPackageInteractionProvider::default(),
         );
         op.execute(start_path)?
     } else {
@@ -460,18 +481,13 @@ fn run_edit(args: EditAdditionalPackageArgs, start_path: &Path) -> Result<()> {
             manifest_version_field_path: args.version_field_path,
         };
         let input = AdditionalPackageEditInput { name, updates };
-        let op = AdditionalPackageDirectEditOperation::new(
-            FileSystemProjectProvider::new(),
-            FileSystemManifestWriter::new(),
-        );
+        let op = AdditionalPackageDirectEditOperation::new(project_provider(), manifest_writer());
         op.execute(start_path, input)?
     } else if is_interactive() {
         let op = AdditionalPackageInteractiveEditOperation::new(
-            FileSystemProjectProvider::new(),
-            FileSystemManifestWriter::new(),
-            TerminalAdditionalPackageInteractionProvider {
-                last_manifest_path: Mutex::new(None),
-            },
+            project_provider(),
+            manifest_writer(),
+            TerminalAdditionalPackageInteractionProvider::default(),
         );
         op.execute(start_path)?
     } else {
@@ -483,7 +499,7 @@ fn run_edit(args: EditAdditionalPackageArgs, start_path: &Path) -> Result<()> {
 }
 
 fn run_list(start_path: &Path) -> Result<()> {
-    let op = AdditionalPackageListOperation::new(FileSystemProjectProvider::new());
+    let op = AdditionalPackageListOperation::new(project_provider());
     let events = op.execute(start_path)?;
     print_additional_package_events(&events);
     Ok(())
@@ -531,11 +547,43 @@ fn run_dependency_add(args: AddDependencyArgs, start_path: &Path) -> Result<()> 
             start_path,
         )?
     } else if is_interactive() {
-        let interaction = TerminalAdditionalPackageInteractionProvider {
-            last_manifest_path: Mutex::new(None),
+        let provider = project_provider();
+        let project = provider.discover_project(start_path)?;
+        let (root_config, _) = provider.load_configs(&project)?;
+        let items = build_package_menu_items(project.packages(), root_config.additional_packages());
+
+        let interaction = TerminalAdditionalPackageInteractionProvider::default();
+
+        let package = match interaction.select_package("Select the owner package", &items)? {
+            MenuSelection::Selected(name) => name,
+            MenuSelection::Cancelled => return Ok(()),
         };
-        let package = interaction.prompt_package_name()?;
-        let dependency = interaction.prompt_dependency_name()?;
+
+        if let Some(additional_pkg) = root_config
+            .additional_packages()
+            .iter()
+            .find(|p| p.name() == &package)
+            && let Ok(mut guard) = interaction.default_manifest_path.lock()
+        {
+            *guard = Some(additional_pkg.manifest().file_path().to_path_buf());
+        }
+
+        let dep_items: Vec<PackageDependenciesSelectionMenuItem> = items
+            .into_iter()
+            .filter(|item| item.name != package)
+            .collect();
+
+        if dep_items.is_empty() {
+            println!("No other packages available to select as a dependency.");
+            return Ok(());
+        }
+
+        let dependency =
+            match interaction.select_package("Select the dependency to track", &dep_items)? {
+                MenuSelection::Selected(name) => name,
+                MenuSelection::Cancelled => return Ok(()),
+            };
+
         let manifest_file = interaction.prompt_manifest_file_path()?;
         let format = interaction.prompt_manifest_format()?;
         let version_field_path = interaction.prompt_manifest_version_field_path()?;
@@ -562,11 +610,38 @@ fn run_dependency_remove(args: RemoveDependencyArgs, start_path: &Path) -> Resul
     let events = if let (Some(package), Some(dependency)) = (args.package, args.dependency) {
         execute_dependency_remove(package, dependency, start_path)?
     } else if is_interactive() {
-        let interaction = TerminalAdditionalPackageInteractionProvider {
-            last_manifest_path: Mutex::new(None),
+        let provider = project_provider();
+        let project = provider.discover_project(start_path)?;
+        let (root_config, pkg_configs) = provider.load_configs(&project)?;
+        let items = build_package_menu_items(project.packages(), root_config.additional_packages());
+
+        let interaction = TerminalAdditionalPackageInteractionProvider::default();
+
+        let package = match interaction.select_package("Select package", &items)? {
+            MenuSelection::Selected(name) => name,
+            MenuSelection::Cancelled => return Ok(()),
         };
-        let package = interaction.prompt_package_name()?;
-        let dependency = interaction.prompt_dependency_name()?;
+
+        let crate_deps = pkg_configs
+            .get(&package)
+            .map(|c| c.additional_package_dependencies())
+            .unwrap_or_default();
+        let dep_items = build_registered_dependency_items(
+            &package,
+            root_config.additional_packages(),
+            crate_deps,
+        );
+
+        if dep_items.is_empty() {
+            println!("No version-tracking dependencies configured for '{package}'.");
+            return Ok(());
+        }
+
+        let dependency =
+            match interaction.select_package("Select dependency to remove", &dep_items)? {
+                MenuSelection::Selected(name) => name,
+                MenuSelection::Cancelled => return Ok(()),
+            };
 
         execute_dependency_remove(package, dependency, start_path)?
     } else {
@@ -579,15 +654,22 @@ fn run_dependency_remove(args: RemoveDependencyArgs, start_path: &Path) -> Resul
 
 fn run_dependency_list(args: ListDependencyArgs, start_path: &Path) -> Result<()> {
     let events = if let Some(package) = args.package {
-        let op = VersionTrackingDependencyListOperation::new(FileSystemProjectProvider::new());
+        let op = VersionTrackingDependencyListOperation::new(project_provider());
         op.execute(start_path, &package)?
     } else if is_interactive() {
-        let interaction = TerminalAdditionalPackageInteractionProvider {
-            last_manifest_path: Mutex::new(None),
-        };
-        let package = interaction.prompt_package_name()?;
+        let provider = project_provider();
+        let project = provider.discover_project(start_path)?;
+        let (root_config, _) = provider.load_configs(&project)?;
+        let items = build_package_menu_items(project.packages(), root_config.additional_packages());
 
-        let op = VersionTrackingDependencyListOperation::new(FileSystemProjectProvider::new());
+        let interaction = TerminalAdditionalPackageInteractionProvider::default();
+
+        let package = match interaction.select_package("Select package", &items)? {
+            MenuSelection::Selected(name) => name,
+            MenuSelection::Cancelled => return Ok(()),
+        };
+
+        let op = VersionTrackingDependencyListOperation::new(provider);
         op.execute(start_path, &package)?
     } else {
         return Err(CliError::IncompleteArgs);
@@ -612,10 +694,7 @@ fn execute_dependency_add(
         manifest_format,
         version_field_path,
     );
-    let op = VersionTrackingDependencyAddOperation::new(
-        FileSystemProjectProvider::new(),
-        FileSystemManifestWriter::new(),
-    );
+    let op = VersionTrackingDependencyAddOperation::new(project_provider(), manifest_writer());
     Ok(op.execute(start_path, input)?)
 }
 
@@ -625,10 +704,7 @@ fn execute_dependency_remove(
     start_path: &Path,
 ) -> Result<Vec<VersionTrackingDependencyEvent>> {
     let input = VersionTrackingDependencyRemoveInput::new(package, dependency);
-    let op = VersionTrackingDependencyRemoveOperation::new(
-        FileSystemProjectProvider::new(),
-        FileSystemManifestWriter::new(),
-    );
+    let op = VersionTrackingDependencyRemoveOperation::new(project_provider(), manifest_writer());
     Ok(op.execute(start_path, input)?)
 }
 
@@ -710,17 +786,217 @@ fn print_additional_package_events(events: &[AdditionalPackageEvent]) {
     }
 }
 
-fn dialoguer_to_operation_error(e: dialoguer::Error) -> OperationError {
-    match e {
-        dialoguer::Error::IO(io_err) => OperationError::Io(io_err),
+fn build_package_menu_items(
+    crate_packages: &[changeset_core::PackageInfo],
+    additional_packages: &[AdditionalPackageDeclaration],
+) -> Vec<PackageDependenciesSelectionMenuItem> {
+    let mut items: Vec<PackageDependenciesSelectionMenuItem> = crate_packages
+        .iter()
+        .map(|p| PackageDependenciesSelectionMenuItem {
+            name: p.name().clone(),
+            label: format!("{} (crate)", p.name()),
+        })
+        .collect();
+
+    for pkg in additional_packages {
+        items.push(PackageDependenciesSelectionMenuItem {
+            name: pkg.name().clone(),
+            label: format!("{} (additional: {})", pkg.name(), pkg.path().display()),
+        });
     }
+
+    items
+}
+
+fn build_registered_dependency_items(
+    package_name: &str,
+    additional_packages: &[AdditionalPackageDeclaration],
+    crate_deps: &[changeset_core::VersionTrackingDependency],
+) -> Vec<PackageDependenciesSelectionMenuItem> {
+    if let Some(additional) = additional_packages
+        .iter()
+        .find(|p| p.name() == package_name)
+    {
+        return additional
+            .dependencies()
+            .iter()
+            .map(|dep| PackageDependenciesSelectionMenuItem {
+                name: dep.dependency_name().clone(),
+                label: dep.dependency_name().clone(),
+            })
+            .collect();
+    }
+
+    crate_deps
+        .iter()
+        .map(|dep| PackageDependenciesSelectionMenuItem {
+            name: dep.dependency_name().clone(),
+            label: dep.dependency_name().clone(),
+        })
+        .collect()
+}
+
+fn project_provider() -> FileSystemProjectProvider {
+    FileSystemProjectProvider::new()
+}
+
+fn manifest_writer() -> FileSystemManifestWriter {
+    FileSystemManifestWriter::new()
 }
 
 #[cfg(test)]
 mod tests {
-    use std::path::Path;
+    use std::path::{Path, PathBuf};
 
-    use changeset_core::ManifestFormat;
+    use changeset_core::{
+        AdditionalPackageDeclaration, AdditionalPackageManifest, ManifestFormat, PackageInfo,
+        VersionTrackingDependency, VersionTrackingManifest,
+    };
+    use semver::Version;
+
+    use super::{build_package_menu_items, build_registered_dependency_items};
+
+    fn sample_crate_packages() -> Vec<PackageInfo> {
+        vec![
+            PackageInfo::new(
+                "crate-a".to_string(),
+                Version::new(1, 0, 0),
+                PathBuf::from("crates/crate-a"),
+            ),
+            PackageInfo::new(
+                "crate-b".to_string(),
+                Version::new(0, 2, 0),
+                PathBuf::from("crates/crate-b"),
+            ),
+        ]
+    }
+
+    fn sample_additional_package(
+        name: &str,
+        path: &str,
+        deps: Vec<VersionTrackingDependency>,
+    ) -> AdditionalPackageDeclaration {
+        AdditionalPackageDeclaration::new(
+            name.to_string(),
+            PathBuf::from(path),
+            vec![format!("{path}/**")],
+            AdditionalPackageManifest::new(
+                PathBuf::from(format!("{path}/Chart.yaml")),
+                ManifestFormat::Yaml,
+                "version".to_string(),
+            ),
+            deps,
+        )
+    }
+
+    fn sample_version_tracking_dependency(name: &str) -> VersionTrackingDependency {
+        VersionTrackingDependency::new(
+            name.to_string(),
+            VersionTrackingManifest::new(
+                PathBuf::from("manifest.yaml"),
+                ManifestFormat::Yaml,
+                "dependencies.version".to_string(),
+            ),
+        )
+    }
+
+    #[test]
+    fn build_menu_items_includes_crates() {
+        let crates = sample_crate_packages();
+
+        let items = build_package_menu_items(&crates, &[]);
+
+        assert_eq!(items.len(), 2);
+        assert_eq!(items[0].name, "crate-a");
+        assert!(items[0].label.contains("(crate)"));
+        assert_eq!(items[1].name, "crate-b");
+        assert!(items[1].label.contains("(crate)"));
+    }
+
+    #[test]
+    fn build_menu_items_includes_additional_packages() {
+        let crates = sample_crate_packages();
+        let additional = vec![sample_additional_package(
+            "my-chart",
+            "charts/my-chart",
+            vec![],
+        )];
+
+        let items = build_package_menu_items(&crates, &additional);
+
+        assert_eq!(items.len(), 3);
+        assert_eq!(items[2].name, "my-chart");
+        assert!(items[2].label.contains("(additional:"));
+        assert!(items[2].label.contains("charts/my-chart"));
+    }
+
+    #[test]
+    fn build_menu_items_empty_when_no_packages() {
+        let items = build_package_menu_items(&[], &[]);
+
+        assert!(items.is_empty());
+    }
+
+    #[test]
+    fn registered_deps_from_additional_package() {
+        let dep = sample_version_tracking_dependency("crate-a");
+        let additional = vec![sample_additional_package(
+            "my-chart",
+            "charts/my-chart",
+            vec![dep],
+        )];
+
+        let items = build_registered_dependency_items("my-chart", &additional, &[]);
+
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].name, "crate-a");
+    }
+
+    #[test]
+    fn registered_deps_from_crate_deps() {
+        let dep = sample_version_tracking_dependency("my-chart");
+
+        let items = build_registered_dependency_items("crate-a", &[], &[dep]);
+
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].name, "my-chart");
+    }
+
+    #[test]
+    fn registered_deps_returns_empty_when_no_sources() {
+        let items = build_registered_dependency_items("nonexistent", &[], &[]);
+
+        assert!(items.is_empty());
+    }
+
+    #[test]
+    fn registered_deps_returns_empty_when_additional_package_has_no_deps() {
+        let additional = vec![sample_additional_package(
+            "my-chart",
+            "charts/my-chart",
+            vec![],
+        )];
+
+        let items = build_registered_dependency_items("my-chart", &additional, &[]);
+
+        assert!(items.is_empty());
+    }
+
+    #[test]
+    fn registered_deps_prefers_additional_package_over_crate_deps() {
+        let dep_from_additional = sample_version_tracking_dependency("from-additional");
+        let dep_from_crate = sample_version_tracking_dependency("from-crate");
+        let additional = vec![sample_additional_package(
+            "dual-pkg",
+            "charts/dual-pkg",
+            vec![dep_from_additional],
+        )];
+
+        let items = build_registered_dependency_items("dual-pkg", &additional, &[dep_from_crate]);
+
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].name, "from-additional");
+    }
 
     #[test]
     fn manifest_format_from_path_detects_toml() {

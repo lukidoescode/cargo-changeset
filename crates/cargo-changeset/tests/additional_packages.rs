@@ -1060,3 +1060,548 @@ mod help_and_ux_tests {
             .stdout(contains("Removed version-tracking dependency"));
     }
 }
+
+#[cfg(not(windows))]
+mod interactive_dependencies_tests {
+    use common::terminal_session::TerminalSession;
+    use indoc::indoc;
+
+    use super::*;
+
+    // --- dependencies add ---
+
+    #[test]
+    fn interactive_dep_add_shows_owner_package_menu() {
+        let workspace = create_workspace_with_helm_chart();
+        add_helm_chart_config(&workspace);
+
+        let mut session =
+            TerminalSession::spawn(&workspace, &["additional-packages", "dependencies", "add"]);
+        session.wait_for("Select the owner package");
+        session.assert_screen(
+            "owner menu rendered",
+            indoc! {"
+                Select the owner package:
+                  crate-a (crate)
+                  my-helm-chart (additional: charts/my-chart)
+            "},
+        );
+        session.cancel();
+        session.wait_for_exit();
+    }
+
+    #[test]
+    fn interactive_dep_add_cancel_on_owner_exits_cleanly() {
+        let workspace = create_workspace_with_helm_chart();
+        add_helm_chart_config(&workspace);
+        let cargo_toml_before =
+            fs::read_to_string(workspace.path().join("Cargo.toml")).expect("read Cargo.toml");
+
+        let mut session =
+            TerminalSession::spawn(&workspace, &["additional-packages", "dependencies", "add"]);
+        session.wait_for("Select the owner package");
+        session.assert_screen(
+            "owner menu before cancel",
+            indoc! {"
+                Select the owner package:
+                  crate-a (crate)
+                  my-helm-chart (additional: charts/my-chart)
+            "},
+        );
+        session.cancel();
+        session.wait_for_exit();
+        session.assert_screen("clean exit after cancel", "");
+
+        let cargo_toml_after =
+            fs::read_to_string(workspace.path().join("Cargo.toml")).expect("read Cargo.toml");
+        assert_eq!(
+            cargo_toml_before, cargo_toml_after,
+            "Cargo.toml must not be modified after cancellation"
+        );
+    }
+
+    #[test]
+    fn interactive_dep_add_cancel_on_dependency_exits_cleanly() {
+        let workspace = create_workspace_with_helm_chart();
+        add_helm_chart_config(&workspace);
+        let cargo_toml_before =
+            fs::read_to_string(workspace.path().join("Cargo.toml")).expect("read Cargo.toml");
+
+        let mut session =
+            TerminalSession::spawn(&workspace, &["additional-packages", "dependencies", "add"]);
+        session.wait_for("Select the owner package");
+        session.assert_screen(
+            "owner menu before selecting",
+            indoc! {"
+                Select the owner package:
+                  crate-a (crate)
+                  my-helm-chart (additional: charts/my-chart)
+            "},
+        );
+        session.select_item(0);
+        session.wait_for("Select the dependency to track");
+        session.assert_screen(
+            "dep menu after owner selected",
+            indoc! {"
+                Select the owner package: crate-a (crate)
+                Select the dependency to track:
+                  my-helm-chart (additional: charts/my-chart)
+            "},
+        );
+        session.cancel();
+        session.wait_for_exit();
+
+        let cargo_toml_after =
+            fs::read_to_string(workspace.path().join("Cargo.toml")).expect("read Cargo.toml");
+        assert_eq!(
+            cargo_toml_before, cargo_toml_after,
+            "Cargo.toml must not be modified after cancellation on dependency menu"
+        );
+    }
+
+    #[test]
+    fn interactive_dep_add_full_flow() {
+        let workspace = create_workspace_with_helm_chart();
+        add_helm_chart_config(&workspace);
+
+        let mut session =
+            TerminalSession::spawn(&workspace, &["additional-packages", "dependencies", "add"]);
+        session.wait_for("Select the owner package");
+        session.assert_screen(
+            "owner menu rendered",
+            indoc! {"
+                Select the owner package:
+                  crate-a (crate)
+                  my-helm-chart (additional: charts/my-chart)
+            "},
+        );
+        session.select_item(0);
+        session.wait_for("Select the dependency to track");
+        session.assert_screen(
+            "dependency menu after selecting crate owner",
+            indoc! {"
+                Select the owner package: crate-a (crate)
+                Select the dependency to track:
+                  my-helm-chart (additional: charts/my-chart)
+            "},
+        );
+        session.select_item(0);
+        session.wait_for("version manifest file");
+        session.assert_screen(
+            "manifest path prompt has no default for crate owner",
+            indoc! {"
+                Select the owner package: crate-a (crate)
+                Select the dependency to track: my-helm-chart (additional: charts/my-chart)
+                Path to version manifest file:
+            "},
+        );
+        session.type_line("charts/my-chart/Chart.yaml");
+        session.wait_for("Manifest format");
+        session.assert_screen(
+            "manifest format menu with yaml auto-detected",
+            indoc! {"
+                Select the owner package: crate-a (crate)
+                Select the dependency to track: my-helm-chart (additional: charts/my-chart)
+                Path to version manifest file: charts/my-chart/Chart.yaml
+                Manifest format:
+                  toml
+                > yaml
+                  json
+            "},
+        );
+        session.confirm();
+        session.wait_for("version field");
+        session.assert_screen(
+            "version field prompt after format confirmed",
+            indoc! {"
+                Select the owner package: crate-a (crate)
+                Select the dependency to track: my-helm-chart (additional: charts/my-chart)
+                Path to version manifest file: charts/my-chart/Chart.yaml
+                Manifest format: yaml
+                Path to version field in manifest (e.g. 'version' or 'info.version'):
+            "},
+        );
+        session.type_line("appVersion");
+        session.wait_for("Added version-tracking dependency");
+        session.wait_for_exit();
+        session.assert_screen(
+            "full flow complete",
+            indoc! {"
+                Select the owner package: crate-a (crate)
+                Select the dependency to track: my-helm-chart (additional: charts/my-chart)
+                Path to version manifest file: charts/my-chart/Chart.yaml
+                Manifest format: yaml
+                Path to version field in manifest (e.g. 'version' or 'info.version'): appVersion
+                Added version-tracking dependency 'my-helm-chart' to package 'crate-a'
+            "},
+        );
+
+        let cargo_toml = fs::read_to_string(workspace.path().join("crates/crate-a/Cargo.toml"))
+            .expect("read crate-a Cargo.toml");
+        assert!(
+            cargo_toml.contains(r#"dependency-name = "my-helm-chart""#),
+            "expected dependency-name stored, got:\n{cargo_toml}"
+        );
+        assert!(
+            cargo_toml.contains(r#"file-path = "charts/my-chart/Chart.yaml""#),
+            "expected manifest file-path stored, got:\n{cargo_toml}"
+        );
+        assert!(
+            cargo_toml.contains(r#"format = "yaml""#),
+            "expected auto-detected yaml format stored, got:\n{cargo_toml}"
+        );
+        assert!(
+            cargo_toml.contains(r#"version-field-path = "appVersion""#),
+            "expected version-field-path stored, got:\n{cargo_toml}"
+        );
+    }
+
+    #[test]
+    fn interactive_dep_add_self_filter() {
+        let workspace = create_workspace_with_helm_chart();
+        add_helm_chart_config(&workspace);
+
+        let mut session =
+            TerminalSession::spawn(&workspace, &["additional-packages", "dependencies", "add"]);
+        session.wait_for("Select the owner package");
+        session.assert_screen(
+            "owner menu before selecting",
+            indoc! {"
+                Select the owner package:
+                  crate-a (crate)
+                  my-helm-chart (additional: charts/my-chart)
+            "},
+        );
+        session.select_item(0);
+        session.wait_for("Select the dependency to track");
+        session.assert_screen(
+            "dep menu filters out owner",
+            indoc! {"
+                Select the owner package: crate-a (crate)
+                Select the dependency to track:
+                  my-helm-chart (additional: charts/my-chart)
+            "},
+        );
+        session.cancel();
+        session.wait_for_exit();
+    }
+
+    #[test]
+    fn interactive_dep_add_defaults_manifest_for_additional_package_owner() {
+        let workspace = create_workspace_with_helm_chart();
+        add_helm_chart_config(&workspace);
+
+        let mut session =
+            TerminalSession::spawn(&workspace, &["additional-packages", "dependencies", "add"]);
+        session.wait_for("Select the owner package");
+        session.assert_screen(
+            "owner menu rendered",
+            indoc! {"
+                Select the owner package:
+                  crate-a (crate)
+                  my-helm-chart (additional: charts/my-chart)
+            "},
+        );
+        session.select_item(1);
+        session.wait_for("Select the dependency to track");
+        session.assert_screen(
+            "dependency menu after selecting additional package owner",
+            indoc! {"
+                Select the owner package: my-helm-chart (additional: charts/my-chart)
+                Select the dependency to track:
+                  crate-a (crate)
+            "},
+        );
+        session.select_item(0);
+        session.wait_for("version manifest file");
+        session.assert_screen(
+            "manifest path prompt shows default from additional package",
+            indoc! {"
+                Select the owner package: my-helm-chart (additional: charts/my-chart)
+                Select the dependency to track: crate-a (crate)
+                Path to version manifest file [charts/my-chart/Chart.yaml]:
+            "},
+        );
+        session.confirm();
+        session.wait_for("Manifest format");
+        session.assert_screen(
+            "manifest format menu with yaml auto-detected from default",
+            indoc! {"
+                Select the owner package: my-helm-chart (additional: charts/my-chart)
+                Select the dependency to track: crate-a (crate)
+                Path to version manifest file: charts/my-chart/Chart.yaml
+                Manifest format:
+                  toml
+                > yaml
+                  json
+            "},
+        );
+        session.confirm();
+        session.wait_for("version field");
+        session.assert_screen(
+            "version field prompt after format confirmed",
+            indoc! {"
+                Select the owner package: my-helm-chart (additional: charts/my-chart)
+                Select the dependency to track: crate-a (crate)
+                Path to version manifest file: charts/my-chart/Chart.yaml
+                Manifest format: yaml
+                Path to version field in manifest (e.g. 'version' or 'info.version'):
+            "},
+        );
+        session.type_line("appVersion");
+        session.wait_for("Added version-tracking dependency");
+        session.wait_for_exit();
+        session.assert_screen(
+            "full flow with default manifest complete",
+            indoc! {"
+                Select the owner package: my-helm-chart (additional: charts/my-chart)
+                Select the dependency to track: crate-a (crate)
+                Path to version manifest file: charts/my-chart/Chart.yaml
+                Manifest format: yaml
+                Path to version field in manifest (e.g. 'version' or 'info.version'): appVersion
+                Added version-tracking dependency 'crate-a' to package 'my-helm-chart'
+            "},
+        );
+    }
+
+    // --- dependencies remove ---
+
+    #[test]
+    fn interactive_dep_remove_shows_package_menu() {
+        let workspace = create_workspace_with_version_tracking_additional_to_cargo();
+
+        let mut session = TerminalSession::spawn(
+            &workspace,
+            &["additional-packages", "dependencies", "remove"],
+        );
+        session.wait_for("Select package");
+        session.assert_screen(
+            "remove package menu",
+            indoc! {"
+                Select package:
+                  my-rust-crate (crate)
+                  my-helm-chart (additional: charts)
+            "},
+        );
+        session.cancel();
+        session.wait_for_exit();
+    }
+
+    #[test]
+    fn interactive_dep_remove_cancel_exits_cleanly() {
+        let workspace = create_workspace_with_version_tracking_additional_to_cargo();
+        let cargo_toml_before =
+            fs::read_to_string(workspace.path().join("Cargo.toml")).expect("read Cargo.toml");
+
+        let mut session = TerminalSession::spawn(
+            &workspace,
+            &["additional-packages", "dependencies", "remove"],
+        );
+        session.wait_for("Select package");
+        session.assert_screen(
+            "remove package menu before cancel",
+            indoc! {"
+                Select package:
+                  my-rust-crate (crate)
+                  my-helm-chart (additional: charts)
+            "},
+        );
+        session.cancel();
+        session.wait_for_exit();
+        session.assert_screen("clean exit after remove cancel", "");
+
+        let cargo_toml_after =
+            fs::read_to_string(workspace.path().join("Cargo.toml")).expect("read Cargo.toml");
+        assert_eq!(
+            cargo_toml_before, cargo_toml_after,
+            "Cargo.toml must not be modified after remove cancellation"
+        );
+    }
+
+    #[test]
+    fn interactive_dep_remove_no_deps_shows_message() {
+        let workspace = create_workspace_with_helm_chart();
+        add_helm_chart_config(&workspace);
+        let cargo_toml_before =
+            fs::read_to_string(workspace.path().join("Cargo.toml")).expect("read Cargo.toml");
+
+        let mut session = TerminalSession::spawn(
+            &workspace,
+            &["additional-packages", "dependencies", "remove"],
+        );
+        session.wait_for("Select package");
+        session.assert_screen(
+            "remove package menu",
+            indoc! {"
+                Select package:
+                  crate-a (crate)
+                  my-helm-chart (additional: charts/my-chart)
+            "},
+        );
+        session.select_item(0);
+        session.wait_for("No version-tracking dependencies configured");
+        session.wait_for_exit();
+        session.assert_screen(
+            "no deps message",
+            indoc! {"
+                Select package: crate-a (crate)
+                No version-tracking dependencies configured for 'crate-a'.
+            "},
+        );
+
+        let cargo_toml_after =
+            fs::read_to_string(workspace.path().join("Cargo.toml")).expect("read Cargo.toml");
+        assert_eq!(
+            cargo_toml_before, cargo_toml_after,
+            "Cargo.toml must not be modified when no deps exist"
+        );
+    }
+
+    #[test]
+    fn interactive_dep_remove_shows_registered_deps() {
+        let workspace = create_workspace_with_version_tracking_additional_to_cargo();
+
+        let mut session = TerminalSession::spawn(
+            &workspace,
+            &["additional-packages", "dependencies", "remove"],
+        );
+        session.wait_for("Select package");
+        session.assert_screen(
+            "remove package menu",
+            indoc! {"
+                Select package:
+                  my-rust-crate (crate)
+                  my-helm-chart (additional: charts)
+            "},
+        );
+        session.select_item(1);
+        session.wait_for("Select dependency to remove");
+        session.assert_screen(
+            "dep removal menu",
+            indoc! {"
+                Select package: my-helm-chart (additional: charts)
+                Select dependency to remove:
+                  my-rust-crate
+            "},
+        );
+        session.cancel();
+        session.wait_for_exit();
+    }
+
+    #[test]
+    fn interactive_dep_remove_full_flow() {
+        let workspace = create_workspace_with_version_tracking_additional_to_cargo();
+
+        let mut session = TerminalSession::spawn(
+            &workspace,
+            &["additional-packages", "dependencies", "remove"],
+        );
+        session.wait_for("Select package");
+        session.assert_screen(
+            "remove package menu",
+            indoc! {"
+                Select package:
+                  my-rust-crate (crate)
+                  my-helm-chart (additional: charts)
+            "},
+        );
+        session.select_item(1);
+        session.wait_for("Select dependency to remove");
+        session.assert_screen(
+            "dependency removal menu after selecting package",
+            indoc! {"
+                Select package: my-helm-chart (additional: charts)
+                Select dependency to remove:
+                  my-rust-crate
+            "},
+        );
+        session.select_item(0);
+        session.wait_for("Removed version-tracking dependency");
+        session.wait_for_exit();
+        session.assert_screen(
+            "removal complete",
+            indoc! {"
+                Select package: my-helm-chart (additional: charts)
+                Select dependency to remove: my-rust-crate
+                Removed version-tracking dependency 'my-rust-crate' from package 'my-helm-chart'
+            "},
+        );
+
+        let cargo_toml =
+            fs::read_to_string(workspace.path().join("Cargo.toml")).expect("read Cargo.toml");
+        assert!(!cargo_toml.contains("dependency-name = \"my-rust-crate\""));
+    }
+
+    // --- dependencies list ---
+
+    #[test]
+    fn interactive_dep_list_shows_package_menu() {
+        let workspace = create_workspace_with_helm_chart();
+        add_helm_chart_config(&workspace);
+
+        let mut session =
+            TerminalSession::spawn(&workspace, &["additional-packages", "dependencies", "list"]);
+        session.wait_for("Select package");
+        session.assert_screen(
+            "list package menu",
+            indoc! {"
+                Select package:
+                  crate-a (crate)
+                  my-helm-chart (additional: charts/my-chart)
+            "},
+        );
+        session.cancel();
+        session.wait_for_exit();
+    }
+
+    #[test]
+    fn interactive_dep_list_cancel_exits_cleanly() {
+        let workspace = create_workspace_with_helm_chart();
+        add_helm_chart_config(&workspace);
+
+        let mut session =
+            TerminalSession::spawn(&workspace, &["additional-packages", "dependencies", "list"]);
+        session.wait_for("Select package");
+        session.assert_screen(
+            "list package menu before cancel",
+            indoc! {"
+                Select package:
+                  crate-a (crate)
+                  my-helm-chart (additional: charts/my-chart)
+            "},
+        );
+        session.cancel();
+        session.wait_for_exit();
+        session.assert_screen("clean exit after list cancel", "");
+    }
+
+    #[test]
+    fn interactive_dep_list_full_flow() {
+        let workspace = create_workspace_with_version_tracking_additional_to_cargo();
+
+        let mut session =
+            TerminalSession::spawn(&workspace, &["additional-packages", "dependencies", "list"]);
+        session.wait_for("Select package");
+        session.assert_screen(
+            "list package menu",
+            indoc! {"
+                Select package:
+                  my-rust-crate (crate)
+                  my-helm-chart (additional: charts)
+            "},
+        );
+        session.select_item(1);
+        session.wait_for("my-rust-crate");
+        session.wait_for_exit();
+        session.assert_screen(
+            "list output",
+            indoc! {"
+                Select package: my-helm-chart (additional: charts)
+
+                Version-tracking dependencies:
+                  my-rust-crate -> charts/Chart.yaml [yaml]
+                    version field: appVersion
+            "},
+        );
+    }
+}
