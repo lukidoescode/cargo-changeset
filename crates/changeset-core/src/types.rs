@@ -7,6 +7,52 @@ use gset::Getset;
 use semver::Version;
 use serde::{Deserialize, Serialize};
 
+pub const CARGO_MANIFEST_FILENAME: &str = "Cargo.toml";
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, ValueEnum)]
+#[serde(rename_all = "lowercase")]
+pub enum ManifestFormat {
+    Toml,
+    Yaml,
+    Json,
+}
+
+impl ManifestFormat {
+    #[must_use]
+    pub fn from_path(path: &std::path::Path) -> Option<Self> {
+        match path.extension()?.to_str()? {
+            "toml" => Some(Self::Toml),
+            "yaml" | "yml" => Some(Self::Yaml),
+            "json" => Some(Self::Json),
+            _ => None,
+        }
+    }
+}
+
+impl fmt::Display for ManifestFormat {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let s = match self {
+            Self::Toml => "toml",
+            Self::Yaml => "yaml",
+            Self::Json => "json",
+        };
+        write!(f, "{s}")
+    }
+}
+
+impl FromStr for ManifestFormat {
+    type Err = crate::error::ManifestFormatParseError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.to_lowercase().as_str() {
+            "toml" => Ok(Self::Toml),
+            "yaml" => Ok(Self::Yaml),
+            "json" => Ok(Self::Json),
+            _ => Err(crate::error::ManifestFormatParseError(s.to_string())),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, ValueEnum)]
 #[serde(rename_all = "lowercase")]
 pub enum BumpType {
@@ -93,6 +139,169 @@ impl fmt::Display for ChangeCategory {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum PrereleaseSpec {
+    Alpha,
+    Beta,
+    Rc,
+    Custom(String),
+}
+
+impl PrereleaseSpec {
+    #[must_use]
+    pub fn identifier(&self) -> &str {
+        match self {
+            Self::Alpha => "alpha",
+            Self::Beta => "beta",
+            Self::Rc => "rc",
+            Self::Custom(s) => s,
+        }
+    }
+}
+
+impl fmt::Display for PrereleaseSpec {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.identifier())
+    }
+}
+
+impl FromStr for PrereleaseSpec {
+    type Err = crate::error::PrereleaseSpecParseError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        if s.is_empty() {
+            return Err(Self::Err::Empty);
+        }
+
+        if let Some(invalid_char) = s.chars().find(|c| !c.is_ascii_alphanumeric() && *c != '-') {
+            return Err(Self::Err::InvalidCharacter(s.to_string(), invalid_char));
+        }
+
+        Ok(match s.to_lowercase().as_str() {
+            "alpha" => Self::Alpha,
+            "beta" => Self::Beta,
+            "rc" => Self::Rc,
+            _ => Self::Custom(s.to_string()),
+        })
+    }
+}
+
+impl ValueEnum for PrereleaseSpec {
+    fn value_variants<'a>() -> &'a [Self] {
+        &[Self::Alpha, Self::Beta, Self::Rc]
+    }
+
+    fn to_possible_value(&self) -> Option<clap::builder::PossibleValue> {
+        match self {
+            Self::Alpha => Some(clap::builder::PossibleValue::new("alpha")),
+            Self::Beta => Some(clap::builder::PossibleValue::new("beta")),
+            Self::Rc => Some(clap::builder::PossibleValue::new("rc")),
+            Self::Custom(_) => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Getset)]
+#[serde(rename_all = "kebab-case")]
+pub struct AdditionalPackageManifest {
+    #[getset(get, vis = "pub")]
+    file_path: PathBuf,
+    #[getset(get_copy, vis = "pub")]
+    format: ManifestFormat,
+    #[getset(get, vis = "pub")]
+    version_field_path: String,
+}
+
+impl AdditionalPackageManifest {
+    #[must_use]
+    pub fn new(file_path: PathBuf, format: ManifestFormat, version_field_path: String) -> Self {
+        Self {
+            file_path,
+            format,
+            version_field_path,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Getset)]
+#[serde(rename_all = "kebab-case")]
+pub struct VersionTrackingManifest {
+    #[getset(get, vis = "pub")]
+    file_path: PathBuf,
+    #[getset(get_copy, vis = "pub")]
+    format: ManifestFormat,
+    #[getset(get, vis = "pub")]
+    version_field_path: String,
+}
+
+impl VersionTrackingManifest {
+    #[must_use]
+    pub fn new(file_path: PathBuf, format: ManifestFormat, version_field_path: String) -> Self {
+        Self {
+            file_path,
+            format,
+            version_field_path,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Getset)]
+#[serde(rename_all = "kebab-case")]
+pub struct VersionTrackingDependency {
+    #[getset(get, vis = "pub")]
+    dependency_name: String,
+    #[getset(get, vis = "pub")]
+    version_tracking_manifest: VersionTrackingManifest,
+}
+
+impl VersionTrackingDependency {
+    #[must_use]
+    pub fn new(
+        dependency_name: String,
+        version_tracking_manifest: VersionTrackingManifest,
+    ) -> Self {
+        Self {
+            dependency_name,
+            version_tracking_manifest,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Getset)]
+#[serde(rename_all = "kebab-case")]
+pub struct AdditionalPackageDeclaration {
+    #[getset(get, vis = "pub")]
+    name: String,
+    #[getset(get, vis = "pub")]
+    path: PathBuf,
+    #[getset(get, vis = "pub")]
+    influence: Vec<String>,
+    #[getset(get, vis = "pub")]
+    manifest: AdditionalPackageManifest,
+    #[serde(default)]
+    #[getset(get, vis = "pub")]
+    dependencies: Vec<VersionTrackingDependency>,
+}
+
+impl AdditionalPackageDeclaration {
+    #[must_use]
+    pub fn new(
+        name: String,
+        path: PathBuf,
+        influence: Vec<String>,
+        manifest: AdditionalPackageManifest,
+        dependencies: Vec<VersionTrackingDependency>,
+    ) -> Self {
+        Self {
+            name,
+            path,
+            influence,
+            manifest,
+            dependencies,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Getset)]
 pub struct PackageRelease {
     #[getset(get, vis = "pub")]
@@ -175,68 +384,6 @@ impl PackageInfo {
             name,
             version,
             path,
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub enum PrereleaseSpec {
-    Alpha,
-    Beta,
-    Rc,
-    Custom(String),
-}
-
-impl PrereleaseSpec {
-    #[must_use]
-    pub fn identifier(&self) -> &str {
-        match self {
-            Self::Alpha => "alpha",
-            Self::Beta => "beta",
-            Self::Rc => "rc",
-            Self::Custom(s) => s,
-        }
-    }
-}
-
-impl fmt::Display for PrereleaseSpec {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.identifier())
-    }
-}
-
-impl FromStr for PrereleaseSpec {
-    type Err = crate::error::PrereleaseSpecParseError;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        if s.is_empty() {
-            return Err(Self::Err::Empty);
-        }
-
-        if let Some(invalid_char) = s.chars().find(|c| !c.is_ascii_alphanumeric() && *c != '-') {
-            return Err(Self::Err::InvalidCharacter(s.to_string(), invalid_char));
-        }
-
-        Ok(match s.to_lowercase().as_str() {
-            "alpha" => Self::Alpha,
-            "beta" => Self::Beta,
-            "rc" => Self::Rc,
-            _ => Self::Custom(s.to_string()),
-        })
-    }
-}
-
-impl ValueEnum for PrereleaseSpec {
-    fn value_variants<'a>() -> &'a [Self] {
-        &[Self::Alpha, Self::Beta, Self::Rc]
-    }
-
-    fn to_possible_value(&self) -> Option<clap::builder::PossibleValue> {
-        match self {
-            Self::Alpha => Some(clap::builder::PossibleValue::new("alpha")),
-            Self::Beta => Some(clap::builder::PossibleValue::new("beta")),
-            Self::Rc => Some(clap::builder::PossibleValue::new("rc")),
-            Self::Custom(_) => None,
         }
     }
 }
@@ -445,5 +592,293 @@ mod tests {
         assert!("123".parse::<PrereleaseSpec>().is_ok());
         assert!("abc123".parse::<PrereleaseSpec>().is_ok());
         assert!("ABC-123-xyz".parse::<PrereleaseSpec>().is_ok());
+    }
+
+    #[test]
+    fn manifest_format_display() {
+        assert_eq!(format!("{}", ManifestFormat::Toml), "toml");
+        assert_eq!(format!("{}", ManifestFormat::Yaml), "yaml");
+        assert_eq!(format!("{}", ManifestFormat::Json), "json");
+    }
+
+    #[test]
+    fn manifest_format_from_str_case_insensitive() {
+        assert_eq!(
+            "toml".parse::<ManifestFormat>().unwrap(),
+            ManifestFormat::Toml
+        );
+        assert_eq!(
+            "TOML".parse::<ManifestFormat>().unwrap(),
+            ManifestFormat::Toml
+        );
+        assert_eq!(
+            "Toml".parse::<ManifestFormat>().unwrap(),
+            ManifestFormat::Toml
+        );
+        assert_eq!(
+            "yaml".parse::<ManifestFormat>().unwrap(),
+            ManifestFormat::Yaml
+        );
+        assert_eq!(
+            "YAML".parse::<ManifestFormat>().unwrap(),
+            ManifestFormat::Yaml
+        );
+        assert_eq!(
+            "json".parse::<ManifestFormat>().unwrap(),
+            ManifestFormat::Json
+        );
+        assert_eq!(
+            "JSON".parse::<ManifestFormat>().unwrap(),
+            ManifestFormat::Json
+        );
+    }
+
+    #[test]
+    fn manifest_format_from_str_rejects_unknown() {
+        let err = "xml".parse::<ManifestFormat>().unwrap_err();
+        assert_eq!(
+            err,
+            crate::error::ManifestFormatParseError("xml".to_string())
+        );
+    }
+
+    #[test]
+    fn manifest_format_serde_round_trip() {
+        for (variant, expected) in [
+            (ManifestFormat::Toml, r#""toml""#),
+            (ManifestFormat::Yaml, r#""yaml""#),
+            (ManifestFormat::Json, r#""json""#),
+        ] {
+            let serialized = serde_json::to_string(&variant).unwrap();
+            assert_eq!(serialized, expected);
+            let deserialized: ManifestFormat = serde_json::from_str(&serialized).unwrap();
+            assert_eq!(deserialized, variant);
+        }
+    }
+
+    #[test]
+    fn additional_package_manifest_serde_round_trip() {
+        let manifest = AdditionalPackageManifest {
+            file_path: PathBuf::from("charts/my-chart/Chart.yaml"),
+            format: ManifestFormat::Yaml,
+            version_field_path: "version".to_string(),
+        };
+        let serialized = serde_json::to_string(&manifest).unwrap();
+        assert!(serialized.contains(r#""file-path""#));
+        assert!(serialized.contains(r#""version-field-path""#));
+        let deserialized: AdditionalPackageManifest = serde_json::from_str(&serialized).unwrap();
+        assert_eq!(deserialized, manifest);
+    }
+
+    #[test]
+    fn additional_package_declaration_serde_round_trip() {
+        let decl = AdditionalPackageDeclaration {
+            name: "my-helm-chart".to_string(),
+            path: PathBuf::from("charts/my-chart"),
+            influence: vec!["charts/my-chart/**".to_string()],
+            manifest: AdditionalPackageManifest {
+                file_path: PathBuf::from("charts/my-chart/Chart.yaml"),
+                format: ManifestFormat::Yaml,
+                version_field_path: "version".to_string(),
+            },
+            dependencies: vec![],
+        };
+        let serialized = serde_json::to_string(&decl).unwrap();
+        let deserialized: AdditionalPackageDeclaration = serde_json::from_str(&serialized).unwrap();
+        assert_eq!(deserialized, decl);
+    }
+
+    #[test]
+    fn manifest_format_parse_error_display() {
+        let err = crate::error::ManifestFormatParseError("bad".to_string());
+        assert_eq!(
+            err.to_string(),
+            "unknown manifest format 'bad', expected one of: toml, yaml, json"
+        );
+    }
+
+    #[test]
+    fn additional_package_declaration_missing_required_field() {
+        let json = r#"{
+            "path": "charts/my-chart",
+            "influence": ["charts/my-chart/**"],
+            "manifest": {
+                "file-path": "charts/my-chart/Chart.yaml",
+                "format": "yaml",
+                "version-field-path": "version"
+            }
+        }"#;
+        let result = serde_json::from_str::<AdditionalPackageDeclaration>(json);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn version_tracking_manifest_serde_round_trip() {
+        let manifest = VersionTrackingManifest::new(
+            PathBuf::from("charts/app/Chart.yaml"),
+            ManifestFormat::Yaml,
+            "appVersion".to_string(),
+        );
+        let serialized = toml::to_string(&manifest).expect("serialize to TOML");
+        let deserialized: VersionTrackingManifest =
+            toml::from_str(&serialized).expect("deserialize from TOML");
+        assert_eq!(deserialized, manifest);
+    }
+
+    #[test]
+    fn version_tracking_dependency_serde_round_trip() {
+        let dep = VersionTrackingDependency::new(
+            "my-lib".to_string(),
+            VersionTrackingManifest::new(
+                PathBuf::from("charts/app/Chart.yaml"),
+                ManifestFormat::Yaml,
+                "appVersion".to_string(),
+            ),
+        );
+        let serialized = toml::to_string(&dep).expect("serialize to TOML");
+        let deserialized: VersionTrackingDependency =
+            toml::from_str(&serialized).expect("deserialize from TOML");
+        assert_eq!(deserialized, dep);
+    }
+
+    #[test]
+    fn additional_package_declaration_with_dependencies_serde_round_trip() {
+        let decl = AdditionalPackageDeclaration::new(
+            "my-helm-chart".to_string(),
+            PathBuf::from("charts/my-chart"),
+            vec!["charts/my-chart/**".to_string()],
+            AdditionalPackageManifest::new(
+                PathBuf::from("charts/my-chart/Chart.yaml"),
+                ManifestFormat::Yaml,
+                "version".to_string(),
+            ),
+            vec![VersionTrackingDependency::new(
+                "my-lib".to_string(),
+                VersionTrackingManifest::new(
+                    PathBuf::from("charts/my-chart/Chart.yaml"),
+                    ManifestFormat::Yaml,
+                    "appVersion".to_string(),
+                ),
+            )],
+        );
+        let serialized = toml::to_string(&decl).expect("serialize to TOML");
+        let deserialized: AdditionalPackageDeclaration =
+            toml::from_str(&serialized).expect("deserialize from TOML");
+        assert_eq!(deserialized, decl);
+        assert_eq!(deserialized.dependencies().len(), 1);
+        assert_eq!(deserialized.dependencies()[0].dependency_name(), "my-lib");
+    }
+
+    #[test]
+    fn version_tracking_manifest_serde_key_names() {
+        let manifest = VersionTrackingManifest::new(
+            PathBuf::from("path/to/manifest.json"),
+            ManifestFormat::Json,
+            "version".to_string(),
+        );
+        let serialized = serde_json::to_string(&manifest).expect("serialize to JSON");
+        assert!(
+            serialized.contains(r#""file-path""#),
+            "expected kebab-case key 'file-path' in JSON output: {serialized}"
+        );
+        assert!(
+            serialized.contains(r#""version-field-path""#),
+            "expected kebab-case key 'version-field-path' in JSON output: {serialized}"
+        );
+    }
+
+    #[test]
+    fn version_tracking_dependency_serde_key_names() {
+        let dep = VersionTrackingDependency::new(
+            "some-dep".to_string(),
+            VersionTrackingManifest::new(
+                PathBuf::from("tracking.json"),
+                ManifestFormat::Json,
+                "ver".to_string(),
+            ),
+        );
+        let serialized = serde_json::to_string(&dep).expect("serialize to JSON");
+        assert!(
+            serialized.contains(r#""dependency-name""#),
+            "expected kebab-case key 'dependency-name' in JSON output: {serialized}"
+        );
+        assert!(
+            serialized.contains(r#""version-tracking-manifest""#),
+            "expected kebab-case key 'version-tracking-manifest' in JSON output: {serialized}"
+        );
+    }
+
+    #[test]
+    fn additional_package_declaration_with_multiple_dependencies() {
+        let decl = AdditionalPackageDeclaration::new(
+            "multi-dep-pkg".to_string(),
+            PathBuf::from("packages/multi"),
+            vec!["packages/multi/**".to_string()],
+            AdditionalPackageManifest::new(
+                PathBuf::from("packages/multi/manifest.yaml"),
+                ManifestFormat::Yaml,
+                "version".to_string(),
+            ),
+            vec![
+                VersionTrackingDependency::new(
+                    "dep-alpha".to_string(),
+                    VersionTrackingManifest::new(
+                        PathBuf::from("tracking/alpha.json"),
+                        ManifestFormat::Json,
+                        "alphaVersion".to_string(),
+                    ),
+                ),
+                VersionTrackingDependency::new(
+                    "dep-beta".to_string(),
+                    VersionTrackingManifest::new(
+                        PathBuf::from("tracking/beta.yaml"),
+                        ManifestFormat::Yaml,
+                        "betaVersion".to_string(),
+                    ),
+                ),
+            ],
+        );
+
+        let serialized = toml::to_string(&decl).expect("serialize to TOML");
+        let deserialized: AdditionalPackageDeclaration =
+            toml::from_str(&serialized).expect("deserialize from TOML");
+
+        assert_eq!(deserialized, decl);
+        assert_eq!(deserialized.dependencies().len(), 2);
+        assert_eq!(
+            deserialized.dependencies()[0].dependency_name(),
+            "dep-alpha"
+        );
+        assert_eq!(
+            deserialized.dependencies()[0]
+                .version_tracking_manifest()
+                .version_field_path(),
+            "alphaVersion"
+        );
+        assert_eq!(deserialized.dependencies()[1].dependency_name(), "dep-beta");
+        assert_eq!(
+            deserialized.dependencies()[1]
+                .version_tracking_manifest()
+                .version_field_path(),
+            "betaVersion"
+        );
+    }
+
+    #[test]
+    fn additional_package_declaration_without_dependencies_defaults_to_empty() {
+        let toml_str = r#"
+name = "my-helm-chart"
+path = "charts/my-chart"
+influence = ["charts/my-chart/**"]
+
+[manifest]
+file-path = "charts/my-chart/Chart.yaml"
+format = "yaml"
+version-field-path = "version"
+"#;
+        let deserialized: AdditionalPackageDeclaration =
+            toml::from_str(toml_str).expect("deserialize from TOML");
+        assert!(deserialized.dependencies().is_empty());
+        assert_eq!(deserialized.name(), "my-helm-chart");
     }
 }

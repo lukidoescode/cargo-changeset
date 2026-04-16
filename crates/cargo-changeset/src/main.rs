@@ -35,7 +35,15 @@ fn main() -> ExitCode {
     let cli = match CargoCli::try_parse() {
         Ok(CargoCli::Changeset(cli)) => cli,
         Err(e) if !e.use_stderr() => e.exit(),
-        Err(_) => ChangesetCli::parse(),
+        Err(e) => {
+            let invoked_via_cargo = std::env::args_os()
+                .nth(1)
+                .is_some_and(|arg| arg == "changeset");
+            if invoked_via_cargo {
+                e.exit();
+            }
+            ChangesetCli::parse()
+        }
     };
 
     let start_path = match resolve_start_path(cli.path) {

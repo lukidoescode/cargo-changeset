@@ -1,7 +1,7 @@
 use std::path::Path;
 
 use semver::Version;
-use toml_edit::{Item, Table, value};
+use toml_edit::{DocumentMut, Item, Table, value};
 
 use crate::config::{InitConfig, MetadataSection};
 use crate::error::ManifestError;
@@ -143,6 +143,85 @@ pub fn write_metadata_section(
 
     let mut doc = read_document(path)?;
 
+    let changeset_table = navigate_to_changeset_table(&mut doc, section, path)?;
+    populate_changeset_table(changeset_table, config);
+
+    std::fs::write(path, doc.to_string()).map_err(|source| ManifestError::Write {
+        path: path.to_path_buf(),
+        source,
+    })
+}
+
+/// Updates the version of a dependency in all relevant sections of a Cargo.toml.
+///
+/// Checks `[workspace.dependencies]`, `[dependencies]`, `[dev-dependencies]`,
+/// and `[build-dependencies]`. Only updates table-form entries that have an
+/// explicit `version` key and do NOT have `workspace = true`.
+///
+/// # Errors
+///
+/// Returns an error if the manifest cannot be read, parsed, or written.
+pub fn update_dependency_version(
+    path: &Path,
+    dependency_name: &str,
+    new_version: &Version,
+) -> Result<bool, ManifestError> {
+    let mut doc = read_document(path)?;
+    let mut changed = false;
+
+    if let Some(workspace) = doc.get_mut("workspace")
+        && let Some(deps) = workspace.get_mut("dependencies")
+        && update_dep_entry(deps, dependency_name, new_version)
+    {
+        changed = true;
+    }
+
+    for section in &DEPENDENCY_SECTIONS {
+        if let Some(deps) = doc.get_mut(section)
+            && update_dep_entry(deps, dependency_name, new_version)
+        {
+            changed = true;
+        }
+    }
+
+    if changed {
+        std::fs::write(path, doc.to_string()).map_err(|source| ManifestError::Write {
+            path: path.to_path_buf(),
+            source,
+        })?;
+    }
+
+    Ok(changed)
+}
+
+fn update_dep_entry(deps: &mut Item, dep_name: &str, new_version: &Version) -> bool {
+    let Some(entry) = deps.get_mut(dep_name) else {
+        return false;
+    };
+
+    if let Some(table) = entry.as_table_like_mut() {
+        let has_workspace_true = table
+            .get("workspace")
+            .and_then(toml_edit::Item::as_bool)
+            .unwrap_or(false);
+        if has_workspace_true {
+            return false;
+        }
+
+        if table.get("version").is_some() {
+            table.insert("version", value(new_version.to_string()));
+            return true;
+        }
+    }
+
+    false
+}
+
+pub(crate) fn navigate_to_changeset_table<'a>(
+    doc: &'a mut DocumentMut,
+    section: MetadataSection,
+    path: &Path,
+) -> Result<&'a mut Table, ManifestError> {
     let root_key = match section {
         MetadataSection::Workspace => "workspace",
         MetadataSection::Package => "package",
@@ -185,78 +264,7 @@ pub fn write_metadata_section(
 
     changeset_table.set_implicit(true);
 
-    populate_changeset_table(changeset_table, config);
-
-    std::fs::write(path, doc.to_string()).map_err(|source| ManifestError::Write {
-        path: path.to_path_buf(),
-        source,
-    })
-}
-
-/// Updates the version of a dependency in all relevant sections of a Cargo.toml.
-///
-/// Checks `[workspace.dependencies]`, `[dependencies]`, `[dev-dependencies]`,
-/// and `[build-dependencies]`. Only updates table-form entries that have an
-/// explicit `version` key and do NOT have `workspace = true`.
-///
-/// # Errors
-///
-/// Returns an error if the manifest cannot be read, parsed, or written.
-pub fn update_dependency_version(
-    path: &Path,
-    dependency_name: &str,
-    new_version: &Version,
-) -> Result<bool, ManifestError> {
-    let mut doc = read_document(path)?;
-    let mut changed = false;
-
-    if let Some(workspace) = doc.get_mut("workspace") {
-        if let Some(deps) = workspace.get_mut("dependencies") {
-            if update_dep_entry(deps, dependency_name, new_version) {
-                changed = true;
-            }
-        }
-    }
-
-    for section in &DEPENDENCY_SECTIONS {
-        if let Some(deps) = doc.get_mut(section) {
-            if update_dep_entry(deps, dependency_name, new_version) {
-                changed = true;
-            }
-        }
-    }
-
-    if changed {
-        std::fs::write(path, doc.to_string()).map_err(|source| ManifestError::Write {
-            path: path.to_path_buf(),
-            source,
-        })?;
-    }
-
-    Ok(changed)
-}
-
-fn update_dep_entry(deps: &mut Item, dep_name: &str, new_version: &Version) -> bool {
-    let Some(entry) = deps.get_mut(dep_name) else {
-        return false;
-    };
-
-    if let Some(table) = entry.as_table_like_mut() {
-        let has_workspace_true = table
-            .get("workspace")
-            .and_then(toml_edit::Item::as_bool)
-            .unwrap_or(false);
-        if has_workspace_true {
-            return false;
-        }
-
-        if table.get("version").is_some() {
-            table.insert("version", value(new_version.to_string()));
-            return true;
-        }
-    }
-
-    false
+    Ok(changeset_table)
 }
 
 fn populate_changeset_table(changeset_table: &mut Table, config: &InitConfig) {
@@ -333,14 +341,14 @@ fn populate_changeset_table(changeset_table: &mut Table, config: &InitConfig) {
         );
     }
 
-    if let Some(ref ignored_files) = config.ignored_files {
-        if !ignored_files.is_empty() {
-            let mut arr = toml_edit::Array::new();
-            for pattern in ignored_files {
-                arr.push(pattern.as_str());
-            }
-            changeset_table.insert("ignored-files", Item::Value(toml_edit::Value::Array(arr)));
+    if let Some(ref ignored_files) = config.ignored_files
+        && !ignored_files.is_empty()
+    {
+        let mut arr = toml_edit::Array::new();
+        for pattern in ignored_files {
+            arr.push(pattern.as_str());
         }
+        changeset_table.insert("ignored-files", Item::Value(toml_edit::Value::Array(arr)));
     }
 }
 

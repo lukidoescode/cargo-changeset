@@ -21,10 +21,8 @@ pub(super) fn run(args: AddArgs, start_path: &Path) -> Result<()> {
 
     let is_single_package =
         *project.kind() == ProjectKind::SinglePackage && args.packages.is_empty();
-    if is_single_package {
-        if let Some(pkg) = project.packages().first() {
-            println!("Using package: {} ({})", pkg.name(), pkg.version());
-        }
+    if is_single_package && let Some(pkg) = project.packages().first() {
+        println!("Using package: {} ({})", pkg.name(), pkg.version());
     }
 
     let changeset_writer = FileSystemChangesetIO::new(project.root());

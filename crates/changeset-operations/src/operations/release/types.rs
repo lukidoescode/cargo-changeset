@@ -319,6 +319,9 @@ pub(super) struct ReleaseContext {
     pub(super) classification: ReleaseClassification,
     pub(super) git_options: GitOptions,
     pub(super) inherited_packages: Vec<String>,
+    pub(super) additional_packages: Vec<PackageInfo>,
+    pub(super) all_packages: Vec<PackageInfo>,
+    pub(super) package_configs: HashMap<String, changeset_project::PackageChangesetConfig>,
 }
 
 #[derive(Debug, Clone)]

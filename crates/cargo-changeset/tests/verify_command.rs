@@ -1,198 +1,34 @@
-use std::fs;
-use std::process::Command;
+mod common;
 
+use std::fs;
+use std::fs::OpenOptions;
+use std::io::Write as IoWrite;
+
+use predicates::prelude::PredicateBooleanExt as _;
 use predicates::str::contains;
 use tempfile::TempDir;
 
-fn init_git_repo(dir: &TempDir) {
-    Command::new("git")
-        .args(["init", "--initial-branch=main"])
-        .current_dir(dir.path())
-        .output()
-        .expect("failed to init git repo");
-
-    Command::new("git")
-        .args(["config", "user.email", "test@example.com"])
-        .current_dir(dir.path())
-        .output()
-        .expect("failed to configure git email");
-
-    Command::new("git")
-        .args(["config", "user.name", "Test"])
-        .current_dir(dir.path())
-        .output()
-        .expect("failed to configure git name");
-}
-
-fn git_add_and_commit(dir: &TempDir, message: &str) {
-    Command::new("git")
-        .args(["add", "-A"])
-        .current_dir(dir.path())
-        .output()
-        .expect("failed to git add");
-
-    Command::new("git")
-        .args(["commit", "-m", message])
-        .current_dir(dir.path())
-        .output()
-        .expect("failed to git commit");
-}
-
-fn create_branch(dir: &TempDir, name: &str) {
-    Command::new("git")
-        .args(["checkout", "-b", name])
-        .current_dir(dir.path())
-        .output()
-        .expect("failed to create branch");
-}
-
-fn create_virtual_workspace_with_git() -> TempDir {
-    let dir = TempDir::new().expect("failed to create temp dir");
-
-    init_git_repo(&dir);
-
-    fs::create_dir_all(dir.path().join("crates/crate-a/src"))
-        .expect("failed to create crate a dir");
-    fs::create_dir_all(dir.path().join("crates/crate-b/src"))
-        .expect("failed to create crate b dir");
-
-    fs::write(
-        dir.path().join("Cargo.toml"),
-        r#"
-[workspace]
-members = ["crates/*"]
-resolver = "2"
-"#,
-    )
-    .expect("failed to write workspace Cargo.toml");
-
-    fs::write(
-        dir.path().join("crates/crate-a/Cargo.toml"),
-        r#"
-[package]
-name = "crate-a"
-version = "0.1.0"
-edition = "2021"
-"#,
-    )
-    .expect("failed to write crate-a Cargo.toml");
-
-    fs::write(dir.path().join("crates/crate-a/src/lib.rs"), "")
-        .expect("failed to write crate-a lib.rs");
-
-    fs::write(
-        dir.path().join("crates/crate-b/Cargo.toml"),
-        r#"
-[package]
-name = "crate-b"
-version = "0.2.0"
-edition = "2021"
-"#,
-    )
-    .expect("failed to write crate-b Cargo.toml");
-
-    fs::write(dir.path().join("crates/crate-b/src/lib.rs"), "")
-        .expect("failed to write crate-b lib.rs");
-
-    git_add_and_commit(&dir, "Initial commit");
-
-    dir
-}
+use common::changesets::write_multi_changeset;
+use common::git::{create_branch, git_add_and_commit, init_git_repo};
+use common::workspaces::{
+    create_virtual_workspace_with_git, create_workspace_with_circular_version_tracking,
+    create_workspace_with_duplicate_dependency, create_workspace_with_helm_chart_and_git,
+    create_workspace_with_three_crates_and_git, create_workspace_with_unknown_dependency,
+    create_workspace_with_version_tracking_and_git,
+};
 
 fn add_changeset(dir: &TempDir, package_name: &str) {
     add_changeset_with_name(dir, package_name, &format!("{package_name}-changeset"));
 }
 
 fn add_changeset_with_name(dir: &TempDir, package_name: &str, changeset_name: &str) {
-    fs::create_dir_all(dir.path().join(".changeset/changesets"))
-        .expect("failed to create .changeset/changesets dir");
-    let filename = format!(".changeset/changesets/{changeset_name}.md");
-    fs::write(
-        dir.path().join(&filename),
-        format!(
-            r#"---
-"{package_name}": patch
----
-
-Test changeset for {package_name}.
-"#
-        ),
-    )
-    .expect("failed to write changeset");
-}
-
-fn add_multi_package_changeset(dir: &TempDir, packages: &[&str], changeset_name: &str) {
-    fs::create_dir_all(dir.path().join(".changeset/changesets"))
-        .expect("failed to create .changeset/changesets dir");
-    let filename = format!(".changeset/changesets/{changeset_name}.md");
-
-    let package_entries: String = packages
-        .iter()
-        .map(|p| format!("\"{p}\": patch"))
-        .collect::<Vec<_>>()
-        .join("\n");
-
-    fs::write(
-        dir.path().join(&filename),
-        format!(
-            r#"---
-{package_entries}
----
-
-Test changeset for multiple packages.
-"#
-        ),
-    )
-    .expect("failed to write changeset");
-}
-
-fn create_workspace_with_three_crates() -> TempDir {
-    let dir = TempDir::new().expect("failed to create temp dir");
-
-    init_git_repo(&dir);
-
-    fs::create_dir_all(dir.path().join("crates/crate-a/src"))
-        .expect("failed to create crate a dir");
-    fs::create_dir_all(dir.path().join("crates/crate-b/src"))
-        .expect("failed to create crate b dir");
-    fs::create_dir_all(dir.path().join("crates/crate-c/src"))
-        .expect("failed to create crate c dir");
-
-    fs::write(
-        dir.path().join("Cargo.toml"),
-        r#"
-[workspace]
-members = ["crates/*"]
-resolver = "2"
-"#,
-    )
-    .expect("failed to write workspace Cargo.toml");
-
-    for (name, version) in [
-        ("crate-a", "0.1.0"),
-        ("crate-b", "0.2.0"),
-        ("crate-c", "0.3.0"),
-    ] {
-        fs::write(
-            dir.path().join(format!("crates/{name}/Cargo.toml")),
-            format!(
-                r#"
-[package]
-name = "{name}"
-version = "{version}"
-edition = "2021"
-"#
-            ),
-        )
-        .expect("failed to write Cargo.toml");
-
-        fs::write(dir.path().join(format!("crates/{name}/src/lib.rs")), "")
-            .expect("failed to write lib.rs");
-    }
-
-    git_add_and_commit(&dir, "Initial commit");
-
-    dir
+    common::changesets::write_changeset(
+        dir,
+        &format!("{changeset_name}.md"),
+        package_name,
+        "patch",
+        &format!("Test changeset for {package_name}."),
+    );
 }
 
 #[test]
@@ -695,7 +531,7 @@ fn verify_deleted_changeset_with_allow_flag_passes() {
 
 #[test]
 fn verify_multiple_commits_on_feature_branch_all_covered() {
-    let workspace = create_workspace_with_three_crates();
+    let workspace = create_workspace_with_three_crates_and_git();
     create_branch(&workspace, "feature");
 
     fs::write(
@@ -734,7 +570,7 @@ fn verify_multiple_commits_on_feature_branch_all_covered() {
 
 #[test]
 fn verify_multiple_commits_on_feature_branch_last_uncovered() {
-    let workspace = create_workspace_with_three_crates();
+    let workspace = create_workspace_with_three_crates_and_git();
     create_branch(&workspace, "feature");
 
     fs::write(
@@ -772,7 +608,7 @@ fn verify_multiple_commits_on_feature_branch_last_uncovered() {
 
 #[test]
 fn verify_main_has_unreleased_changesets_feature_has_different_changes() {
-    let workspace = create_workspace_with_three_crates();
+    let workspace = create_workspace_with_three_crates_and_git();
 
     add_changeset_with_name(&workspace, "crate-a", "unreleased-on-main");
     git_add_and_commit(&workspace, "Add unreleased changeset for crate-a on main");
@@ -799,7 +635,7 @@ fn verify_main_has_unreleased_changesets_feature_has_different_changes() {
 
 #[test]
 fn verify_main_has_unreleased_changesets_feature_modifies_same_crate_without_new_changeset() {
-    let workspace = create_workspace_with_three_crates();
+    let workspace = create_workspace_with_three_crates_and_git();
 
     add_changeset_with_name(&workspace, "crate-a", "unreleased-on-main");
     git_add_and_commit(&workspace, "Add unreleased changeset for crate-a on main");
@@ -825,7 +661,7 @@ fn verify_main_has_unreleased_changesets_feature_modifies_same_crate_without_new
 
 #[test]
 fn verify_feature_modifies_existing_changeset_from_main() {
-    let workspace = create_workspace_with_three_crates();
+    let workspace = create_workspace_with_three_crates_and_git();
 
     add_changeset_with_name(&workspace, "crate-a", "shared-changeset");
     git_add_and_commit(&workspace, "Add changeset on main");
@@ -864,7 +700,7 @@ Updated description with additional changes.
 
 #[test]
 fn verify_single_changeset_covers_multiple_packages() {
-    let workspace = create_workspace_with_three_crates();
+    let workspace = create_workspace_with_three_crates_and_git();
     create_branch(&workspace, "feature");
 
     fs::write(
@@ -879,7 +715,12 @@ fn verify_single_changeset_covers_multiple_packages() {
     )
     .expect("failed to modify lib.rs");
 
-    add_multi_package_changeset(&workspace, &["crate-a", "crate-b"], "multi-package-change");
+    write_multi_changeset(
+        &workspace,
+        "multi-package-change.md",
+        &[("crate-a", "patch"), ("crate-b", "patch")],
+        "Test changeset for multiple packages.",
+    );
     git_add_and_commit(&workspace, "Change multiple packages with single changeset");
 
     assert_cmd::cargo::cargo_bin_cmd!("cargo-changeset")
@@ -894,7 +735,7 @@ fn verify_single_changeset_covers_multiple_packages() {
 
 #[test]
 fn verify_single_changeset_covers_multiple_packages_but_misses_one() {
-    let workspace = create_workspace_with_three_crates();
+    let workspace = create_workspace_with_three_crates_and_git();
     create_branch(&workspace, "feature");
 
     fs::write(
@@ -915,7 +756,12 @@ fn verify_single_changeset_covers_multiple_packages_but_misses_one() {
     )
     .expect("failed to modify lib.rs");
 
-    add_multi_package_changeset(&workspace, &["crate-a", "crate-b"], "multi-package-change");
+    write_multi_changeset(
+        &workspace,
+        "multi-package-change.md",
+        &[("crate-a", "patch"), ("crate-b", "patch")],
+        "Test changeset for multiple packages.",
+    );
     git_add_and_commit(
         &workspace,
         "Change three packages but only two in changeset",
@@ -933,7 +779,7 @@ fn verify_single_changeset_covers_multiple_packages_but_misses_one() {
 
 #[test]
 fn verify_changeset_added_in_later_commit_covers_earlier_changes() {
-    let workspace = create_workspace_with_three_crates();
+    let workspace = create_workspace_with_three_crates_and_git();
     create_branch(&workspace, "feature");
 
     fs::write(
@@ -965,7 +811,7 @@ fn verify_changeset_added_in_later_commit_covers_earlier_changes() {
 
 #[test]
 fn verify_multiple_changesets_for_same_package() {
-    let workspace = create_workspace_with_three_crates();
+    let workspace = create_workspace_with_three_crates_and_git();
     create_branch(&workspace, "feature");
 
     fs::write(
@@ -990,7 +836,7 @@ fn verify_multiple_changesets_for_same_package() {
 
 #[test]
 fn verify_code_changes_across_multiple_commits_single_changeset() {
-    let workspace = create_workspace_with_three_crates();
+    let workspace = create_workspace_with_three_crates_and_git();
     create_branch(&workspace, "feature");
 
     fs::write(
@@ -1027,7 +873,7 @@ fn verify_code_changes_across_multiple_commits_single_changeset() {
 
 #[test]
 fn verify_changeset_added_then_code_changed_later_still_covered() {
-    let workspace = create_workspace_with_three_crates();
+    let workspace = create_workspace_with_three_crates_and_git();
     create_branch(&workspace, "feature");
 
     add_changeset(&workspace, "crate-a");
@@ -1052,7 +898,7 @@ fn verify_changeset_added_then_code_changed_later_still_covered() {
 
 #[test]
 fn verify_mixed_scenario_some_from_main_some_new() {
-    let workspace = create_workspace_with_three_crates();
+    let workspace = create_workspace_with_three_crates_and_git();
 
     add_changeset_with_name(&workspace, "crate-a", "main-changeset-a");
     add_changeset_with_name(&workspace, "crate-b", "main-changeset-b");
@@ -1088,7 +934,7 @@ fn verify_mixed_scenario_some_from_main_some_new() {
 
 #[test]
 fn verify_preexisting_changeset_for_different_package_does_not_help() {
-    let workspace = create_workspace_with_three_crates();
+    let workspace = create_workspace_with_three_crates_and_git();
 
     add_changeset(&workspace, "crate-a");
     git_add_and_commit(&workspace, "Add changeset for crate-a on main");
@@ -1114,7 +960,7 @@ fn verify_preexisting_changeset_for_different_package_does_not_help() {
 
 #[test]
 fn verify_changeset_covers_package_not_actually_changed() {
-    let workspace = create_workspace_with_three_crates();
+    let workspace = create_workspace_with_three_crates_and_git();
     create_branch(&workspace, "feature");
 
     fs::write(
@@ -1123,10 +969,11 @@ fn verify_changeset_covers_package_not_actually_changed() {
     )
     .expect("failed to modify lib.rs");
 
-    add_multi_package_changeset(
+    write_multi_changeset(
         &workspace,
-        &["crate-a", "crate-b"],
-        "overly-broad-changeset",
+        "overly-broad-changeset.md",
+        &[("crate-a", "patch"), ("crate-b", "patch")],
+        "Test changeset for multiple packages.",
     );
     git_add_and_commit(&workspace, "Changeset covers more than needed");
 
@@ -1142,7 +989,7 @@ fn verify_changeset_covers_package_not_actually_changed() {
 
 #[test]
 fn verify_feature_branch_deletes_code_needs_changeset() {
-    let workspace = create_workspace_with_three_crates();
+    let workspace = create_workspace_with_three_crates_and_git();
 
     fs::write(
         workspace.path().join("crates/crate-a/src/lib.rs"),
@@ -1169,7 +1016,7 @@ fn verify_feature_branch_deletes_code_needs_changeset() {
 
 #[test]
 fn verify_feature_branch_deletes_code_with_changeset_passes() {
-    let workspace = create_workspace_with_three_crates();
+    let workspace = create_workspace_with_three_crates_and_git();
 
     fs::write(
         workspace.path().join("crates/crate-a/src/lib.rs"),
@@ -1197,7 +1044,7 @@ fn verify_feature_branch_deletes_code_with_changeset_passes() {
 
 #[test]
 fn verify_new_file_in_package_needs_changeset() {
-    let workspace = create_workspace_with_three_crates();
+    let workspace = create_workspace_with_three_crates_and_git();
     create_branch(&workspace, "feature");
 
     fs::write(
@@ -1219,7 +1066,7 @@ fn verify_new_file_in_package_needs_changeset() {
 
 #[test]
 fn verify_deleted_and_added_changeset_in_same_branch() {
-    let workspace = create_workspace_with_three_crates();
+    let workspace = create_workspace_with_three_crates_and_git();
 
     add_changeset_with_name(&workspace, "crate-a", "old-changeset");
     git_add_and_commit(&workspace, "Add old changeset");
@@ -1247,7 +1094,7 @@ fn verify_deleted_and_added_changeset_in_same_branch() {
 
 #[test]
 fn verify_deleted_and_added_changeset_with_allow_flag() {
-    let workspace = create_workspace_with_three_crates();
+    let workspace = create_workspace_with_three_crates_and_git();
 
     add_changeset_with_name(&workspace, "crate-a", "old-changeset");
     git_add_and_commit(&workspace, "Add old changeset");
@@ -1278,4 +1125,330 @@ fn verify_deleted_and_added_changeset_with_allow_flag() {
         .current_dir(workspace.path())
         .assert()
         .success();
+}
+
+#[test]
+fn verify_detects_additional_package_changes_requiring_coverage() {
+    let workspace = create_workspace_with_helm_chart_and_git();
+    create_branch(&workspace, "feature");
+
+    let mut values = OpenOptions::new()
+        .append(true)
+        .open(workspace.path().join("charts/my-chart/values.yaml"))
+        .expect("failed to open values.yaml for appending");
+    writeln!(values, "image: nginx").expect("failed to append to values.yaml");
+    drop(values);
+
+    git_add_and_commit(&workspace, "Modify helm values");
+
+    assert_cmd::cargo::cargo_bin_cmd!("cargo-changeset")
+        .arg("verify")
+        .arg("--base")
+        .arg("main")
+        .current_dir(workspace.path())
+        .assert()
+        .failure()
+        .stderr(contains("my-helm-chart"));
+}
+
+#[test]
+fn verify_passes_when_additional_package_change_covered() {
+    let workspace = create_workspace_with_helm_chart_and_git();
+    create_branch(&workspace, "feature");
+
+    let mut values = OpenOptions::new()
+        .append(true)
+        .open(workspace.path().join("charts/my-chart/values.yaml"))
+        .expect("failed to open values.yaml for appending");
+    writeln!(values, "image: nginx").expect("failed to append to values.yaml");
+    drop(values);
+
+    add_changeset(&workspace, "my-helm-chart");
+    git_add_and_commit(&workspace, "Add changeset for helm chart");
+
+    assert_cmd::cargo::cargo_bin_cmd!("cargo-changeset")
+        .arg("verify")
+        .arg("--base")
+        .arg("main")
+        .current_dir(workspace.path())
+        .assert()
+        .success();
+}
+
+#[test]
+fn verify_ignores_files_outside_additional_package_influence() {
+    let workspace = create_workspace_with_helm_chart_and_git();
+
+    fs::create_dir_all(workspace.path().join("docs")).expect("failed to create docs dir");
+    fs::write(workspace.path().join("docs/README.md"), "# Documentation")
+        .expect("failed to write README.md");
+    git_add_and_commit(&workspace, "Add docs");
+
+    create_branch(&workspace, "feature");
+
+    let mut readme = OpenOptions::new()
+        .append(true)
+        .open(workspace.path().join("docs/README.md"))
+        .expect("failed to open README.md for appending");
+    writeln!(readme, "## Additional section").expect("failed to append to README.md");
+    drop(readme);
+
+    git_add_and_commit(&workspace, "Update docs");
+
+    assert_cmd::cargo::cargo_bin_cmd!("cargo-changeset")
+        .arg("verify")
+        .arg("--base")
+        .arg("main")
+        .current_dir(workspace.path())
+        .assert()
+        .success();
+}
+
+#[test]
+fn verify_both_rust_and_additional_package_uncovered() {
+    let workspace = create_workspace_with_helm_chart_and_git();
+    create_branch(&workspace, "feature");
+
+    let mut lib = OpenOptions::new()
+        .append(true)
+        .open(workspace.path().join("crates/crate-a/src/lib.rs"))
+        .expect("failed to open lib.rs for appending");
+    writeln!(lib, "// changed").expect("failed to append to lib.rs");
+    drop(lib);
+
+    let mut values = OpenOptions::new()
+        .append(true)
+        .open(workspace.path().join("charts/my-chart/values.yaml"))
+        .expect("failed to open values.yaml for appending");
+    writeln!(values, "image: nginx").expect("failed to append to values.yaml");
+    drop(values);
+
+    git_add_and_commit(&workspace, "Modify both");
+
+    assert_cmd::cargo::cargo_bin_cmd!("cargo-changeset")
+        .arg("verify")
+        .arg("--base")
+        .arg("main")
+        .current_dir(workspace.path())
+        .assert()
+        .failure()
+        .stderr(contains("crate-a"))
+        .stderr(contains("my-helm-chart"));
+}
+
+#[test]
+fn verify_mixed_coverage_only_rust_uncovered() {
+    let workspace = create_workspace_with_helm_chart_and_git();
+    create_branch(&workspace, "feature");
+
+    let mut lib = OpenOptions::new()
+        .append(true)
+        .open(workspace.path().join("crates/crate-a/src/lib.rs"))
+        .expect("failed to open lib.rs for appending");
+    writeln!(lib, "// changed").expect("failed to append to lib.rs");
+    drop(lib);
+
+    let mut values = OpenOptions::new()
+        .append(true)
+        .open(workspace.path().join("charts/my-chart/values.yaml"))
+        .expect("failed to open values.yaml for appending");
+    writeln!(values, "image: nginx").expect("failed to append to values.yaml");
+    drop(values);
+
+    add_changeset(&workspace, "my-helm-chart");
+    git_add_and_commit(&workspace, "Add helm changeset only");
+
+    assert_cmd::cargo::cargo_bin_cmd!("cargo-changeset")
+        .arg("verify")
+        .arg("--base")
+        .arg("main")
+        .current_dir(workspace.path())
+        .assert()
+        .failure()
+        .stderr(contains("crate-a"))
+        .stderr(contains("✗ my-helm-chart").not());
+}
+
+#[test]
+fn verify_detects_change_in_version_tracking_manifest_requires_coverage() {
+    let workspace = create_workspace_with_version_tracking_and_git();
+    create_branch(&workspace, "feature");
+
+    let mut chart = OpenOptions::new()
+        .append(true)
+        .open(workspace.path().join("charts/my-chart/Chart.yaml"))
+        .expect("failed to open Chart.yaml for appending");
+    writeln!(chart, "extraField: true").expect("failed to append to Chart.yaml");
+    drop(chart);
+
+    git_add_and_commit(&workspace, "Modify version-tracking manifest");
+
+    assert_cmd::cargo::cargo_bin_cmd!("cargo-changeset")
+        .arg("verify")
+        .arg("--base")
+        .arg("main")
+        .current_dir(workspace.path())
+        .assert()
+        .failure()
+        .stderr(contains("my-helm-chart"));
+}
+
+#[test]
+fn verify_changeset_covers_version_tracking_manifest_change() {
+    let workspace = create_workspace_with_version_tracking_and_git();
+    create_branch(&workspace, "feature");
+
+    let mut chart = OpenOptions::new()
+        .append(true)
+        .open(workspace.path().join("charts/my-chart/Chart.yaml"))
+        .expect("failed to open Chart.yaml for appending");
+    writeln!(chart, "extraField: true").expect("failed to append to Chart.yaml");
+    drop(chart);
+
+    add_changeset(&workspace, "my-helm-chart");
+    git_add_and_commit(&workspace, "Modify manifest and add changeset");
+
+    assert_cmd::cargo::cargo_bin_cmd!("cargo-changeset")
+        .arg("verify")
+        .arg("--base")
+        .arg("main")
+        .current_dir(workspace.path())
+        .assert()
+        .success();
+}
+
+#[test]
+fn verify_ignores_changes_outside_version_tracking_manifests() {
+    let dir = TempDir::new().expect("failed to create temp dir");
+
+    fs::create_dir_all(dir.path().join("crates/crate-a/src"))
+        .expect("failed to create crate-a src dir");
+    fs::create_dir_all(dir.path().join("charts/my-chart"))
+        .expect("failed to create charts/my-chart dir");
+    fs::create_dir_all(dir.path().join("external")).expect("failed to create external dir");
+    fs::create_dir_all(dir.path().join(".changeset/changesets"))
+        .expect("failed to create .changeset/changesets dir");
+
+    fs::write(
+        dir.path().join("Cargo.toml"),
+        r#"[workspace]
+members = ["crates/*"]
+resolver = "2"
+
+[[workspace.metadata.changeset.additional-packages]]
+name = "my-helm-chart"
+path = "charts/my-chart"
+influence = ["charts/my-chart/**"]
+
+[workspace.metadata.changeset.additional-packages.manifest]
+file-path = "charts/my-chart/Chart.yaml"
+format = "yaml"
+version-field-path = "version"
+
+[[workspace.metadata.changeset.additional-packages.dependencies]]
+dependency-name = "crate-a"
+
+[workspace.metadata.changeset.additional-packages.dependencies.version-tracking-manifest]
+file-path = "external/tracking.json"
+format = "json"
+version-field-path = "version"
+"#,
+    )
+    .expect("failed to write workspace Cargo.toml");
+
+    fs::write(
+        dir.path().join("crates/crate-a/Cargo.toml"),
+        r#"[package]
+name = "crate-a"
+version = "1.0.0"
+edition = "2021"
+"#,
+    )
+    .expect("failed to write crate-a Cargo.toml");
+
+    fs::write(dir.path().join("crates/crate-a/src/lib.rs"), "")
+        .expect("failed to write crate-a lib.rs");
+
+    fs::write(
+        dir.path().join("charts/my-chart/Chart.yaml"),
+        "apiVersion: v2\nname: my-chart\nversion: \"2.0.0\"\n",
+    )
+    .expect("failed to write Chart.yaml");
+
+    fs::write(
+        dir.path().join("external/tracking.json"),
+        r#"{"version": "1.0.0"}"#,
+    )
+    .expect("failed to write tracking.json");
+
+    init_git_repo(&dir);
+    git_add_and_commit(&dir, "Initial commit");
+    create_branch(&dir, "feature");
+
+    fs::write(
+        dir.path().join("external/tracking.json"),
+        r#"{"version": "1.0.1"}"#,
+    )
+    .expect("failed to modify tracking.json");
+
+    git_add_and_commit(&dir, "Modify tracking file outside influence");
+
+    assert_cmd::cargo::cargo_bin_cmd!("cargo-changeset")
+        .arg("verify")
+        .arg("--base")
+        .arg("main")
+        .current_dir(dir.path())
+        .assert()
+        .success();
+}
+
+#[test]
+fn verify_rejects_unknown_version_tracking_dependency() {
+    let workspace = create_workspace_with_unknown_dependency();
+    init_git_repo(&workspace);
+    git_add_and_commit(&workspace, "Initial commit");
+    create_branch(&workspace, "feature");
+
+    assert_cmd::cargo::cargo_bin_cmd!("cargo-changeset")
+        .arg("verify")
+        .arg("--base")
+        .arg("main")
+        .current_dir(workspace.path())
+        .assert()
+        .failure()
+        .stderr(contains("unknown-pkg"));
+}
+
+#[test]
+fn verify_rejects_circular_version_tracking_dependency() {
+    let workspace = create_workspace_with_circular_version_tracking();
+    init_git_repo(&workspace);
+    git_add_and_commit(&workspace, "Initial commit");
+    create_branch(&workspace, "feature");
+
+    assert_cmd::cargo::cargo_bin_cmd!("cargo-changeset")
+        .arg("verify")
+        .arg("--base")
+        .arg("main")
+        .current_dir(workspace.path())
+        .assert()
+        .failure()
+        .stderr(contains("circular"));
+}
+
+#[test]
+fn verify_rejects_duplicate_version_tracking_dependency() {
+    let workspace = create_workspace_with_duplicate_dependency();
+    init_git_repo(&workspace);
+    git_add_and_commit(&workspace, "Initial commit");
+    create_branch(&workspace, "feature");
+
+    assert_cmd::cargo::cargo_bin_cmd!("cargo-changeset")
+        .arg("verify")
+        .arg("--base")
+        .arg("main")
+        .current_dir(workspace.path())
+        .assert()
+        .failure()
+        .stderr(contains("duplicate").or(contains("crate-a")));
 }

@@ -1,4 +1,5 @@
 mod add;
+mod additional_packages;
 mod init;
 mod manage;
 mod release;
@@ -13,6 +14,7 @@ use changeset_core::{BumpType, ChangeCategory};
 use changeset_manifest::{
     ChangelogLocation, ComparisonLinks, NoneBumpBehavior, TagFormat, ZeroVersionBehavior,
 };
+use changeset_operations::OperationError;
 
 use crate::error::Result;
 
@@ -352,6 +354,9 @@ Use 'cargo changeset manage' to configure these files."
     Init(InitArgs),
     /// Manage release configuration files
     Manage(ManageArgs),
+    /// Manage non-Rust package declarations in Cargo.toml metadata
+    #[command(name = "additional-packages")]
+    AdditionalPackages(additional_packages::AdditionalPackagesArgs),
 }
 
 impl Commands {
@@ -372,6 +377,84 @@ impl Commands {
                 manage::run(args, start_path),
                 ExecuteResult { quiet: false },
             ),
+            Self::AdditionalPackages(args) => (
+                additional_packages::run(args, start_path),
+                ExecuteResult { quiet: false },
+            ),
+        }
+    }
+}
+
+pub(super) fn dialoguer_to_operation_error(e: dialoguer::Error) -> OperationError {
+    match e {
+        dialoguer::Error::IO(io_err) => OperationError::Io(io_err),
+    }
+}
+
+#[cfg(test)]
+mod dialoguer_conversion_tests {
+    use std::io;
+
+    use changeset_operations::OperationError;
+
+    use super::dialoguer_to_operation_error;
+
+    #[test]
+    fn converts_io_error_to_operation_io_variant() {
+        let io_err = io::Error::new(io::ErrorKind::BrokenPipe, "pipe closed");
+        let dialoguer_err = dialoguer::Error::IO(io_err);
+
+        let result = dialoguer_to_operation_error(dialoguer_err);
+
+        assert!(matches!(result, OperationError::Io(_)));
+    }
+
+    #[test]
+    fn preserves_io_error_kind() {
+        let io_err = io::Error::new(io::ErrorKind::PermissionDenied, "access denied");
+        let dialoguer_err = dialoguer::Error::IO(io_err);
+
+        let result = dialoguer_to_operation_error(dialoguer_err);
+
+        match result {
+            OperationError::Io(inner) => {
+                assert_eq!(inner.kind(), io::ErrorKind::PermissionDenied);
+            }
+            other => panic!("expected OperationError::Io, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn preserves_error_chain() {
+        let io_err = io::Error::other("chain test");
+        let dialoguer_err = dialoguer::Error::IO(io_err);
+
+        let result = dialoguer_to_operation_error(dialoguer_err);
+
+        let source = std::error::Error::source(&result);
+        assert!(
+            source.is_some(),
+            "error chain should be preserved through conversion"
+        );
+    }
+
+    #[test]
+    fn preserves_io_error_message() {
+        let io_err = io::Error::other("terminal unavailable");
+        let dialoguer_err = dialoguer::Error::IO(io_err);
+
+        let result = dialoguer_to_operation_error(dialoguer_err);
+
+        assert!(
+            result.to_string().contains("IO error"),
+            "expected display to contain 'IO error', got: {}",
+            result
+        );
+        match result {
+            OperationError::Io(inner) => {
+                assert_eq!(inner.to_string(), "terminal unavailable");
+            }
+            other => panic!("expected OperationError::Io, got {other:?}"),
         }
     }
 }

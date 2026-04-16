@@ -1,3 +1,5 @@
+mod additional_package_interaction;
+mod additional_package_writer;
 mod changelog_writer;
 mod changeset_io;
 mod git_provider;
@@ -8,7 +10,12 @@ mod manage_interaction;
 mod manifest_writer;
 mod project_provider;
 mod release_state_io;
+mod version_tracking_dependency_writer;
 
+pub use additional_package_interaction::{
+    AdditionalPackageField, AdditionalPackageInteractionProvider,
+};
+pub use additional_package_writer::AdditionalPackageConfigWriter;
 pub use changelog_writer::{ChangelogWriteResult, ChangelogWriter};
 pub use changeset_io::{ChangesetReader, ChangesetWriter};
 pub use git_provider::{
@@ -28,8 +35,10 @@ pub use manage_interaction::{
     PrereleaseInteractionProvider,
 };
 pub use manifest_writer::{
-    FullManifestWriter, LockfileUpdater, ManifestDependencyWriter, ManifestMetadataWriter,
-    ManifestVersionWriter, WorkspaceVersionManager,
+    ExternalManifestVersionReader, ExternalManifestVersionWriter, FullManifestWriter,
+    LockfileUpdater, ManifestDependencyWriter, ManifestMetadataWriter, ManifestVersionWriter,
+    WorkspaceVersionManager,
 };
 pub use project_provider::{DependencyGraphProvider, ProjectProvider};
 pub use release_state_io::ReleaseStateIO;
+pub use version_tracking_dependency_writer::VersionTrackingDependencyWriter;

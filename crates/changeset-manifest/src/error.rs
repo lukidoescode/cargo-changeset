@@ -48,4 +48,37 @@ pub enum ManifestError {
 
     #[error("expected '{section}' to be a table in manifest '{path}'")]
     InvalidSectionType { path: PathBuf, section: String },
+
+    #[error("failed to parse YAML at '{path}'")]
+    YamlParse {
+        path: PathBuf,
+        #[source]
+        source: yaml_edit::YamlError,
+    },
+
+    #[error("failed to parse JSON at '{path}'")]
+    JsonParse {
+        path: PathBuf,
+        #[source]
+        source: jsonc_parser::errors::ParseError,
+    },
+
+    #[error("failed to decode JSON string at '{path}'")]
+    JsonStringDecode {
+        path: PathBuf,
+        #[source]
+        source: jsonc_parser::ParseStringErrorKind,
+    },
+
+    #[error("version path '{version_field_path}' not found in manifest at '{path}'")]
+    VersionPathNotFound {
+        path: PathBuf,
+        version_field_path: String,
+    },
+
+    #[error("expected string at version path '{version_field_path}' in manifest at '{path}'")]
+    VersionNotString {
+        path: PathBuf,
+        version_field_path: String,
+    },
 }

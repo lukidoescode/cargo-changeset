@@ -85,4 +85,17 @@ pub trait ChangesetWriter: Send + Sync {
     ///
     /// Returns an error if changesets cannot be read, parsed, or written.
     fn clear_consumed_for_prerelease(&self, changeset_dir: &Path, paths: &[&Path]) -> Result<()>;
+
+    /// Writes back a previously stored consumed-for-prerelease version string verbatim,
+    /// without parsing it. Used during saga compensation to restore the original state.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if changesets cannot be read, parsed, or written.
+    fn restore_consumed_for_prerelease(
+        &self,
+        changeset_dir: &Path,
+        paths: &[&Path],
+        version: &str,
+    ) -> Result<()>;
 }

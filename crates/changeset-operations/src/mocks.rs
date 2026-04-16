@@ -3,9 +3,11 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, RwLock};
 
 use changeset_changelog::{RepositoryInfo, VersionRelease};
-use changeset_core::{BumpType, ChangeCategory, Changeset, PackageInfo};
+use changeset_core::{
+    AdditionalPackageDeclaration, BumpType, ChangeCategory, Changeset, ManifestFormat, PackageInfo,
+};
 use changeset_git::{CommitInfo, FileChange, TagInfo};
-use changeset_manifest::{InitConfig, MetadataSection};
+use changeset_manifest::{AdditionalPackageUpdate, InitConfig, MetadataSection};
 use changeset_project::{
     CargoProject, GraduationState, PackageChangesetConfig, PrereleaseState, ProjectKind,
     RootChangesetConfig, WorkspaceDependencyGraph,
@@ -13,16 +15,20 @@ use changeset_project::{
 use semver::Version;
 
 use crate::Result;
+use changeset_core::VersionTrackingDependency;
+
 use crate::traits::{
+    AdditionalPackageConfigWriter, AdditionalPackageField, AdditionalPackageInteractionProvider,
     BumpSelection, CategorySelection, ChangelogSettingsInput, ChangelogWriteResult,
     ChangelogWriter, ChangesetReader, ChangesetWriter, DependencyGraphProvider, DescriptionInput,
-    FilteringSettingsInput, GitCommitProvider, GitDiffProvider, GitSettingsInput,
-    GitStagingProvider, GitStatusProvider, GitTagProvider, GitWorkdirDiffProvider,
-    GraduationAction, GraduationInteractionProvider, InheritedVersionChecker,
-    InitInteractionProvider, InteractionProvider, LockfileUpdater, ManifestDependencyWriter,
-    ManifestMetadataWriter, ManifestVersionWriter, MenuSelection, PackageSelection,
-    PrereleaseAction, PrereleaseInteractionProvider, ProjectContext, ProjectProvider,
-    ReleaseStateIO, VersionSettingsInput, WorkspaceVersionManager,
+    ExternalManifestVersionReader, ExternalManifestVersionWriter, FilteringSettingsInput,
+    GitCommitProvider, GitDiffProvider, GitSettingsInput, GitStagingProvider, GitStatusProvider,
+    GitTagProvider, GitWorkdirDiffProvider, GraduationAction, GraduationInteractionProvider,
+    InheritedVersionChecker, InitInteractionProvider, InteractionProvider, LockfileUpdater,
+    ManifestDependencyWriter, ManifestMetadataWriter, ManifestVersionWriter, MenuSelection,
+    PackageSelection, PrereleaseAction, PrereleaseInteractionProvider, ProjectContext,
+    ProjectProvider, ReleaseStateIO, VersionSettingsInput, VersionTrackingDependencyWriter,
+    WorkspaceVersionManager,
 };
 
 macro_rules! impl_arc_delegation {
@@ -48,6 +54,8 @@ pub struct MockProjectProvider {
     changeset_dir: PathBuf,
     root_config: RootChangesetConfig,
     dependency_edges: Vec<(String, String)>,
+    additional_packages: Vec<PackageInfo>,
+    fail_on_discover_additional: bool,
 }
 
 impl MockProjectProvider {
@@ -59,6 +67,8 @@ impl MockProjectProvider {
             changeset_dir,
             root_config: RootChangesetConfig::default(),
             dependency_edges: Vec::new(),
+            additional_packages: Vec::new(),
+            fail_on_discover_additional: false,
         }
     }
 
@@ -97,6 +107,18 @@ impl MockProjectProvider {
             .into_iter()
             .map(|(a, b)| (a.to_string(), b.to_string()))
             .collect();
+        self
+    }
+
+    #[must_use]
+    pub fn with_additional_packages(mut self, packages: Vec<PackageInfo>) -> Self {
+        self.additional_packages = packages;
+        self
+    }
+
+    #[must_use]
+    pub fn with_fail_on_discover_additional(mut self) -> Self {
+        self.fail_on_discover_additional = true;
         self
     }
 
@@ -158,6 +180,19 @@ impl ProjectProvider for MockProjectProvider {
         _config: &RootChangesetConfig,
     ) -> Result<PathBuf> {
         Ok(self.changeset_dir.clone())
+    }
+
+    fn discover_additional_packages(
+        &self,
+        _project_root: &Path,
+        _config: &RootChangesetConfig,
+    ) -> Result<Vec<PackageInfo>> {
+        if self.fail_on_discover_additional {
+            return Err(crate::OperationError::Io(std::io::Error::other(
+                "discover_additional_packages must not be called for single-package projects",
+            )));
+        }
+        Ok(self.additional_packages.clone())
     }
 }
 
@@ -327,6 +362,21 @@ impl ChangesetWriter for MockChangesetReader {
         }
         Ok(())
     }
+
+    fn restore_consumed_for_prerelease(
+        &self,
+        _changeset_dir: &Path,
+        paths: &[&Path],
+        version: &str,
+    ) -> Result<()> {
+        let mut changesets = self.changesets.lock().expect("lock poisoned");
+        for path in paths {
+            if let Some(changeset) = changesets.get_mut(*path) {
+                changeset.set_consumed_for_prerelease(Some(version.to_owned()));
+            }
+        }
+        Ok(())
+    }
 }
 
 impl_arc_delegation! {
@@ -344,6 +394,7 @@ impl_arc_delegation! {
         fn filename_exists(&self, changeset_dir: &Path, filename: &str) -> bool;
         fn mark_consumed_for_prerelease(&self, changeset_dir: &Path, paths: &[&Path], version: &Version) -> Result<()>;
         fn clear_consumed_for_prerelease(&self, changeset_dir: &Path, paths: &[&Path]) -> Result<()>;
+        fn restore_consumed_for_prerelease(&self, changeset_dir: &Path, paths: &[&Path], version: &str) -> Result<()>;
     }
 }
 
@@ -410,6 +461,15 @@ impl ChangesetWriter for MockChangesetWriter {
     }
 
     fn clear_consumed_for_prerelease(&self, _changeset_dir: &Path, _paths: &[&Path]) -> Result<()> {
+        Ok(())
+    }
+
+    fn restore_consumed_for_prerelease(
+        &self,
+        _changeset_dir: &Path,
+        _paths: &[&Path],
+        _version: &str,
+    ) -> Result<()> {
         Ok(())
     }
 }
@@ -832,6 +892,22 @@ impl InteractionProvider for MockInteractionProvider {
     }
 }
 
+#[derive(Clone)]
+pub struct ExternalVersionWrite {
+    pub manifest_path: PathBuf,
+    pub format: ManifestFormat,
+    pub version_field_path: String,
+    pub version: Version,
+}
+
+#[derive(Clone)]
+pub struct ExternalVersionRestore {
+    pub manifest_path: PathBuf,
+    pub format: ManifestFormat,
+    pub version_field_path: String,
+    pub version_str: String,
+}
+
 struct MockManifestState {
     written_versions: Vec<(PathBuf, Version)>,
     dependency_version_updates: Vec<(PathBuf, String, Version)>,
@@ -842,6 +918,9 @@ struct MockManifestState {
     lockfile_content: Option<Vec<u8>>,
     lockfile_restored: Option<Vec<u8>>,
     lockfile_removed: bool,
+    external_written_versions: Vec<ExternalVersionWrite>,
+    external_version_to_read: HashMap<(PathBuf, ManifestFormat, String), String>,
+    restore_calls: Vec<ExternalVersionRestore>,
 }
 
 pub struct MockManifestWriter {
@@ -863,9 +942,28 @@ impl MockManifestWriter {
                 lockfile_content: None,
                 lockfile_restored: None,
                 lockfile_removed: false,
+                external_written_versions: Vec::new(),
+                external_version_to_read: HashMap::new(),
+                restore_calls: Vec::new(),
             }),
             inherited_paths: HashSet::new(),
         }
+    }
+
+    #[must_use]
+    pub fn with_external_version_to_read(
+        self,
+        path: PathBuf,
+        format: ManifestFormat,
+        version_field_path: String,
+        version: String,
+    ) -> Self {
+        self.state
+            .lock()
+            .expect("lock poisoned")
+            .external_version_to_read
+            .insert((path, format, version_field_path), version);
+        self
     }
 
     #[must_use]
@@ -951,6 +1049,24 @@ impl MockManifestWriter {
     #[must_use]
     pub fn lockfile_removed(&self) -> bool {
         self.state.lock().expect("lock poisoned").lockfile_removed
+    }
+
+    #[must_use]
+    pub fn external_written_versions(&self) -> Vec<ExternalVersionWrite> {
+        self.state
+            .lock()
+            .expect("lock poisoned")
+            .external_written_versions
+            .clone()
+    }
+
+    #[must_use]
+    pub fn restore_calls(&self) -> Vec<ExternalVersionRestore> {
+        self.state
+            .lock()
+            .expect("lock poisoned")
+            .restore_calls
+            .clone()
     }
 }
 
@@ -1067,6 +1183,81 @@ impl ManifestMetadataWriter for MockManifestWriter {
     }
 }
 
+impl ExternalManifestVersionReader for MockManifestWriter {
+    fn read_external_version(
+        &self,
+        manifest_path: &Path,
+        format: ManifestFormat,
+        version_field_path: &str,
+    ) -> Result<String> {
+        let key = (
+            manifest_path.to_path_buf(),
+            format,
+            version_field_path.to_string(),
+        );
+        Ok(self
+            .state
+            .lock()
+            .expect("lock poisoned")
+            .external_version_to_read
+            .get(&key)
+            .cloned()
+            .unwrap_or_else(|| "0.0.0".to_string()))
+    }
+}
+
+impl ExternalManifestVersionWriter for MockManifestWriter {
+    fn write_external_version(
+        &self,
+        manifest_path: &Path,
+        format: ManifestFormat,
+        version_field_path: &str,
+        new_version: &Version,
+    ) -> Result<()> {
+        self.state
+            .lock()
+            .expect("lock poisoned")
+            .external_written_versions
+            .push(ExternalVersionWrite {
+                manifest_path: manifest_path.to_path_buf(),
+                format,
+                version_field_path: version_field_path.to_string(),
+                version: new_version.clone(),
+            });
+        Ok(())
+    }
+
+    fn verify_external_version(
+        &self,
+        _manifest_path: &Path,
+        _format: ManifestFormat,
+        _version_field_path: &str,
+        _expected: &Version,
+    ) -> Result<()> {
+        Ok(())
+    }
+
+    fn restore_external_version(
+        &self,
+        manifest_path: &Path,
+        format: ManifestFormat,
+        version_field_path: &str,
+        version_str: &str,
+    ) -> Result<()> {
+        self.state
+            .lock()
+            .expect("lock poisoned")
+            .restore_calls
+            .push(ExternalVersionRestore {
+                manifest_path: manifest_path.to_path_buf(),
+                format,
+                version_field_path: version_field_path.to_string(),
+                version_str: version_str.to_string(),
+            });
+        Ok(())
+    }
+}
+
 impl_arc_delegation! {
     impl InheritedVersionChecker for Arc<MockManifestWriter> {
         fn has_inherited_version(&self, manifest_path: &Path) -> Result<bool>;
@@ -1106,6 +1297,67 @@ impl_arc_delegation! {
 impl_arc_delegation! {
     impl ManifestMetadataWriter for Arc<MockManifestWriter> {
         fn write_metadata(&self, manifest_path: &Path, section: MetadataSection, config: &InitConfig) -> Result<()>;
+    }
+}
+
+impl_arc_delegation! {
+    impl ExternalManifestVersionReader for Arc<MockManifestWriter> {
+        fn read_external_version(&self, manifest_path: &Path, format: ManifestFormat, version_field_path: &str) -> Result<String>;
+    }
+}
+
+impl_arc_delegation! {
+    impl ExternalManifestVersionWriter for Arc<MockManifestWriter> {
+        fn write_external_version(&self, manifest_path: &Path, format: ManifestFormat, version_field_path: &str, new_version: &Version) -> Result<()>;
+        fn verify_external_version(&self, manifest_path: &Path, format: ManifestFormat, version_field_path: &str, expected: &Version) -> Result<()>;
+        fn restore_external_version(&self, manifest_path: &Path, format: ManifestFormat, version_field_path: &str, version_str: &str) -> Result<()>;
+    }
+}
+
+impl VersionTrackingDependencyWriter for MockManifestWriter {
+    fn add_dependency_to_additional_package(
+        &self,
+        _manifest_path: &Path,
+        _section: MetadataSection,
+        _package_name: &str,
+        _dependency: &VersionTrackingDependency,
+    ) -> Result<bool> {
+        Ok(true)
+    }
+
+    fn remove_dependency_from_additional_package(
+        &self,
+        _manifest_path: &Path,
+        _section: MetadataSection,
+        _package_name: &str,
+        _dependency_name: &str,
+    ) -> Result<bool> {
+        Ok(true)
+    }
+
+    fn add_dependency_to_crate(
+        &self,
+        _manifest_path: &Path,
+        _dependency: &VersionTrackingDependency,
+    ) -> Result<()> {
+        Ok(())
+    }
+
+    fn remove_dependency_from_crate(
+        &self,
+        _manifest_path: &Path,
+        _dependency_name: &str,
+    ) -> Result<bool> {
+        Ok(true)
+    }
+}
+
+impl_arc_delegation! {
+    impl VersionTrackingDependencyWriter for Arc<MockManifestWriter> {
+        fn add_dependency_to_additional_package(&self, manifest_path: &Path, section: MetadataSection, package_name: &str, dependency: &VersionTrackingDependency) -> Result<bool>;
+        fn remove_dependency_from_additional_package(&self, manifest_path: &Path, section: MetadataSection, package_name: &str, dependency_name: &str) -> Result<bool>;
+        fn add_dependency_to_crate(&self, manifest_path: &Path, dependency: &VersionTrackingDependency) -> Result<()>;
+        fn remove_dependency_from_crate(&self, manifest_path: &Path, dependency_name: &str) -> Result<bool>;
     }
 }
 
@@ -1619,6 +1871,181 @@ impl_arc_delegation! {
         fn select_graduation_action(&self) -> Result<MenuSelection<GraduationAction>>;
         fn select_package_for_graduation(&self, eligible: &[&PackageInfo]) -> Result<MenuSelection<usize>>;
         fn select_package_to_remove_graduation(&self, items: &[String]) -> Result<MenuSelection<usize>>;
+    }
+}
+
+pub struct MockAdditionalPackageConfigWriter {
+    pub add_result: bool,
+    pub remove_result: bool,
+    pub update_result: Option<bool>,
+}
+
+impl MockAdditionalPackageConfigWriter {
+    #[must_use]
+    pub fn new() -> Self {
+        Self {
+            add_result: true,
+            remove_result: true,
+            update_result: Some(true),
+        }
+    }
+}
+
+impl Default for MockAdditionalPackageConfigWriter {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl AdditionalPackageConfigWriter for MockAdditionalPackageConfigWriter {
+    fn add_additional_package(
+        &self,
+        _manifest_path: &Path,
+        _section: MetadataSection,
+        _declaration: &AdditionalPackageDeclaration,
+    ) -> Result<()> {
+        if self.add_result {
+            Ok(())
+        } else {
+            Err(crate::OperationError::Cancelled)
+        }
+    }
+
+    fn remove_additional_package(
+        &self,
+        _manifest_path: &Path,
+        _section: MetadataSection,
+        _name: &str,
+    ) -> Result<bool> {
+        if self.remove_result {
+            Ok(true)
+        } else {
+            Err(crate::OperationError::Cancelled)
+        }
+    }
+
+    fn update_additional_package(
+        &self,
+        _manifest_path: &Path,
+        _section: MetadataSection,
+        _name: &str,
+        _updates: &AdditionalPackageUpdate,
+    ) -> Result<bool> {
+        match self.update_result {
+            Some(v) => Ok(v),
+            None => Err(crate::OperationError::Cancelled),
+        }
+    }
+}
+
+pub struct MockAdditionalPackageInteractionProvider {
+    pub package_name: String,
+    pub package_path: PathBuf,
+    pub influence_patterns: Vec<String>,
+    pub manifest_file_path: PathBuf,
+    pub manifest_format: ManifestFormat,
+    pub manifest_version_field_path: String,
+    pub select_remove_result: MenuSelection<usize>,
+    pub select_edit_result: MenuSelection<usize>,
+    pub select_field_result: MenuSelection<AdditionalPackageField>,
+    pub confirm_removal_result: bool,
+}
+
+impl AdditionalPackageInteractionProvider for MockAdditionalPackageInteractionProvider {
+    fn prompt_package_name(&self) -> Result<String> {
+        Ok(self.package_name.clone())
+    }
+
+    fn prompt_package_path(&self) -> Result<PathBuf> {
+        Ok(self.package_path.clone())
+    }
+
+    fn prompt_influence_patterns(&self, _package_path: &Path) -> Result<Vec<String>> {
+        Ok(self.influence_patterns.clone())
+    }
+
+    fn prompt_manifest_file_path(&self) -> Result<PathBuf> {
+        Ok(self.manifest_file_path.clone())
+    }
+
+    fn prompt_manifest_format(&self) -> Result<ManifestFormat> {
+        Ok(self.manifest_format)
+    }
+
+    fn prompt_manifest_version_field_path(&self) -> Result<String> {
+        Ok(self.manifest_version_field_path.clone())
+    }
+
+    fn select_package_to_remove(
+        &self,
+        _packages: &[&AdditionalPackageDeclaration],
+    ) -> Result<MenuSelection<usize>> {
+        Ok(self.select_remove_result.clone())
+    }
+
+    fn select_package_to_edit(
+        &self,
+        _packages: &[&AdditionalPackageDeclaration],
+    ) -> Result<MenuSelection<usize>> {
+        Ok(self.select_edit_result.clone())
+    }
+
+    fn select_field_to_edit(&self) -> Result<MenuSelection<AdditionalPackageField>> {
+        Ok(self.select_field_result.clone())
+    }
+
+    fn confirm_removal(&self, _name: &str) -> Result<bool> {
+        Ok(self.confirm_removal_result)
+    }
+}
+
+pub struct PanickingAdditionalPackageInteractionProvider;
+
+impl AdditionalPackageInteractionProvider for PanickingAdditionalPackageInteractionProvider {
+    fn prompt_package_name(&self) -> Result<String> {
+        panic!("prompt_package_name must not be called");
+    }
+
+    fn prompt_package_path(&self) -> Result<PathBuf> {
+        panic!("prompt_package_path must not be called");
+    }
+
+    fn prompt_influence_patterns(&self, _package_path: &Path) -> Result<Vec<String>> {
+        panic!("prompt_influence_patterns must not be called");
+    }
+
+    fn prompt_manifest_file_path(&self) -> Result<PathBuf> {
+        panic!("prompt_manifest_file_path must not be called");
+    }
+
+    fn prompt_manifest_format(&self) -> Result<ManifestFormat> {
+        panic!("prompt_manifest_format must not be called");
+    }
+
+    fn prompt_manifest_version_field_path(&self) -> Result<String> {
+        panic!("prompt_manifest_version_field_path must not be called");
+    }
+
+    fn select_package_to_remove(
+        &self,
+        _packages: &[&AdditionalPackageDeclaration],
+    ) -> Result<MenuSelection<usize>> {
+        panic!("select_package_to_remove must not be called");
+    }
+
+    fn select_package_to_edit(
+        &self,
+        _packages: &[&AdditionalPackageDeclaration],
+    ) -> Result<MenuSelection<usize>> {
+        panic!("select_package_to_edit must not be called");
+    }
+
+    fn select_field_to_edit(&self) -> Result<MenuSelection<AdditionalPackageField>> {
+        panic!("select_field_to_edit must not be called");
+    }
+
+    fn confirm_removal(&self, _name: &str) -> Result<bool> {
+        panic!("confirm_removal must not be called");
     }
 }
 

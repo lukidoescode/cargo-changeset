@@ -160,16 +160,28 @@ pub enum OperationError {
     #[error("release validation failed")]
     ValidationFailed(#[from] crate::operations::ValidationErrors),
 
-    #[error("failed to parse version '{version}' during {context}")]
-    VersionParse {
-        version: String,
-        context: String,
-        #[source]
-        source: semver::Error,
-    },
-
     #[error("failed to delete {} tag(s) during compensation: {}", failed_tags.len(), failed_tags.join(", "))]
     TagDeletionFailed { failed_tags: Vec<String> },
+
+    #[error("additional packages are only supported in Cargo workspace projects")]
+    AdditionalPackagesRequireWorkspace,
+
+    #[error("additional package '{name}' already exists")]
+    AdditionalPackageAlreadyExists { name: String },
+
+    #[error("additional package '{name}' not found")]
+    AdditionalPackageNotFound { name: String },
+
+    #[error("manifest file for package '{name}' not found at '{}'", path.display())]
+    AdditionalPackageManifestNotFound { name: String, path: PathBuf },
+
+    #[error("invalid glob pattern '{pattern}' for package '{name}'")]
+    AdditionalPackageInvalidGlob {
+        name: String,
+        pattern: String,
+        #[source]
+        source: globset::Error,
+    },
 
     #[error("package '{name}' not found in workspace")]
     PackageNotFound { name: String },
@@ -327,17 +339,6 @@ mod tests {
     }
 
     #[test]
-    fn version_parse_error_includes_version_and_context() {
-        let err = OperationError::VersionParse {
-            version: "not-a-version".to_string(),
-            context: "test context".to_string(),
-            source: "bad".parse::<semver::Version>().expect_err("should fail"),
-        };
-        assert!(err.to_string().contains("not-a-version"));
-        assert!(err.to_string().contains("test context"));
-    }
-
-    #[test]
     fn parse_prerelease_tag_succeeds_for_valid_tag() {
         let spec = parse_prerelease_tag("alpha").expect("should parse valid tag");
 
@@ -352,5 +353,32 @@ mod tests {
             err,
             OperationError::InvalidPrereleaseTag { ref tag, .. } if tag == "bad.tag"
         ));
+    }
+
+    #[test]
+    fn additional_package_already_exists_error_includes_name() {
+        let err = OperationError::AdditionalPackageAlreadyExists {
+            name: "my-chart".to_string(),
+        };
+        assert!(err.to_string().contains("my-chart"));
+    }
+
+    #[test]
+    fn additional_package_not_found_error_includes_name() {
+        let err = OperationError::AdditionalPackageNotFound {
+            name: "missing-chart".to_string(),
+        };
+        assert!(err.to_string().contains("missing-chart"));
+    }
+
+    #[test]
+    fn additional_package_manifest_not_found_includes_name_and_path() {
+        let err = OperationError::AdditionalPackageManifestNotFound {
+            name: "my-chart".to_string(),
+            path: PathBuf::from("/charts/my-chart/Chart.yaml"),
+        };
+        let msg = err.to_string();
+        assert!(msg.contains("my-chart"));
+        assert!(msg.contains("/charts/my-chart/Chart.yaml"));
     }
 }

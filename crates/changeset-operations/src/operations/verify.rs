@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 
 use changeset_core::{NoneBumpBehavior, PackageInfo};
 use changeset_git::{FileChange, FileStatus};
-use changeset_project::map_files_to_packages;
+use changeset_project::{compile_influence_patterns, map_files_to_all_packages};
 
 use derive_builder::Builder;
 use gset::Getset;
@@ -92,6 +92,34 @@ where
         let project = self.project_provider.discover_project(start_path)?;
         let (root_config, package_configs) = self.project_provider.load_configs(&project)?;
 
+        let additional_packages = super::discover_additional_packages_if_workspace(
+            &self.project_provider,
+            &project,
+            &root_config,
+        )?;
+
+        let all_package_names: HashSet<String> = project
+            .packages()
+            .iter()
+            .map(|p| p.name().clone())
+            .chain(additional_packages.iter().map(|p| p.name().clone()))
+            .collect();
+        changeset_project::validate_version_tracking_dependencies(
+            &root_config,
+            &package_configs,
+            &all_package_names,
+        )?;
+
+        let additional_with_patterns: Vec<_> = if additional_packages.is_empty() {
+            Vec::new()
+        } else {
+            let influence_patterns = compile_influence_patterns(root_config.additional_packages())?;
+            additional_packages
+                .into_iter()
+                .zip(influence_patterns)
+                .collect()
+        };
+
         let collected = self.collect_changes(&project, root_config.changeset_dir(), input)?;
         let is_dirty = collected.is_dirty;
         let changeset_files = collected.changeset_files;
@@ -106,7 +134,13 @@ where
         }
 
         let mapping = has_code_changes.then(|| {
-            map_files_to_packages(&project, &changed_paths, &root_config, &package_configs)
+            map_files_to_all_packages(
+                &project,
+                &changed_paths,
+                &root_config,
+                &package_configs,
+                &additional_with_patterns,
+            )
         });
 
         let (affected_packages, transitive_dependents) =
@@ -308,7 +342,7 @@ mod tests {
     use changeset_git::FileStatus;
     use changeset_project::RootChangesetConfig;
 
-    use crate::mocks::{MockChangesetReader, MockGitProvider, MockProjectProvider};
+    use crate::mocks::{MockChangesetReader, MockGitProvider, MockProjectProvider, make_package};
 
     #[test]
     fn returns_no_changes_when_no_files_changed() {
@@ -1028,6 +1062,315 @@ mod tests {
         }
     }
 
+    fn make_declaration(
+        name: &str,
+        influence: &[&str],
+    ) -> changeset_core::AdditionalPackageDeclaration {
+        let influence_json: String = influence
+            .iter()
+            .map(|s| format!("\"{s}\""))
+            .collect::<Vec<_>>()
+            .join(",");
+        let json = format!(
+            r#"{{"name":"{name}","path":"{name}","influence":[{influence_json}],"manifest":{{"file-path":"/{name}/manifest.yaml","format":"yaml","version-field-path":"version"}}}}"#
+        );
+        serde_json::from_str(&json).expect("valid declaration JSON")
+    }
+
+    #[test]
+    fn detects_additional_package_changes_via_influence_globs() {
+        let decl = make_declaration("helm-chart", &["charts/**"]);
+        let root_config =
+            RootChangesetConfig::default().with_additional_packages(vec![decl.clone()]);
+        let helm_chart = make_package("helm-chart", "1.0.0");
+        let project_provider = MockProjectProvider::workspace(vec![("my-crate", "1.0.0")])
+            .with_root_config(root_config)
+            .with_additional_packages(vec![helm_chart]);
+
+        let git_provider = MockGitProvider::new().with_changed_files(vec![FileChange::new(
+            PathBuf::from("charts/values.yaml"),
+            FileStatus::Modified,
+        )]);
+
+        let changeset_reader = MockChangesetReader::new();
+
+        let operation = VerifyOperation::new(project_provider, git_provider, changeset_reader);
+
+        let input = VerifyInputBuilder::default()
+            .base("main".to_string())
+            .build()
+            .expect("all fields have defaults");
+
+        let result = operation
+            .execute(Path::new("/any"), &input)
+            .expect("operation should not error");
+
+        match result.outcome() {
+            VerifyOutcome::Failed(verification_result) => {
+                assert!(
+                    verification_result
+                        .uncovered_packages()
+                        .iter()
+                        .any(|p| p.name() == "helm-chart"),
+                    "helm-chart should be uncovered"
+                );
+            }
+            other => panic!("Expected VerifyOutcome::Failed, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn succeeds_when_additional_package_covered_by_changeset() {
+        let decl = make_declaration("helm-chart", &["charts/**"]);
+        let root_config = RootChangesetConfig::default().with_additional_packages(vec![decl]);
+        let helm_chart = make_package("helm-chart", "1.0.0");
+        let project_provider = MockProjectProvider::workspace(vec![("my-crate", "1.0.0")])
+            .with_root_config(root_config)
+            .with_additional_packages(vec![helm_chart]);
+
+        let git_provider = MockGitProvider::new().with_changed_files(vec![
+            FileChange::new(
+                PathBuf::from(".changeset/changesets/chart.md"),
+                FileStatus::Added,
+            ),
+            FileChange::new(PathBuf::from("charts/values.yaml"), FileStatus::Modified),
+        ]);
+
+        let changeset = crate::mocks::make_changeset("helm-chart", BumpType::Patch, "Update chart");
+        let changeset_reader = MockChangesetReader::new()
+            .with_changeset(PathBuf::from(".changeset/changesets/chart.md"), changeset);
+
+        let operation = VerifyOperation::new(project_provider, git_provider, changeset_reader);
+
+        let input = VerifyInputBuilder::default()
+            .base("main".to_string())
+            .build()
+            .expect("all fields have defaults");
+
+        let result = operation
+            .execute(Path::new("/any"), &input)
+            .expect("operation should not error");
+
+        match result.outcome() {
+            VerifyOutcome::Success(verification_result) => {
+                assert!(
+                    verification_result
+                        .covered_packages()
+                        .contains("helm-chart")
+                );
+                assert!(verification_result.uncovered_packages().is_empty());
+            }
+            other => panic!("Expected VerifyOutcome::Success, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn files_outside_influence_globs_not_matched_to_additional_packages() {
+        let decl = make_declaration("helm-chart", &["charts/**"]);
+        let root_config = RootChangesetConfig::default().with_additional_packages(vec![decl]);
+        let helm_chart = make_package("helm-chart", "1.0.0");
+        let project_provider = MockProjectProvider::workspace(vec![("my-crate", "1.0.0")])
+            .with_root_config(root_config)
+            .with_additional_packages(vec![helm_chart]);
+
+        let git_provider = MockGitProvider::new().with_changed_files(vec![FileChange::new(
+            PathBuf::from("docs/README.md"),
+            FileStatus::Modified,
+        )]);
+
+        let changeset_reader = MockChangesetReader::new();
+
+        let operation = VerifyOperation::new(project_provider, git_provider, changeset_reader);
+
+        let input = VerifyInputBuilder::default()
+            .base("main".to_string())
+            .build()
+            .expect("all fields have defaults");
+
+        let result = operation
+            .execute(Path::new("/any"), &input)
+            .expect("operation should not error");
+
+        assert!(matches!(
+            result.outcome(),
+            VerifyOutcome::NoPackagesAffected { .. }
+        ));
+    }
+
+    #[test]
+    fn mixed_rust_and_additional_packages_both_detected_and_covered() {
+        let decl = make_declaration("helm-chart", &["charts/**"]);
+        let root_config = RootChangesetConfig::default().with_additional_packages(vec![decl]);
+        let helm_chart = make_package("helm-chart", "1.0.0");
+        let project_provider = MockProjectProvider::workspace(vec![("core", "1.0.0")])
+            .with_root_config(root_config)
+            .with_additional_packages(vec![helm_chart]);
+
+        let git_provider = MockGitProvider::new().with_changed_files(vec![
+            FileChange::new(
+                PathBuf::from(".changeset/changesets/both.md"),
+                FileStatus::Added,
+            ),
+            FileChange::new(
+                PathBuf::from("crates/core/src/lib.rs"),
+                FileStatus::Modified,
+            ),
+            FileChange::new(PathBuf::from("charts/values.yaml"), FileStatus::Modified),
+        ]);
+
+        let changeset = changeset_core::Changeset::new(
+            "Update both".to_string(),
+            vec![
+                changeset_core::PackageRelease::new("core".to_string(), BumpType::Patch),
+                changeset_core::PackageRelease::new("helm-chart".to_string(), BumpType::Patch),
+            ],
+            changeset_core::ChangeCategory::Changed,
+        );
+        let changeset_reader = MockChangesetReader::new()
+            .with_changeset(PathBuf::from(".changeset/changesets/both.md"), changeset);
+
+        let operation = VerifyOperation::new(project_provider, git_provider, changeset_reader);
+
+        let input = VerifyInputBuilder::default()
+            .base("main".to_string())
+            .build()
+            .expect("all fields have defaults");
+
+        let result = operation
+            .execute(Path::new("/any"), &input)
+            .expect("operation should not error");
+
+        match result.outcome() {
+            VerifyOutcome::Success(verification_result) => {
+                assert!(verification_result.covered_packages().contains("core"));
+                assert!(
+                    verification_result
+                        .covered_packages()
+                        .contains("helm-chart")
+                );
+                assert!(verification_result.uncovered_packages().is_empty());
+            }
+            other => panic!("Expected VerifyOutcome::Success, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn additional_packages_not_expanded_as_transitive_dependents() {
+        let decl = make_declaration("helm-chart", &["charts/**"]);
+        let root_config = RootChangesetConfig::default().with_additional_packages(vec![decl]);
+        let helm_chart = make_package("helm-chart", "1.0.0");
+        let project_provider =
+            MockProjectProvider::workspace(vec![("core", "1.0.0"), ("app", "1.0.0")])
+                .with_dependency_edges(vec![("app", "core")])
+                .with_root_config(root_config)
+                .with_additional_packages(vec![helm_chart]);
+
+        let git_provider = MockGitProvider::new().with_changed_files(vec![
+            FileChange::new(
+                PathBuf::from(".changeset/changesets/fix.md"),
+                FileStatus::Added,
+            ),
+            FileChange::new(
+                PathBuf::from("crates/core/src/lib.rs"),
+                FileStatus::Modified,
+            ),
+        ]);
+
+        let changeset = changeset_core::Changeset::new(
+            "Fix core and app".to_string(),
+            vec![
+                changeset_core::PackageRelease::new("core".to_string(), BumpType::Patch),
+                changeset_core::PackageRelease::new("app".to_string(), BumpType::Patch),
+            ],
+            changeset_core::ChangeCategory::Changed,
+        );
+        let changeset_reader = MockChangesetReader::new()
+            .with_changeset(PathBuf::from(".changeset/changesets/fix.md"), changeset);
+
+        let operation = VerifyOperation::new(project_provider, git_provider, changeset_reader);
+
+        let input = VerifyInputBuilder::default()
+            .base("main".to_string())
+            .build()
+            .expect("all fields have defaults");
+
+        let result = operation
+            .execute(Path::new("/any"), &input)
+            .expect("operation should not error");
+
+        match result.outcome() {
+            VerifyOutcome::Success(verification_result) => {
+                assert!(verification_result.covered_packages().contains("core"));
+                assert!(verification_result.covered_packages().contains("app"));
+                assert!(
+                    !verification_result
+                        .uncovered_packages()
+                        .iter()
+                        .any(|p| p.name() == "helm-chart"),
+                    "helm-chart should not appear as uncovered — it had no changes"
+                );
+            }
+            other => panic!("Expected VerifyOutcome::Success, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn additional_package_uncovered_while_rust_packages_covered() {
+        let decl = make_declaration("helm-chart", &["charts/**"]);
+        let root_config = RootChangesetConfig::default().with_additional_packages(vec![decl]);
+        let helm_chart = make_package("helm-chart", "1.0.0");
+        let project_provider = MockProjectProvider::workspace(vec![("core", "1.0.0")])
+            .with_root_config(root_config)
+            .with_additional_packages(vec![helm_chart]);
+
+        let git_provider = MockGitProvider::new().with_changed_files(vec![
+            FileChange::new(
+                PathBuf::from(".changeset/changesets/fix.md"),
+                FileStatus::Added,
+            ),
+            FileChange::new(
+                PathBuf::from("crates/core/src/lib.rs"),
+                FileStatus::Modified,
+            ),
+            FileChange::new(PathBuf::from("charts/values.yaml"), FileStatus::Modified),
+        ]);
+
+        let changeset = crate::mocks::make_changeset("core", BumpType::Patch, "Fix core");
+        let changeset_reader = MockChangesetReader::new()
+            .with_changeset(PathBuf::from(".changeset/changesets/fix.md"), changeset);
+
+        let operation = VerifyOperation::new(project_provider, git_provider, changeset_reader);
+
+        let input = VerifyInputBuilder::default()
+            .base("main".to_string())
+            .build()
+            .expect("all fields have defaults");
+
+        let result = operation
+            .execute(Path::new("/any"), &input)
+            .expect("operation should not error");
+
+        match result.outcome() {
+            VerifyOutcome::Failed(verification_result) => {
+                assert!(
+                    verification_result
+                        .uncovered_packages()
+                        .iter()
+                        .any(|p| p.name() == "helm-chart"),
+                    "helm-chart should be uncovered"
+                );
+                assert!(
+                    !verification_result
+                        .uncovered_packages()
+                        .iter()
+                        .any(|p| p.name() == "core"),
+                    "core should be covered"
+                );
+            }
+            other => panic!("Expected VerifyOutcome::Failed, got {other:?}"),
+        }
+    }
+
     #[test]
     fn promote_to_patch_permits_none_bump_in_verify() {
         let root_config = RootChangesetConfig::default()
@@ -1068,5 +1411,27 @@ mod tests {
             }
             other => panic!("Expected VerifyOutcome::Success, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn single_package_never_calls_discover_additional_packages() {
+        let project_provider = MockProjectProvider::single_package("my-crate", "1.0.0")
+            .with_fail_on_discover_additional();
+
+        let git_provider = MockGitProvider::new();
+        let changeset_reader = MockChangesetReader::new();
+
+        let operation = VerifyOperation::new(project_provider, git_provider, changeset_reader);
+
+        let input = VerifyInputBuilder::default()
+            .base("main".to_string())
+            .build()
+            .expect("all fields have defaults");
+
+        let result = operation
+            .execute(Path::new("/any"), &input)
+            .expect("single-package should succeed without calling discover_additional_packages");
+
+        assert!(matches!(result.outcome(), VerifyOutcome::NoChanges));
     }
 }

@@ -116,10 +116,10 @@ impl Changelog {
             return first_version_pos + 1;
         }
 
-        if let Some(header_end) = self.content.find(HEADER_END_MARKER) {
-            if let Some(newline_after) = self.content[header_end..].find('\n') {
-                return header_end + newline_after + 1;
-            }
+        if let Some(header_end) = self.content.find(HEADER_END_MARKER)
+            && let Some(newline_after) = self.content[header_end..].find('\n')
+        {
+            return header_end + newline_after + 1;
         }
 
         self.content.len()

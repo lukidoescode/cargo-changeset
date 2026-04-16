@@ -2,7 +2,9 @@ use std::collections::HashMap;
 use std::path::Path;
 
 use changeset_changelog::{ChangelogLocation, ComparisonLinksSetting};
-use changeset_core::ZeroVersionBehavior;
+use changeset_core::{
+    AdditionalPackageDeclaration, VersionTrackingDependency, ZeroVersionBehavior,
+};
 use serde::Deserialize;
 use serde::de::IgnoredAny;
 
@@ -68,6 +70,11 @@ pub(crate) struct PackageMetadata {
 }
 
 #[derive(Debug, Deserialize, Default)]
+pub(crate) struct PackageLevelMetadata {
+    pub(crate) changeset: Option<PackageChangesetMetadata>,
+}
+
+#[derive(Debug, Deserialize, Default)]
 pub(crate) struct WorkspaceMetadata {
     pub(crate) changeset: Option<ChangesetMetadata>,
 }
@@ -107,6 +114,17 @@ pub(crate) struct ChangesetMetadata {
     pub(crate) none_bump_behavior: Option<changeset_core::NoneBumpBehavior>,
     #[serde(default)]
     pub(crate) none_bump_promote_message_template: Option<String>,
+    #[serde(default)]
+    pub(crate) additional_packages: Vec<AdditionalPackageDeclaration>,
+}
+
+#[derive(Debug, Deserialize, Default)]
+#[serde(rename_all = "kebab-case")]
+pub(crate) struct PackageChangesetMetadata {
+    #[serde(default)]
+    pub(crate) ignored_files: Vec<String>,
+    #[serde(default)]
+    pub(crate) additional_package_dependencies: Vec<VersionTrackingDependency>,
 }
 
 #[derive(Debug, Deserialize, Clone, Copy)]
@@ -114,6 +132,30 @@ pub(crate) struct ChangesetMetadata {
 pub(crate) enum TagFormatValue {
     VersionOnly,
     CratePrefixed,
+}
+
+#[derive(Debug, Deserialize)]
+pub(crate) struct PackageLevelManifest {
+    pub(crate) package: Option<PackageLevelPackage>,
+}
+
+#[derive(Debug, Deserialize)]
+pub(crate) struct PackageLevelPackage {
+    pub(crate) metadata: Option<PackageLevelMetadata>,
+}
+
+pub(crate) fn read_package_level_manifest(
+    path: &Path,
+) -> Result<PackageLevelManifest, ProjectError> {
+    let content = std::fs::read_to_string(path).map_err(|source| ProjectError::ManifestRead {
+        path: path.to_path_buf(),
+        source,
+    })?;
+
+    toml::from_str(&content).map_err(|source| ProjectError::ManifestParse {
+        path: path.to_path_buf(),
+        source,
+    })
 }
 
 pub(crate) fn read_manifest(path: &Path) -> Result<CargoManifest, ProjectError> {

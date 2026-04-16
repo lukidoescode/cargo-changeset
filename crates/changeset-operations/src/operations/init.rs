@@ -1,6 +1,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use changeset_core::CARGO_MANIFEST_FILENAME;
 use changeset_git::DEFAULT_BASE_BRANCH;
 use changeset_manifest::{InitConfig, MetadataSection};
 use changeset_project::{CargoProject, ProjectKind, RootChangesetConfig};
@@ -228,7 +229,7 @@ where
             if plan.config().is_empty() {
                 false
             } else {
-                let manifest_path = project.root().join("Cargo.toml");
+                let manifest_path = project.root().join(CARGO_MANIFEST_FILENAME);
                 writer.write_metadata(&manifest_path, plan.metadata_section(), plan.config())?;
                 true
             }
@@ -261,17 +262,17 @@ where
     fn build_config(&self, input: &InitInput, context: ProjectContext) -> Result<InitConfig> {
         let mut config = build_config_from_input(input, context);
 
-        if config.is_empty() {
-            if let Some(ref provider) = self.interaction_provider {
-                let interactive_input = InitInputBuilder::default()
-                    .git_config(provider.configure_git_settings(context)?)
-                    .changelog_config(provider.configure_changelog_settings(context)?)
-                    .version_config(provider.configure_version_settings()?)
-                    .filtering_config(provider.configure_filtering_settings()?)
-                    .build()
-                    .expect("all fields have defaults");
-                apply_settings_to_config(&mut config, &interactive_input);
-            }
+        if config.is_empty()
+            && let Some(ref provider) = self.interaction_provider
+        {
+            let interactive_input = InitInputBuilder::default()
+                .git_config(provider.configure_git_settings(context)?)
+                .changelog_config(provider.configure_changelog_settings(context)?)
+                .version_config(provider.configure_version_settings()?)
+                .filtering_config(provider.configure_filtering_settings()?)
+                .build()
+                .expect("all fields have defaults");
+            apply_settings_to_config(&mut config, &interactive_input);
         }
 
         Ok(config)
@@ -379,10 +380,10 @@ fn apply_settings_to_config(config: &mut InitConfig, input: &InitInput) {
             .clone_from(&version.none_bump_promote_message_template);
     }
 
-    if let Some(filtering) = input.filtering_config() {
-        if !filtering.ignored_files.is_empty() {
-            config.ignored_files = Some(filtering.ignored_files.clone());
-        }
+    if let Some(filtering) = input.filtering_config()
+        && !filtering.ignored_files.is_empty()
+    {
+        config.ignored_files = Some(filtering.ignored_files.clone());
     }
 }
 

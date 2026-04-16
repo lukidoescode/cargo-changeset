@@ -91,11 +91,14 @@ pub(crate) fn run(args: InitArgs, start_path: &Path) -> Result<()> {
         println!("Created .gitkeep file");
     }
 
-    if output.wrote_config() {
-        if let Some(section) = output.config_location() {
-            println!("Wrote configuration to {section} in Cargo.toml");
-        }
+    if output.wrote_config()
+        && let Some(section) = output.config_location()
+    {
+        println!("Wrote configuration to {section} in Cargo.toml");
     }
+
+    println!();
+    println!("Tip: Use 'cargo changeset additional-packages add' to declare non-Rust packages.");
 
     Ok(())
 }
@@ -211,10 +214,10 @@ fn print_config_summary(config: &InitConfig) {
     {
         println!("  dependency_bump_changelog_template = \"{dependency_bump_changelog_template}\"");
     }
-    if let Some(ref ignored_files) = config.ignored_files {
-        if !ignored_files.is_empty() {
-            println!("  ignored_files = {:?}", ignored_files);
-        }
+    if let Some(ref ignored_files) = config.ignored_files
+        && !ignored_files.is_empty()
+    {
+        println!("  ignored_files = {:?}", ignored_files);
     }
 }
 

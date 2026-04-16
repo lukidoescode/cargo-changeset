@@ -1,52 +1,11 @@
+mod common;
+
 use std::fs;
 
 use predicates::str::contains;
 use tempfile::TempDir;
 
-fn create_virtual_workspace() -> TempDir {
-    let dir = TempDir::new().expect("failed to create temp dir");
-
-    fs::create_dir_all(dir.path().join("crates/a/src")).expect("failed to create crate a dir");
-    fs::create_dir_all(dir.path().join("crates/b/src")).expect("failed to create crate b dir");
-
-    fs::write(
-        dir.path().join("Cargo.toml"),
-        r#"
-[workspace]
-members = ["crates/*"]
-resolver = "2"
-"#,
-    )
-    .expect("failed to write workspace Cargo.toml");
-
-    fs::write(
-        dir.path().join("crates/a/Cargo.toml"),
-        r#"
-[package]
-name = "crate-a"
-version = "0.1.0"
-edition = "2021"
-"#,
-    )
-    .expect("failed to write crate-a Cargo.toml");
-
-    fs::write(dir.path().join("crates/a/src/lib.rs"), "").expect("failed to write crate-a lib.rs");
-
-    fs::write(
-        dir.path().join("crates/b/Cargo.toml"),
-        r#"
-[package]
-name = "crate-b"
-version = "0.2.0"
-edition = "2021"
-"#,
-    )
-    .expect("failed to write crate-b Cargo.toml");
-
-    fs::write(dir.path().join("crates/b/src/lib.rs"), "").expect("failed to write crate-b lib.rs");
-
-    dir
-}
+use common::workspaces::create_virtual_workspace;
 
 fn create_workspace_with_stable_version() -> TempDir {
     let dir = TempDir::new().expect("failed to create temp dir");

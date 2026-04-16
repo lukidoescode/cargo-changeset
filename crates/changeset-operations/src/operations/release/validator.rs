@@ -374,25 +374,25 @@ impl ReleaseValidator {
         collector: &mut ValidationErrorCollector,
     ) {
         for pkg_name in &cli_input.cli_graduate {
-            if let Some(pkg) = package_lookup.get(pkg_name.as_str()) {
-                if is_prerelease(pkg.version()) {
-                    collector.push(ValidationError::CannotGraduateFromPrerelease {
-                        package: pkg_name.clone(),
-                        current_version: pkg.version().clone(),
-                    });
-                }
+            if let Some(pkg) = package_lookup.get(pkg_name.as_str())
+                && is_prerelease(pkg.version())
+            {
+                collector.push(ValidationError::CannotGraduateFromPrerelease {
+                    package: pkg_name.clone(),
+                    current_version: pkg.version().clone(),
+                });
             }
         }
 
         if let Some(state) = graduation_state {
             for pkg_name in state.iter() {
-                if let Some(pkg) = package_lookup.get(pkg_name) {
-                    if is_prerelease(pkg.version()) {
-                        collector.push(ValidationError::CannotGraduateFromPrerelease {
-                            package: pkg_name.to_string(),
-                            current_version: pkg.version().clone(),
-                        });
-                    }
+                if let Some(pkg) = package_lookup.get(pkg_name)
+                    && is_prerelease(pkg.version())
+                {
+                    collector.push(ValidationError::CannotGraduateFromPrerelease {
+                        package: pkg_name.to_string(),
+                        current_version: pkg.version().clone(),
+                    });
                 }
             }
         }
@@ -405,25 +405,27 @@ impl ReleaseValidator {
         collector: &mut ValidationErrorCollector,
     ) {
         for pkg_name in &cli_input.cli_graduate {
-            if let Some(pkg) = package_lookup.get(pkg_name.as_str()) {
-                if !is_zero_version(pkg.version()) && !is_prerelease(pkg.version()) {
-                    collector.push(ValidationError::CannotGraduateStableVersion {
-                        package: pkg_name.clone(),
-                        version: pkg.version().clone(),
-                    });
-                }
+            if let Some(pkg) = package_lookup.get(pkg_name.as_str())
+                && !is_zero_version(pkg.version())
+                && !is_prerelease(pkg.version())
+            {
+                collector.push(ValidationError::CannotGraduateStableVersion {
+                    package: pkg_name.clone(),
+                    version: pkg.version().clone(),
+                });
             }
         }
 
         if let Some(state) = graduation_state {
             for pkg_name in state.iter() {
-                if let Some(pkg) = package_lookup.get(pkg_name) {
-                    if !is_zero_version(pkg.version()) && !is_prerelease(pkg.version()) {
-                        collector.push(ValidationError::CannotGraduateStableVersion {
-                            package: pkg_name.to_string(),
-                            version: pkg.version().clone(),
-                        });
-                    }
+                if let Some(pkg) = package_lookup.get(pkg_name)
+                    && !is_zero_version(pkg.version())
+                    && !is_prerelease(pkg.version())
+                {
+                    collector.push(ValidationError::CannotGraduateStableVersion {
+                        package: pkg_name.to_string(),
+                        version: pkg.version().clone(),
+                    });
                 }
             }
         }

@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use changeset_core::PackageInfo;
+use changeset_core::{CARGO_MANIFEST_FILENAME, PackageInfo};
 
 use crate::Result;
 
@@ -19,7 +19,7 @@ pub trait InheritedVersionChecker: Send + Sync {
     ) -> Result<Vec<String>> {
         let mut inherited = Vec::new();
         for pkg in packages {
-            let manifest_path = pkg.path().join("Cargo.toml");
+            let manifest_path = pkg.path().join(CARGO_MANIFEST_FILENAME);
             if self.has_inherited_version(&manifest_path)? {
                 inherited.push(pkg.name().clone());
             }
@@ -59,13 +59,13 @@ mod tests {
 
     impl InheritedVersionChecker for TestChecker {
         fn has_inherited_version(&self, manifest_path: &Path) -> Result<bool> {
-            if let Some(ref fail_path) = self.fail_on {
-                if manifest_path == fail_path {
-                    return Err(crate::OperationError::Io(std::io::Error::new(
-                        std::io::ErrorKind::PermissionDenied,
-                        "mock failure",
-                    )));
-                }
+            if let Some(ref fail_path) = self.fail_on
+                && manifest_path == fail_path
+            {
+                return Err(crate::OperationError::Io(std::io::Error::new(
+                    std::io::ErrorKind::PermissionDenied,
+                    "mock failure",
+                )));
             }
             Ok(self.inherited.contains(manifest_path))
         }

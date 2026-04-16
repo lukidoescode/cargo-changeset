@@ -3,7 +3,6 @@ use std::path::Path;
 use dialoguer::{Input, Select};
 
 use changeset_core::PackageInfo;
-use changeset_operations::OperationError;
 use changeset_operations::operations::{
     GraduationDirectInput, GraduationDirectOperation, GraduationEvent, GraduationManageOperation,
     PrereleaseDirectInput, PrereleaseDirectOperation, PrereleaseEvent, PrereleaseManageOperation,
@@ -36,7 +35,7 @@ impl PrereleaseInteractionProvider for TerminalManageInteractionProvider {
             .items(options)
             .default(0)
             .interact_opt()
-            .map_err(dialoguer_to_operation_error)?;
+            .map_err(super::dialoguer_to_operation_error)?;
 
         Ok(match selection {
             Some(0) => MenuSelection::Selected(PrereleaseAction::Add),
@@ -59,7 +58,7 @@ impl PrereleaseInteractionProvider for TerminalManageInteractionProvider {
             .with_prompt("Select a crate to add to pre-release")
             .items(&items)
             .interact_opt()
-            .map_err(dialoguer_to_operation_error)?;
+            .map_err(super::dialoguer_to_operation_error)?;
 
         Ok(match selection {
             Some(index) => MenuSelection::Selected(index),
@@ -71,7 +70,7 @@ impl PrereleaseInteractionProvider for TerminalManageInteractionProvider {
         let tag: String = Input::new()
             .with_prompt("Enter pre-release tag (e.g., alpha, beta, rc)")
             .interact_text()
-            .map_err(dialoguer_to_operation_error)?;
+            .map_err(super::dialoguer_to_operation_error)?;
 
         Ok(tag)
     }
@@ -89,7 +88,7 @@ impl PrereleaseInteractionProvider for TerminalManageInteractionProvider {
             .with_prompt("Select a crate to remove from pre-release")
             .items(&display_items)
             .interact_opt()
-            .map_err(dialoguer_to_operation_error)?;
+            .map_err(super::dialoguer_to_operation_error)?;
 
         Ok(match selection {
             Some(index) => MenuSelection::Selected(index),
@@ -113,7 +112,7 @@ impl GraduationInteractionProvider for TerminalManageInteractionProvider {
             .items(options)
             .default(0)
             .interact_opt()
-            .map_err(dialoguer_to_operation_error)?;
+            .map_err(super::dialoguer_to_operation_error)?;
 
         Ok(match selection {
             Some(0) => MenuSelection::Selected(GraduationAction::Add),
@@ -135,7 +134,7 @@ impl GraduationInteractionProvider for TerminalManageInteractionProvider {
             .with_prompt("Select a crate to graduate (move to graduation queue)")
             .items(&items)
             .interact_opt()
-            .map_err(dialoguer_to_operation_error)?;
+            .map_err(super::dialoguer_to_operation_error)?;
 
         Ok(match selection {
             Some(index) => MenuSelection::Selected(index),
@@ -151,7 +150,7 @@ impl GraduationInteractionProvider for TerminalManageInteractionProvider {
             .with_prompt("Select a crate to remove from graduation queue")
             .items(items)
             .interact_opt()
-            .map_err(dialoguer_to_operation_error)?;
+            .map_err(super::dialoguer_to_operation_error)?;
 
         Ok(match selection {
             Some(index) => MenuSelection::Selected(index),
@@ -295,81 +294,6 @@ fn print_graduation_events(events: &[GraduationEvent]) {
             }
             GraduationEvent::NoGraduationPackages => {
                 println!("No packages are currently queued for graduation.");
-            }
-        }
-    }
-}
-
-fn dialoguer_to_operation_error(e: dialoguer::Error) -> OperationError {
-    match e {
-        dialoguer::Error::IO(io_err) => OperationError::Io(io_err),
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    mod dialoguer_conversion {
-        use super::*;
-        use std::io;
-
-        #[test]
-        fn converts_io_error_to_operation_io_variant() {
-            let io_err = io::Error::new(io::ErrorKind::BrokenPipe, "pipe closed");
-            let dialoguer_err = dialoguer::Error::IO(io_err);
-
-            let result = dialoguer_to_operation_error(dialoguer_err);
-
-            assert!(matches!(result, OperationError::Io(_)));
-        }
-
-        #[test]
-        fn preserves_io_error_kind() {
-            let io_err = io::Error::new(io::ErrorKind::PermissionDenied, "access denied");
-            let dialoguer_err = dialoguer::Error::IO(io_err);
-
-            let result = dialoguer_to_operation_error(dialoguer_err);
-
-            match result {
-                OperationError::Io(inner) => {
-                    assert_eq!(inner.kind(), io::ErrorKind::PermissionDenied);
-                }
-                other => panic!("expected OperationError::Io, got {other:?}"),
-            }
-        }
-
-        #[test]
-        fn preserves_error_chain() {
-            let io_err = io::Error::other("chain test");
-            let dialoguer_err = dialoguer::Error::IO(io_err);
-
-            let result = dialoguer_to_operation_error(dialoguer_err);
-
-            let source = std::error::Error::source(&result);
-            assert!(
-                source.is_some(),
-                "error chain should be preserved through conversion"
-            );
-        }
-
-        #[test]
-        fn preserves_io_error_message() {
-            let io_err = io::Error::other("terminal unavailable");
-            let dialoguer_err = dialoguer::Error::IO(io_err);
-
-            let result = dialoguer_to_operation_error(dialoguer_err);
-
-            assert!(
-                result.to_string().contains("IO error"),
-                "expected display to contain 'IO error', got: {}",
-                result
-            );
-            match result {
-                OperationError::Io(inner) => {
-                    assert_eq!(inner.to_string(), "terminal unavailable");
-                }
-                other => panic!("expected OperationError::Io, got {other:?}"),
             }
         }
     }

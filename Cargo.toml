@@ -4,7 +4,7 @@ resolver = "3"
 
 [workspace.package]
 edition = "2024"
-rust-version = "1.85.0"
+rust-version = "1.88.0"
 license = "MIT"
 repository = "https://github.com/lukidoescode/cargo-changeset"
 homepage = "https://github.com/lukidoescode/cargo-changeset"
@@ -51,6 +51,8 @@ git2 = { version = "0.20", default-features = false }
 dialoguer = "0.12.0"
 petname = "2.0.2"
 toml_edit = "0.25.0"
+yaml-edit = "0.2.1"
+jsonc-parser = { version = "0.32.3", features = ["cst"] }
 tracing = "0.1.44"
 gset = "1.1.0"
 derive_builder = "0.20.2"
