@@ -1,35 +1,10 @@
-use std::fs;
-
-use changeset_test_helpers::git::{git_add_and_commit, init_git_repo};
-use tempfile::TempDir;
-
-fn create_single_package_project() -> TempDir {
-    let dir = TempDir::new().expect("failed to create temp dir");
-
-    init_git_repo(&dir);
-
-    fs::create_dir_all(dir.path().join("src")).expect("failed to create src dir");
-
-    fs::write(
-        dir.path().join("Cargo.toml"),
-        r#"[package]
-name = "my-crate"
-version = "0.1.0"
-edition = "2021"
-"#,
-    )
-    .expect("failed to write Cargo.toml");
-
-    fs::write(dir.path().join("src/lib.rs"), "").expect("failed to write lib.rs");
-
-    git_add_and_commit(&dir, "Initial commit");
-
-    dir
-}
+use changeset_test_helpers::workspaces::WorkspaceBuilder;
 
 #[test]
 fn cargo_dispatch_verify_succeeds_with_changeset_prefix() {
-    let workspace = create_single_package_project();
+    let workspace = WorkspaceBuilder::single_package("my-crate", "0.1.0")
+        .with_git()
+        .build();
 
     assert_cmd::cargo::cargo_bin_cmd!("cargo-changeset")
         .arg("changeset")

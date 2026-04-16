@@ -2,7 +2,9 @@ use std::fs;
 use std::fs::OpenOptions;
 use std::io::Write as IoWrite;
 
-use changeset_test_helpers::changesets::write_multi_changeset;
+use changeset_test_helpers::changesets::{
+    add_changeset, add_changeset_with_name, write_multi_changeset,
+};
 use changeset_test_helpers::git::{create_branch, git_add_and_commit, init_git_repo};
 use changeset_test_helpers::workspaces::{
     create_virtual_workspace_with_git, create_workspace_with_circular_version_tracking,
@@ -13,20 +15,6 @@ use changeset_test_helpers::workspaces::{
 use predicates::prelude::PredicateBooleanExt as _;
 use predicates::str::contains;
 use tempfile::TempDir;
-
-fn add_changeset(dir: &TempDir, package_name: &str) {
-    add_changeset_with_name(dir, package_name, &format!("{package_name}-changeset"));
-}
-
-fn add_changeset_with_name(dir: &TempDir, package_name: &str, changeset_name: &str) {
-    changeset_test_helpers::changesets::write_changeset(
-        dir,
-        &format!("{changeset_name}.md"),
-        package_name,
-        "patch",
-        &format!("Test changeset for {package_name}."),
-    );
-}
 
 #[test]
 fn verify_exit_code_0_when_all_changes_covered() {

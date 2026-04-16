@@ -1,73 +1,19 @@
 use std::fs;
 
-use changeset_test_helpers::workspaces::create_virtual_workspace;
+use changeset_test_helpers::workspaces::{WorkspaceBuilder, create_virtual_workspace};
 use predicates::str::contains;
 use tempfile::TempDir;
 
 fn create_workspace_with_stable_version() -> TempDir {
-    let dir = TempDir::new().expect("failed to create temp dir");
-
-    fs::create_dir_all(dir.path().join("crates/stable/src"))
-        .expect("failed to create stable crate dir");
-
-    fs::write(
-        dir.path().join("Cargo.toml"),
-        r#"
-[workspace]
-members = ["crates/*"]
-resolver = "2"
-"#,
-    )
-    .expect("failed to write workspace Cargo.toml");
-
-    fs::write(
-        dir.path().join("crates/stable/Cargo.toml"),
-        r#"
-[package]
-name = "stable-crate"
-version = "1.2.3"
-edition = "2021"
-"#,
-    )
-    .expect("failed to write stable-crate Cargo.toml");
-
-    fs::write(dir.path().join("crates/stable/src/lib.rs"), "")
-        .expect("failed to write stable-crate lib.rs");
-
-    dir
+    WorkspaceBuilder::virtual_workspace()
+        .crate_member_at("stable-crate", "1.2.3", "crates/stable")
+        .build()
 }
 
 fn create_workspace_with_prerelease_version() -> TempDir {
-    let dir = TempDir::new().expect("failed to create temp dir");
-
-    fs::create_dir_all(dir.path().join("crates/pre/src"))
-        .expect("failed to create prerelease crate dir");
-
-    fs::write(
-        dir.path().join("Cargo.toml"),
-        r#"
-[workspace]
-members = ["crates/*"]
-resolver = "2"
-"#,
-    )
-    .expect("failed to write workspace Cargo.toml");
-
-    fs::write(
-        dir.path().join("crates/pre/Cargo.toml"),
-        r#"
-[package]
-name = "prerelease-crate"
-version = "0.1.0-alpha.1"
-edition = "2021"
-"#,
-    )
-    .expect("failed to write prerelease-crate Cargo.toml");
-
-    fs::write(dir.path().join("crates/pre/src/lib.rs"), "")
-        .expect("failed to write prerelease-crate lib.rs");
-
-    dir
+    WorkspaceBuilder::virtual_workspace()
+        .crate_member_at("prerelease-crate", "0.1.0-alpha.1", "crates/pre")
+        .build()
 }
 
 mod manage_prerelease {

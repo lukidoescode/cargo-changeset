@@ -17,6 +17,20 @@ pub fn write_changeset(dir: &TempDir, filename: &str, package: &str, bump: &str,
     fs::write(changeset_dir.join(filename), content).expect("failed to write changeset");
 }
 
+pub fn add_changeset(dir: &TempDir, package_name: &str) {
+    add_changeset_with_name(dir, package_name, &format!("{package_name}-changeset"));
+}
+
+pub fn add_changeset_with_name(dir: &TempDir, package_name: &str, changeset_name: &str) {
+    write_changeset(
+        dir,
+        &format!("{changeset_name}.md"),
+        package_name,
+        "patch",
+        &format!("Test changeset for {package_name}."),
+    );
+}
+
 pub fn write_multi_changeset(
     dir: &TempDir,
     filename: &str,

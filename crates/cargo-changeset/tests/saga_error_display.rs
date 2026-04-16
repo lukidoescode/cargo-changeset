@@ -1,80 +1,25 @@
 use std::fs;
 
 use changeset_test_helpers::changesets::{write_changeset, write_multi_changeset};
-use changeset_test_helpers::git::{create_tag, git_add_and_commit, init_git_repo};
+use changeset_test_helpers::git::{create_tag, git_add_and_commit};
+use changeset_test_helpers::workspaces::WorkspaceBuilder;
 use predicates::str::contains;
 use tempfile::TempDir;
 
 fn create_single_package_with_git() -> TempDir {
-    let dir = TempDir::new().expect("create temp dir");
-
-    init_git_repo(&dir);
-
-    fs::write(
-        dir.path().join("Cargo.toml"),
-        r#"[package]
-name = "my-crate"
-version = "1.0.0"
-edition = "2021"
-"#,
-    )
-    .expect("write Cargo.toml");
-
-    fs::create_dir_all(dir.path().join("src")).expect("create src dir");
-    fs::write(dir.path().join("src/lib.rs"), "").expect("write lib.rs");
-
-    fs::create_dir_all(dir.path().join(".changeset/changesets"))
-        .expect("create .changeset/changesets dir");
-
-    git_add_and_commit(&dir, "Initial commit");
-
-    dir
+    WorkspaceBuilder::single_package("my-crate", "1.0.0")
+        .with_changeset_dir()
+        .with_git()
+        .build()
 }
 
 fn create_workspace_with_two_crates() -> TempDir {
-    let dir = TempDir::new().expect("create temp dir");
-
-    init_git_repo(&dir);
-
-    fs::write(
-        dir.path().join("Cargo.toml"),
-        r#"[workspace]
-members = ["crates/*"]
-resolver = "2"
-"#,
-    )
-    .expect("write workspace Cargo.toml");
-
-    fs::create_dir_all(dir.path().join("crates/crate-a/src")).expect("create crate-a dir");
-    fs::write(
-        dir.path().join("crates/crate-a/Cargo.toml"),
-        r#"[package]
-name = "crate-a"
-version = "1.0.0"
-edition = "2021"
-"#,
-    )
-    .expect("write crate-a Cargo.toml");
-    fs::write(dir.path().join("crates/crate-a/src/lib.rs"), "").expect("write lib.rs");
-
-    fs::create_dir_all(dir.path().join("crates/crate-b/src")).expect("create crate-b dir");
-    fs::write(
-        dir.path().join("crates/crate-b/Cargo.toml"),
-        r#"[package]
-name = "crate-b"
-version = "2.0.0"
-edition = "2021"
-"#,
-    )
-    .expect("write crate-b Cargo.toml");
-    fs::write(dir.path().join("crates/crate-b/src/lib.rs"), "").expect("write lib.rs");
-
-    fs::create_dir_all(dir.path().join(".changeset/changesets"))
-        .expect("create .changeset/changesets dir");
-
-    git_add_and_commit(&dir, "Initial commit");
-
-    dir
+    WorkspaceBuilder::virtual_workspace()
+        .crate_member("crate-a", "1.0.0")
+        .crate_member("crate-b", "2.0.0")
+        .with_changeset_dir()
+        .with_git()
+        .build()
 }
 
 #[test]
