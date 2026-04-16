@@ -1,13 +1,10 @@
-mod common;
-
 use std::fs;
 use std::process::Command;
 
+use changeset_test_helpers::changesets::write_changeset;
+use changeset_test_helpers::git::{create_branch, git_add_and_commit, init_git_repo};
+use changeset_test_helpers::workspaces::{add_helm_chart_config, create_workspace_with_helm_chart};
 use predicates::str::contains;
-
-use common::changesets::write_changeset;
-use common::git::{create_branch, git_add_and_commit, init_git_repo};
-use common::workspaces::{add_helm_chart_config, create_workspace_with_helm_chart};
 
 mod additional_packages {
     use super::*;

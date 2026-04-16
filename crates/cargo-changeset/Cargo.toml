@@ -33,10 +33,10 @@ chrono = { version = "0.4.44", features = ["clock"], default-features = false }
 
 [dev-dependencies]
 assert_cmd = "2.1"
-predicates = "3.1"
+changeset-test-helpers = { path = "../changeset-test-helpers" }
 expectrl = "0.8"
+predicates = "3.1"
 indexmap = { workspace = true }
 semver = { workspace = true }
 serde_json = { workspace = true }
-vt100 = "0.16.2"
 indoc = "2.0.7"

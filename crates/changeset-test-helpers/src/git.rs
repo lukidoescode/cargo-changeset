@@ -1,5 +1,3 @@
-#![allow(dead_code)]
-
 use std::process::Command;
 
 use tempfile::TempDir;
@@ -46,6 +44,16 @@ pub fn create_branch(dir: &TempDir, name: &str) {
         .current_dir(dir.path())
         .output()
         .expect("failed to create branch");
+}
+
+pub fn lockfile_hash(dir: &TempDir) -> Vec<u8> {
+    let output = Command::new("git")
+        .args(["hash-object", "Cargo.lock"])
+        .current_dir(dir.path())
+        .output()
+        .expect("failed to hash Cargo.lock");
+
+    output.stdout
 }
 
 pub fn create_tag(dir: &TempDir, tag_name: &str, message: &str) {

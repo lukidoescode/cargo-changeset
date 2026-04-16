@@ -1,47 +1,18 @@
-mod common;
-
 use std::fs;
 use std::process::Command;
 use std::time::Duration;
 
+use changeset_test_helpers::workspaces::{
+    WorkspaceBuilder, create_single_crate_workspace, create_virtual_workspace,
+    create_workspace_with_additional_package,
+};
 use predicates::str::contains;
 use tempfile::TempDir;
 
-use common::workspaces::{
-    create_single_crate_workspace, create_virtual_workspace,
-    create_workspace_with_additional_package,
-};
-
 fn create_workspace_with_underscored_crate() -> TempDir {
-    let dir = TempDir::new().expect("failed to create temp dir");
-
-    fs::create_dir_all(dir.path().join("crates/one/src")).expect("failed to create crate one dir");
-
-    fs::write(
-        dir.path().join("Cargo.toml"),
-        r#"
-[workspace]
-members = ["crates/*"]
-resolver = "2"
-"#,
-    )
-    .expect("failed to write workspace Cargo.toml");
-
-    fs::write(
-        dir.path().join("crates/one/Cargo.toml"),
-        r#"
-[package]
-name = "crate_one"
-version = "0.1.0"
-edition = "2021"
-"#,
-    )
-    .expect("failed to write crate_one Cargo.toml");
-
-    fs::write(dir.path().join("crates/one/src/lib.rs"), "")
-        .expect("failed to write crate_one lib.rs");
-
-    dir
+    WorkspaceBuilder::virtual_workspace()
+        .crate_member_at("crate_one", "0.1.0", "crates/one")
+        .build()
 }
 
 mod non_interactive {

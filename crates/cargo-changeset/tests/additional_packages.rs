@@ -1,18 +1,15 @@
-mod common;
-
 use std::fs;
 use std::process::Command;
 
-use predicates::str::contains;
-
-use common::changesets::write_changeset;
-use common::git::{git_add_and_commit, init_git_repo};
-use common::workspaces::{
+use changeset_test_helpers::changesets::write_changeset;
+use changeset_test_helpers::git::{git_add_and_commit, init_git_repo};
+use changeset_test_helpers::workspaces::{
     add_helm_chart_config, add_helm_chart_config_with_three_deps, create_single_crate_workspace,
     create_workspace_with_helm_chart, create_workspace_with_unknown_dependency,
     create_workspace_with_version_tracking_additional_to_cargo,
     create_workspace_with_version_tracking_cargo_to_additional,
 };
+use predicates::str::contains;
 
 mod add_tests {
     use super::*;
@@ -1063,10 +1060,16 @@ mod help_and_ux_tests {
 
 #[cfg(not(windows))]
 mod interactive_dependencies_tests {
-    use common::terminal_session::TerminalSession;
+    use std::path::PathBuf;
+
+    use changeset_test_helpers::terminal_session::TerminalSession;
     use indoc::indoc;
 
     use super::*;
+
+    fn bin_path() -> PathBuf {
+        assert_cmd::cargo::cargo_bin("cargo-changeset")
+    }
 
     // --- dependencies add ---
 
@@ -1075,8 +1078,11 @@ mod interactive_dependencies_tests {
         let workspace = create_workspace_with_helm_chart();
         add_helm_chart_config(&workspace);
 
-        let mut session =
-            TerminalSession::spawn(&workspace, &["additional-packages", "dependencies", "add"]);
+        let mut session = TerminalSession::spawn(
+            &bin_path(),
+            &workspace,
+            &["additional-packages", "dependencies", "add"],
+        );
         session.wait_for("Select the owner package");
         session.assert_screen(
             "owner menu rendered",
@@ -1097,8 +1103,11 @@ mod interactive_dependencies_tests {
         let cargo_toml_before =
             fs::read_to_string(workspace.path().join("Cargo.toml")).expect("read Cargo.toml");
 
-        let mut session =
-            TerminalSession::spawn(&workspace, &["additional-packages", "dependencies", "add"]);
+        let mut session = TerminalSession::spawn(
+            &bin_path(),
+            &workspace,
+            &["additional-packages", "dependencies", "add"],
+        );
         session.wait_for("Select the owner package");
         session.assert_screen(
             "owner menu before cancel",
@@ -1127,8 +1136,11 @@ mod interactive_dependencies_tests {
         let cargo_toml_before =
             fs::read_to_string(workspace.path().join("Cargo.toml")).expect("read Cargo.toml");
 
-        let mut session =
-            TerminalSession::spawn(&workspace, &["additional-packages", "dependencies", "add"]);
+        let mut session = TerminalSession::spawn(
+            &bin_path(),
+            &workspace,
+            &["additional-packages", "dependencies", "add"],
+        );
         session.wait_for("Select the owner package");
         session.assert_screen(
             "owner menu before selecting",
@@ -1164,8 +1176,11 @@ mod interactive_dependencies_tests {
         let workspace = create_workspace_with_helm_chart();
         add_helm_chart_config(&workspace);
 
-        let mut session =
-            TerminalSession::spawn(&workspace, &["additional-packages", "dependencies", "add"]);
+        let mut session = TerminalSession::spawn(
+            &bin_path(),
+            &workspace,
+            &["additional-packages", "dependencies", "add"],
+        );
         session.wait_for("Select the owner package");
         session.assert_screen(
             "owner menu rendered",
@@ -1261,8 +1276,11 @@ mod interactive_dependencies_tests {
         let workspace = create_workspace_with_helm_chart();
         add_helm_chart_config(&workspace);
 
-        let mut session =
-            TerminalSession::spawn(&workspace, &["additional-packages", "dependencies", "add"]);
+        let mut session = TerminalSession::spawn(
+            &bin_path(),
+            &workspace,
+            &["additional-packages", "dependencies", "add"],
+        );
         session.wait_for("Select the owner package");
         session.assert_screen(
             "owner menu before selecting",
@@ -1291,8 +1309,11 @@ mod interactive_dependencies_tests {
         let workspace = create_workspace_with_helm_chart();
         add_helm_chart_config(&workspace);
 
-        let mut session =
-            TerminalSession::spawn(&workspace, &["additional-packages", "dependencies", "add"]);
+        let mut session = TerminalSession::spawn(
+            &bin_path(),
+            &workspace,
+            &["additional-packages", "dependencies", "add"],
+        );
         session.wait_for("Select the owner package");
         session.assert_screen(
             "owner menu rendered",
@@ -1371,6 +1392,7 @@ mod interactive_dependencies_tests {
         let workspace = create_workspace_with_version_tracking_additional_to_cargo();
 
         let mut session = TerminalSession::spawn(
+            &bin_path(),
             &workspace,
             &["additional-packages", "dependencies", "remove"],
         );
@@ -1394,6 +1416,7 @@ mod interactive_dependencies_tests {
             fs::read_to_string(workspace.path().join("Cargo.toml")).expect("read Cargo.toml");
 
         let mut session = TerminalSession::spawn(
+            &bin_path(),
             &workspace,
             &["additional-packages", "dependencies", "remove"],
         );
@@ -1426,6 +1449,7 @@ mod interactive_dependencies_tests {
             fs::read_to_string(workspace.path().join("Cargo.toml")).expect("read Cargo.toml");
 
         let mut session = TerminalSession::spawn(
+            &bin_path(),
             &workspace,
             &["additional-packages", "dependencies", "remove"],
         );
@@ -1462,6 +1486,7 @@ mod interactive_dependencies_tests {
         let workspace = create_workspace_with_version_tracking_additional_to_cargo();
 
         let mut session = TerminalSession::spawn(
+            &bin_path(),
             &workspace,
             &["additional-packages", "dependencies", "remove"],
         );
@@ -1493,6 +1518,7 @@ mod interactive_dependencies_tests {
         let workspace = create_workspace_with_version_tracking_additional_to_cargo();
 
         let mut session = TerminalSession::spawn(
+            &bin_path(),
             &workspace,
             &["additional-packages", "dependencies", "remove"],
         );
@@ -1539,8 +1565,11 @@ mod interactive_dependencies_tests {
         let workspace = create_workspace_with_helm_chart();
         add_helm_chart_config(&workspace);
 
-        let mut session =
-            TerminalSession::spawn(&workspace, &["additional-packages", "dependencies", "list"]);
+        let mut session = TerminalSession::spawn(
+            &bin_path(),
+            &workspace,
+            &["additional-packages", "dependencies", "list"],
+        );
         session.wait_for("Select package");
         session.assert_screen(
             "list package menu",
@@ -1559,8 +1588,11 @@ mod interactive_dependencies_tests {
         let workspace = create_workspace_with_helm_chart();
         add_helm_chart_config(&workspace);
 
-        let mut session =
-            TerminalSession::spawn(&workspace, &["additional-packages", "dependencies", "list"]);
+        let mut session = TerminalSession::spawn(
+            &bin_path(),
+            &workspace,
+            &["additional-packages", "dependencies", "list"],
+        );
         session.wait_for("Select package");
         session.assert_screen(
             "list package menu before cancel",
@@ -1579,8 +1611,11 @@ mod interactive_dependencies_tests {
     fn interactive_dep_list_full_flow() {
         let workspace = create_workspace_with_version_tracking_additional_to_cargo();
 
-        let mut session =
-            TerminalSession::spawn(&workspace, &["additional-packages", "dependencies", "list"]);
+        let mut session = TerminalSession::spawn(
+            &bin_path(),
+            &workspace,
+            &["additional-packages", "dependencies", "list"],
+        );
         session.wait_for("Select package");
         session.assert_screen(
             "list package menu",

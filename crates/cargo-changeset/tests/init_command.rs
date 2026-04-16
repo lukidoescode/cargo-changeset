@@ -1,115 +1,32 @@
-mod common;
-
 use std::fs;
 
+use changeset_test_helpers::git::{create_branch, git_add_and_commit, init_git_repo};
+use changeset_test_helpers::workspaces::WorkspaceBuilder;
 use predicates::str::contains;
 use tempfile::TempDir;
 
-use common::git::{create_branch, git_add_and_commit, init_git_repo};
-
 fn setup_single_package() -> TempDir {
-    let dir = TempDir::new().expect("create temp dir");
-    fs::create_dir_all(dir.path().join("src")).expect("create src dir");
-    fs::write(
-        dir.path().join("Cargo.toml"),
-        r#"[package]
-name = "test-crate"
-version = "1.0.0"
-edition = "2021"
-"#,
-    )
-    .expect("write Cargo.toml");
-    fs::write(dir.path().join("src/lib.rs"), "").expect("write lib.rs");
-    dir
+    WorkspaceBuilder::single_package("test-crate", "1.0.0").build()
 }
 
 fn setup_workspace() -> TempDir {
-    let dir = TempDir::new().expect("create temp dir");
-    fs::create_dir_all(dir.path().join("crates/foo/src")).expect("create foo dir");
-    fs::create_dir_all(dir.path().join("crates/bar/src")).expect("create bar dir");
-    fs::write(
-        dir.path().join("Cargo.toml"),
-        r#"[workspace]
-members = ["crates/*"]
-resolver = "2"
-"#,
-    )
-    .expect("write workspace Cargo.toml");
-    fs::write(
-        dir.path().join("crates/foo/Cargo.toml"),
-        r#"[package]
-name = "foo"
-version = "1.0.0"
-edition = "2021"
-"#,
-    )
-    .expect("write foo Cargo.toml");
-    fs::write(dir.path().join("crates/foo/src/lib.rs"), "").expect("write foo lib.rs");
-    fs::write(
-        dir.path().join("crates/bar/Cargo.toml"),
-        r#"[package]
-name = "bar"
-version = "2.0.0"
-edition = "2021"
-"#,
-    )
-    .expect("write bar Cargo.toml");
-    fs::write(dir.path().join("crates/bar/src/lib.rs"), "").expect("write bar lib.rs");
-    dir
+    WorkspaceBuilder::virtual_workspace()
+        .crate_member("foo", "1.0.0")
+        .crate_member("bar", "2.0.0")
+        .build()
 }
 
 fn setup_virtual_workspace() -> TempDir {
-    let dir = TempDir::new().expect("create temp dir");
-    fs::create_dir_all(dir.path().join("crates/alpha/src")).expect("create alpha dir");
-    fs::write(
-        dir.path().join("Cargo.toml"),
-        r#"[workspace]
-members = ["crates/*"]
-resolver = "2"
-"#,
-    )
-    .expect("write workspace Cargo.toml");
-    fs::write(
-        dir.path().join("crates/alpha/Cargo.toml"),
-        r#"[package]
-name = "alpha"
-version = "0.1.0"
-edition = "2021"
-"#,
-    )
-    .expect("write alpha Cargo.toml");
-    fs::write(dir.path().join("crates/alpha/src/lib.rs"), "").expect("write alpha lib.rs");
-    dir
+    WorkspaceBuilder::virtual_workspace()
+        .crate_member("alpha", "0.1.0")
+        .build()
 }
 
 fn setup_workspace_with_root_package() -> TempDir {
-    let dir = TempDir::new().expect("create temp dir");
-    fs::create_dir_all(dir.path().join("src")).expect("create src dir");
-    fs::create_dir_all(dir.path().join("crates/sub/src")).expect("create sub dir");
-    fs::write(
-        dir.path().join("Cargo.toml"),
-        r#"[package]
-name = "root-pkg"
-version = "1.0.0"
-edition = "2021"
-
-[workspace]
-members = ["crates/*"]
-"#,
-    )
-    .expect("write workspace Cargo.toml");
-    fs::write(dir.path().join("src/lib.rs"), "").expect("write root lib.rs");
-    fs::write(
-        dir.path().join("crates/sub/Cargo.toml"),
-        r#"[package]
-name = "sub-pkg"
-version = "0.5.0"
-edition = "2021"
-"#,
-    )
-    .expect("write sub Cargo.toml");
-    fs::write(dir.path().join("crates/sub/src/lib.rs"), "").expect("write sub lib.rs");
-    dir
+    WorkspaceBuilder::virtual_workspace()
+        .root_package("root-pkg", "1.0.0")
+        .crate_member_at("sub-pkg", "0.5.0", "crates/sub")
+        .build()
 }
 
 mod directory_creation {
