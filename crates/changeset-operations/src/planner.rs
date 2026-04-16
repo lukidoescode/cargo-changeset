@@ -325,7 +325,7 @@ impl VersionPlanner {
         prerelease: Option<&PrereleaseSpec>,
         should_graduate: bool,
     ) -> bool {
-        let is_noop_or_absent = bump_type.is_none() || bump_type.is_some_and(|b| b.is_noop());
+        let is_noop_or_absent = bump_type.is_none_or(|b| b.is_noop());
         is_noop_or_absent && prerelease.is_none() && !should_graduate
     }
 

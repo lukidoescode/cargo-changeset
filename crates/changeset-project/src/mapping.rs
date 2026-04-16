@@ -76,7 +76,7 @@ pub fn map_files_to_packages<S: BuildHasher>(
         })
         .collect();
 
-    packages_with_depth.sort_by(|a, b| b.depth.cmp(&a.depth));
+    packages_with_depth.sort_by_key(|b| std::cmp::Reverse(b.depth));
 
     let mut package_files_map: HashMap<String, Vec<PathBuf>> = HashMap::new();
     let mut project_files = Vec::new();

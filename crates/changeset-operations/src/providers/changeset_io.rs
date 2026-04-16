@@ -243,7 +243,6 @@ fn generate_unique_filename(changeset_dir: &Path) -> String {
 
     let timestamp = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_millis())
-        .unwrap_or(0);
+        .map_or(0, |d| d.as_millis());
     format!("changeset-{timestamp}.md")
 }
