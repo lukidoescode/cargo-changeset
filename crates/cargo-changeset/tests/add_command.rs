@@ -81,6 +81,7 @@ mod non_interactive {
             .success()
             .stdout(contains("Using package: test-crate"))
             .stdout(contains("Created changeset"))
+            .stdout(contains(".changeset/changesets/"))
             .stdout(contains("Fixed a bug"));
 
         let changeset_dir = workspace.path().join(".changeset/changesets");

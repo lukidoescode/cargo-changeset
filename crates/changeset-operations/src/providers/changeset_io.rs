@@ -132,7 +132,7 @@ impl ChangesetReader for FileSystemChangesetIO {
 }
 
 impl ChangesetWriter for FileSystemChangesetIO {
-    fn write_changeset(&self, changeset_dir: &Path, changeset: &Changeset) -> Result<String> {
+    fn write_changeset(&self, changeset_dir: &Path, changeset: &Changeset) -> Result<PathBuf> {
         let changesets_subdir = changeset_dir.join(CHANGESETS_SUBDIR);
         let filename = generate_unique_filename(&changesets_subdir);
         let file_path = changesets_subdir.join(&filename);
@@ -140,7 +140,7 @@ impl ChangesetWriter for FileSystemChangesetIO {
         let content = serialize_changeset(changeset)?;
         fs::write(&file_path, content).map_err(OperationError::ChangesetFileWrite)?;
 
-        Ok(filename)
+        Ok(file_path)
     }
 
     fn restore_changeset(&self, path: &Path, changeset: &Changeset) -> Result<()> {

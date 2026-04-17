@@ -55,7 +55,7 @@ pub trait ChangesetWriter: Send + Sync {
     /// # Errors
     ///
     /// Returns an error if the changeset cannot be serialized or written.
-    fn write_changeset(&self, changeset_dir: &Path, changeset: &Changeset) -> Result<String>;
+    fn write_changeset(&self, changeset_dir: &Path, changeset: &Changeset) -> Result<PathBuf>;
 
     /// Writes a changeset to a specific file path.
     ///
