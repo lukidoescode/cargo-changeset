@@ -25,6 +25,7 @@ changeset-project = { workspace = true }
 changeset-version = { workspace = true }
 clap = { workspace = true }
 dialoguer = { workspace = true }
+strum = { version = "0.28", features = ["derive"] }
 tempfile = "3.25"
 thiserror = { workspace = true }
 

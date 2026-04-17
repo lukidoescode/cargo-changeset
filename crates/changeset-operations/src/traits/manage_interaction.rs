@@ -2,7 +2,7 @@ use changeset_core::PackageInfo;
 
 use crate::Result;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PrereleaseAction {
     Add,
     Remove,
@@ -10,7 +10,7 @@ pub enum PrereleaseAction {
     Done,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GraduationAction {
     Add,
     Remove,

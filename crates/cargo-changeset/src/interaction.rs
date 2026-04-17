@@ -3,6 +3,7 @@ use std::io::Write as _;
 use std::process::Command;
 
 use dialoguer::{Confirm, Input, MultiSelect, Select};
+use strum::{EnumMessage, VariantArray};
 
 use changeset_core::{BumpType, ChangeCategory, PackageInfo};
 use changeset_git::DEFAULT_BASE_BRANCH;
@@ -11,13 +12,177 @@ use changeset_manifest::{
 };
 use changeset_operations::Result;
 use changeset_operations::traits::{
-    BumpSelection, CategorySelection, ChangelogSettingsInput, DescriptionInput,
-    FilteringSettingsInput, GitSettingsInput, InitInteractionProvider, InteractionProvider,
-    PackageSelection, ProjectContext, VersionSettingsInput,
+    AdditionalPackageField, BumpSelection, CategorySelection, ChangelogSettingsInput,
+    DescriptionInput, FilteringSettingsInput, GitSettingsInput, InitInteractionProvider,
+    InteractionProvider, PackageSelection, ProjectContext, VersionSettingsInput,
 };
 
+use crate::commands::{cli_error_to_operation_error, dialoguer_to_operation_error};
 use crate::environment::is_interactive;
-use crate::error::CliError;
+use crate::error::{CliError, Result as CliResult};
+
+#[derive(Clone, Copy, VariantArray, EnumMessage)]
+pub(crate) enum BumpTypeSelectionOption {
+    #[strum(message = "patch - Bug fixes (backwards compatible)")]
+    Patch,
+    #[strum(message = "minor - New features (backwards compatible)")]
+    Minor,
+    #[strum(message = "major - Breaking changes")]
+    Major,
+    #[strum(message = "none - No version bump (internal changes only)")]
+    None,
+}
+
+impl From<BumpTypeSelectionOption> for BumpType {
+    fn from(opt: BumpTypeSelectionOption) -> Self {
+        match opt {
+            BumpTypeSelectionOption::Patch => Self::Patch,
+            BumpTypeSelectionOption::Minor => Self::Minor,
+            BumpTypeSelectionOption::Major => Self::Major,
+            BumpTypeSelectionOption::None => Self::None,
+        }
+    }
+}
+
+#[derive(Clone, Copy, VariantArray, EnumMessage)]
+pub(crate) enum ChangeCategorySelectionOption {
+    #[strum(message = "changed - General changes (default)")]
+    Changed,
+    #[strum(message = "added - New features")]
+    Added,
+    #[strum(message = "fixed - Bug fixes")]
+    Fixed,
+    #[strum(message = "deprecated - Deprecated features")]
+    Deprecated,
+    #[strum(message = "removed - Removed features")]
+    Removed,
+    #[strum(message = "security - Security fixes")]
+    Security,
+}
+
+impl From<ChangeCategorySelectionOption> for ChangeCategory {
+    fn from(opt: ChangeCategorySelectionOption) -> Self {
+        match opt {
+            ChangeCategorySelectionOption::Changed => Self::Changed,
+            ChangeCategorySelectionOption::Added => Self::Added,
+            ChangeCategorySelectionOption::Fixed => Self::Fixed,
+            ChangeCategorySelectionOption::Deprecated => Self::Deprecated,
+            ChangeCategorySelectionOption::Removed => Self::Removed,
+            ChangeCategorySelectionOption::Security => Self::Security,
+        }
+    }
+}
+
+#[derive(Clone, Copy, VariantArray, EnumMessage)]
+pub(crate) enum ChangelogLocationSelectionOption {
+    #[strum(message = "root - Single CHANGELOG.md at project root (default)")]
+    Root,
+    #[strum(message = "per-package - CHANGELOG.md in each package directory")]
+    PerPackage,
+}
+
+impl From<ChangelogLocationSelectionOption> for ChangelogLocation {
+    fn from(opt: ChangelogLocationSelectionOption) -> Self {
+        match opt {
+            ChangelogLocationSelectionOption::Root => Self::Root,
+            ChangelogLocationSelectionOption::PerPackage => Self::PerPackage,
+        }
+    }
+}
+
+#[derive(Clone, Copy, VariantArray, EnumMessage)]
+pub(crate) enum ComparisonLinksSelectionOption {
+    #[strum(message = "auto - Generate links if git remote detected (default)")]
+    Auto,
+    #[strum(message = "enabled - Always generate comparison links")]
+    Enabled,
+    #[strum(message = "disabled - Never generate comparison links")]
+    Disabled,
+}
+
+impl From<ComparisonLinksSelectionOption> for ComparisonLinks {
+    fn from(opt: ComparisonLinksSelectionOption) -> Self {
+        match opt {
+            ComparisonLinksSelectionOption::Auto => Self::Auto,
+            ComparisonLinksSelectionOption::Enabled => Self::Enabled,
+            ComparisonLinksSelectionOption::Disabled => Self::Disabled,
+        }
+    }
+}
+
+#[derive(Clone, Copy, VariantArray, EnumMessage)]
+pub(crate) enum ZeroVersionBehaviorSelectionOption {
+    #[strum(message = "effective-minor - Major bump on 0.x increments minor (default)")]
+    EffectiveMinor,
+    #[strum(message = "auto-promote-on-major - Major bump on 0.x promotes to 1.0.0")]
+    AutoPromoteOnMajor,
+}
+
+impl From<ZeroVersionBehaviorSelectionOption> for ZeroVersionBehavior {
+    fn from(opt: ZeroVersionBehaviorSelectionOption) -> Self {
+        match opt {
+            ZeroVersionBehaviorSelectionOption::EffectiveMinor => Self::EffectiveMinor,
+            ZeroVersionBehaviorSelectionOption::AutoPromoteOnMajor => Self::AutoPromoteOnMajor,
+        }
+    }
+}
+
+#[derive(Clone, Copy, VariantArray, EnumMessage)]
+pub(crate) enum NoneBumpBehaviorSelectionOption {
+    #[strum(message = "promote-to-patch - Treat none bumps as patch releases (default)")]
+    PromoteToPatch,
+    #[strum(message = "allow - Allow none bumps without version change")]
+    Allow,
+    #[strum(message = "disallow - Reject changesets with none bump type")]
+    Disallow,
+}
+
+impl From<NoneBumpBehaviorSelectionOption> for NoneBumpBehavior {
+    fn from(opt: NoneBumpBehaviorSelectionOption) -> Self {
+        match opt {
+            NoneBumpBehaviorSelectionOption::PromoteToPatch => Self::PromoteToPatch,
+            NoneBumpBehaviorSelectionOption::Allow => Self::Allow,
+            NoneBumpBehaviorSelectionOption::Disallow => Self::Disallow,
+        }
+    }
+}
+
+#[derive(Clone, Copy, VariantArray, EnumMessage)]
+pub(crate) enum AdditionalPackageFieldSelectionOption {
+    #[strum(message = "path")]
+    Path,
+    #[strum(message = "influence patterns")]
+    Influence,
+    #[strum(message = "manifest file path")]
+    ManifestFilePath,
+    #[strum(message = "manifest format")]
+    ManifestFormat,
+    #[strum(message = "manifest version path")]
+    ManifestVersionFieldPath,
+    #[strum(message = "Done")]
+    Done,
+}
+
+impl From<AdditionalPackageFieldSelectionOption> for Option<AdditionalPackageField> {
+    fn from(opt: AdditionalPackageFieldSelectionOption) -> Self {
+        match opt {
+            AdditionalPackageFieldSelectionOption::Path => Some(AdditionalPackageField::Path),
+            AdditionalPackageFieldSelectionOption::Influence => {
+                Some(AdditionalPackageField::Influence)
+            }
+            AdditionalPackageFieldSelectionOption::ManifestFilePath => {
+                Some(AdditionalPackageField::ManifestFilePath)
+            }
+            AdditionalPackageFieldSelectionOption::ManifestFormat => {
+                Some(AdditionalPackageField::ManifestFormat)
+            }
+            AdditionalPackageFieldSelectionOption::ManifestVersionFieldPath => {
+                Some(AdditionalPackageField::ManifestVersionFieldPath)
+            }
+            AdditionalPackageFieldSelectionOption::Done => None,
+        }
+    }
+}
 
 pub(crate) struct TerminalInteractionProvider {
     use_editor: bool,
@@ -37,7 +202,7 @@ impl InteractionProvider for TerminalInteractionProvider {
         display_labels: Option<&[String]>,
     ) -> Result<PackageSelection> {
         if !is_interactive() {
-            return Err(cli_to_operation_error(CliError::NotATty));
+            return Err(changeset_operations::OperationError::InteractionRequired);
         }
 
         let default_labels: Vec<String>;
@@ -56,7 +221,7 @@ impl InteractionProvider for TerminalInteractionProvider {
             .with_prompt("Select packages to include in changeset")
             .items(items)
             .interact_opt()
-            .map_err(from_dialoguer)?;
+            .map_err(dialoguer_to_operation_error)?;
 
         match selection {
             Some(indices) => {
@@ -68,62 +233,32 @@ impl InteractionProvider for TerminalInteractionProvider {
     }
 
     fn select_bump_type(&self, package_name: &str) -> Result<BumpSelection> {
-        let items = [
-            "patch - Bug fixes (backwards compatible)",
-            "minor - New features (backwards compatible)",
-            "major - Breaking changes",
-            "none - No version bump (internal changes only)",
-        ];
-
-        let selection = Select::new()
-            .with_prompt(format!("Select bump type for '{package_name}'"))
-            .items(items)
-            .default(0)
-            .interact_opt()
-            .map_err(from_dialoguer)?;
-
-        match selection {
-            Some(0) => Ok(BumpSelection::Selected(BumpType::Patch)),
-            Some(1) => Ok(BumpSelection::Selected(BumpType::Minor)),
-            Some(2) => Ok(BumpSelection::Selected(BumpType::Major)),
-            Some(3) => Ok(BumpSelection::Selected(BumpType::None)),
-            _ => Ok(BumpSelection::Cancelled),
-        }
+        let selection = select_variant::<BumpTypeSelectionOption>(
+            &format!("Select bump type for '{package_name}'"),
+            0,
+        )
+        .map_err(cli_error_to_operation_error)?;
+        Ok(match selection {
+            Some(opt) => BumpSelection::Selected(opt.into()),
+            None => BumpSelection::Cancelled,
+        })
     }
 
     fn select_category(&self) -> Result<CategorySelection> {
-        let items = [
-            "changed - General changes (default)",
-            "added - New features",
-            "fixed - Bug fixes",
-            "deprecated - Deprecated features",
-            "removed - Removed features",
-            "security - Security fixes",
-        ];
-
-        let selection = Select::new()
-            .with_prompt("Select change category")
-            .items(items)
-            .default(0)
-            .interact_opt()
-            .map_err(from_dialoguer)?;
-
-        match selection {
-            Some(0) => Ok(CategorySelection::Selected(ChangeCategory::Changed)),
-            Some(1) => Ok(CategorySelection::Selected(ChangeCategory::Added)),
-            Some(2) => Ok(CategorySelection::Selected(ChangeCategory::Fixed)),
-            Some(3) => Ok(CategorySelection::Selected(ChangeCategory::Deprecated)),
-            Some(4) => Ok(CategorySelection::Selected(ChangeCategory::Removed)),
-            Some(5) => Ok(CategorySelection::Selected(ChangeCategory::Security)),
-            _ => Ok(CategorySelection::Cancelled),
-        }
+        let selection =
+            select_variant::<ChangeCategorySelectionOption>("Select change category", 0)
+                .map_err(cli_error_to_operation_error)?;
+        Ok(match selection {
+            Some(opt) => CategorySelection::Selected(opt.into()),
+            None => CategorySelection::Cancelled,
+        })
     }
 
     fn get_description(&self) -> Result<DescriptionInput> {
         if self.use_editor {
-            get_description_editor().map_err(cli_to_operation_error)
+            get_description_editor().map_err(cli_error_to_operation_error)
         } else {
-            get_description_terminal().map_err(cli_to_operation_error)
+            get_description_terminal().map_err(cli_error_to_operation_error)
         }
     }
 }
@@ -181,21 +316,26 @@ impl InitInteractionProvider for TerminalInitInteractionProvider {
             .with_prompt("Configure git settings?")
             .default(true)
             .interact_opt()
-            .map_err(from_dialoguer)?;
+            .map_err(dialoguer_to_operation_error)?;
 
         if configure != Some(true) {
             return Ok(None);
         }
 
-        let commit = select_bool("Create git commits on release?", true)?;
-        let tags = select_bool("Create git tags on release?", true)?;
-        let keep_changesets = select_bool("Keep changeset files after release?", false)?;
-        let tag_format = select_tag_format(context.is_single_package)?;
-        let base_branch = prompt_base_branch()?;
+        let commit = select_bool("Create git commits on release?", true)
+            .map_err(cli_error_to_operation_error)?;
+        let tags = select_bool("Create git tags on release?", true)
+            .map_err(cli_error_to_operation_error)?;
+        let keep_changesets = select_bool("Keep changeset files after release?", false)
+            .map_err(cli_error_to_operation_error)?;
+        let tag_format =
+            select_tag_format(context.is_single_package).map_err(cli_error_to_operation_error)?;
+        let base_branch = prompt_base_branch().map_err(cli_error_to_operation_error)?;
 
         let (commit_title_template, changes_in_body) = if commit {
-            let template = prompt_commit_title_template()?;
-            let body = select_bool("Include version details in commit body?", true)?;
+            let template = prompt_commit_title_template().map_err(cli_error_to_operation_error)?;
+            let body = select_bool("Include version details in commit body?", true)
+                .map_err(cli_error_to_operation_error)?;
             (Some(template), Some(body))
         } else {
             (None, None)
@@ -224,7 +364,7 @@ impl InitInteractionProvider for TerminalInitInteractionProvider {
             .with_prompt("Configure changelog settings?")
             .default(true)
             .interact_opt()
-            .map_err(from_dialoguer)?;
+            .map_err(dialoguer_to_operation_error)?;
 
         if configure != Some(true) {
             return Ok(None);
@@ -233,12 +373,13 @@ impl InitInteractionProvider for TerminalInitInteractionProvider {
         let changelog = if context.is_single_package {
             ChangelogLocation::Root
         } else {
-            select_changelog_location()?
+            select_changelog_location().map_err(cli_error_to_operation_error)?
         };
-        let comparison_links = select_comparison_links()?;
+        let comparison_links = select_comparison_links().map_err(cli_error_to_operation_error)?;
 
         let comparison_links_template = if comparison_links != ComparisonLinks::Disabled {
-            let template = prompt_comparison_links_template()?;
+            let template =
+                prompt_comparison_links_template().map_err(cli_error_to_operation_error)?;
             if template.is_empty() {
                 None
             } else {
@@ -248,7 +389,8 @@ impl InitInteractionProvider for TerminalInitInteractionProvider {
             None
         };
 
-        let dep_template = prompt_dependency_bump_changelog_template()?;
+        let dep_template =
+            prompt_dependency_bump_changelog_template().map_err(cli_error_to_operation_error)?;
         let dependency_bump_changelog_template =
             if dep_template == "Updated dependency `{dependency}` to v{version}" {
                 None
@@ -273,17 +415,22 @@ impl InitInteractionProvider for TerminalInitInteractionProvider {
             .with_prompt("Configure version settings?")
             .default(true)
             .interact_opt()
-            .map_err(from_dialoguer)?;
+            .map_err(dialoguer_to_operation_error)?;
 
         if configure != Some(true) {
             return Ok(None);
         }
 
-        let zero_version_behavior = select_zero_version_behavior()?;
-        let none_bump_behavior = select_none_bump_behavior()?;
+        let zero_version_behavior =
+            select_zero_version_behavior().map_err(cli_error_to_operation_error)?;
+        let none_bump_behavior =
+            select_none_bump_behavior().map_err(cli_error_to_operation_error)?;
         let none_bump_promote_message_template =
             if none_bump_behavior == NoneBumpBehavior::PromoteToPatch {
-                Some(prompt_none_bump_promote_message_template()?)
+                Some(
+                    prompt_none_bump_promote_message_template()
+                        .map_err(cli_error_to_operation_error)?,
+                )
             } else {
                 None
             };
@@ -304,13 +451,13 @@ impl InitInteractionProvider for TerminalInitInteractionProvider {
             .with_prompt("Configure file filtering?")
             .default(false)
             .interact_opt()
-            .map_err(from_dialoguer)?;
+            .map_err(dialoguer_to_operation_error)?;
 
         if configure != Some(true) {
             return Ok(None);
         }
 
-        let ignored_files = prompt_ignored_files_loop()?;
+        let ignored_files = prompt_ignored_files_loop().map_err(cli_error_to_operation_error)?;
 
         if ignored_files.is_empty() {
             return Ok(None);
@@ -320,7 +467,7 @@ impl InitInteractionProvider for TerminalInitInteractionProvider {
     }
 }
 
-pub(crate) fn confirm_proceed(prompt: &str) -> crate::error::Result<bool> {
+pub(crate) fn confirm_proceed(prompt: &str) -> CliResult<bool> {
     if !is_interactive() {
         return Err(CliError::NotATty);
     }
@@ -328,15 +475,12 @@ pub(crate) fn confirm_proceed(prompt: &str) -> crate::error::Result<bool> {
     let confirmed = Confirm::new()
         .with_prompt(prompt)
         .default(true)
-        .interact_opt()
-        .map_err(from_dialoguer)?;
+        .interact_opt()?;
 
     Ok(confirmed == Some(true))
 }
 
-pub(crate) fn prompt_multi_value(
-    config: &MultiValuePromptConfig<'_>,
-) -> std::io::Result<Vec<String>> {
+pub(crate) fn prompt_multi_value(config: &MultiValuePromptConfig<'_>) -> CliResult<Vec<String>> {
     let mut values = Vec::new();
     println!("{}", config.intro);
 
@@ -346,7 +490,7 @@ pub(crate) fn prompt_multi_value(
     if let Some(ref default) = config.first_default {
         first_input = first_input.default(default.clone());
     }
-    let first = first_input.interact_text().map_err(from_dialoguer)?;
+    let first = first_input.interact_text()?;
     let first = first.trim().to_string();
     if first.is_empty() {
         return Ok(values);
@@ -357,8 +501,7 @@ pub(crate) fn prompt_multi_value(
         let s: String = Input::new()
             .with_prompt(config.additional_prompt)
             .allow_empty(true)
-            .interact_text()
-            .map_err(from_dialoguer)?;
+            .interact_text()?;
         let s = s.trim().to_string();
         if s.is_empty() {
             break;
@@ -368,35 +511,38 @@ pub(crate) fn prompt_multi_value(
     Ok(values)
 }
 
-fn from_dialoguer(e: dialoguer::Error) -> std::io::Error {
-    match e {
-        dialoguer::Error::IO(io) => io,
-    }
+pub(crate) fn select_variant<T>(prompt: &str, default: usize) -> CliResult<Option<T>>
+where
+    T: Copy + VariantArray + EnumMessage,
+{
+    let variants = T::VARIANTS;
+    let items: Vec<&str> = variants
+        .iter()
+        .map(|v| v.get_message().unwrap_or(""))
+        .collect();
+    let selection = Select::new()
+        .with_prompt(prompt)
+        .items(&items)
+        .default(default)
+        .interact_opt()?;
+    Ok(selection.map(|idx| variants[idx]))
 }
 
-fn cli_to_operation_error(e: CliError) -> changeset_operations::OperationError {
-    use changeset_operations::OperationError;
-
-    match e {
-        CliError::Io(io) => OperationError::Io(io),
-        CliError::NotATty => OperationError::InteractionRequired,
-        CliError::EditorFailed { source } => OperationError::Io(source),
-        CliError::Core(e) => OperationError::Core(e),
-        CliError::Git(e) => OperationError::Git(e),
-        CliError::Project(e) => OperationError::Project(e),
-        CliError::Operation(e) => e,
-        CliError::CurrentDir(io) => OperationError::Io(io),
-        CliError::ManifestFormatRequired | CliError::IncompleteArgs => {
-            OperationError::InteractionRequired
-        }
-        CliError::InvalidPackageBumpFormat { .. }
-        | CliError::InvalidBumpType { .. }
-        | CliError::VerificationFailed { .. }
-        | CliError::ChangesetDeleted { .. } => OperationError::Cancelled,
-    }
+pub(crate) fn select_from_options<T: Copy>(
+    prompt: &str,
+    options: &[(T, &str)],
+    default: usize,
+) -> CliResult<Option<T>> {
+    let items: Vec<&str> = options.iter().map(|(_, label)| *label).collect();
+    let selection = Select::new()
+        .with_prompt(prompt)
+        .items(&items)
+        .default(default)
+        .interact_opt()?;
+    Ok(selection.map(|idx| options[idx].0))
 }
 
-fn get_description_terminal() -> std::result::Result<DescriptionInput, CliError> {
+fn get_description_terminal() -> CliResult<DescriptionInput> {
     println!();
     println!("Enter description (press Enter 3 times to finish):");
     println!();
@@ -429,7 +575,7 @@ fn get_description_terminal() -> std::result::Result<DescriptionInput, CliError>
     Ok(DescriptionInput::Provided(lines.join("\n")))
 }
 
-fn get_description_editor() -> std::result::Result<DescriptionInput, CliError> {
+fn get_description_editor() -> CliResult<DescriptionInput> {
     let editor = std::env::var("EDITOR").unwrap_or_else(|_| "vi".to_string());
 
     let mut temp_file = tempfile::NamedTempFile::new()?;
@@ -460,186 +606,115 @@ fn get_description_editor() -> std::result::Result<DescriptionInput, CliError> {
     Ok(DescriptionInput::Provided(description))
 }
 
-fn prompt_base_branch() -> Result<String> {
+fn prompt_base_branch() -> CliResult<String> {
     Ok(Input::new()
         .with_prompt("Default base branch for git comparisons")
         .default(DEFAULT_BASE_BRANCH.to_string())
-        .interact_text()
-        .map_err(from_dialoguer)?)
+        .interact_text()?)
 }
 
-fn select_bool(prompt: &str, default: bool) -> Result<bool> {
+fn select_bool(prompt: &str, default: bool) -> CliResult<bool> {
     Ok(Confirm::new()
         .with_prompt(prompt)
         .default(default)
-        .interact()
-        .map_err(from_dialoguer)?)
+        .interact()?)
 }
 
-fn select_tag_format(is_single_package: bool) -> Result<TagFormat> {
-    let (items, default_idx) = if is_single_package {
+fn select_tag_format(is_single_package: bool) -> CliResult<TagFormat> {
+    let (options, default_idx): (&[(TagFormat, &str)], usize) = if is_single_package {
         (
-            [
-                "version-only - Tags like v1.0.0 (default)",
-                "crate-prefixed - Tags like crate-name@1.0.0",
+            &[
+                (
+                    TagFormat::VersionOnly,
+                    "version-only - Tags like v1.0.0 (default)",
+                ),
+                (
+                    TagFormat::CratePrefixed,
+                    "crate-prefixed - Tags like crate-name@1.0.0",
+                ),
             ],
             0,
         )
     } else {
         (
-            [
-                "version-only - Tags like v1.0.0",
-                "crate-prefixed - Tags like crate-name@1.0.0 (default)",
+            &[
+                (TagFormat::VersionOnly, "version-only - Tags like v1.0.0"),
+                (
+                    TagFormat::CratePrefixed,
+                    "crate-prefixed - Tags like crate-name@1.0.0 (default)",
+                ),
             ],
             1,
         )
     };
 
-    let selection = Select::new()
-        .with_prompt("Select tag format")
-        .items(items)
-        .default(default_idx)
-        .interact_opt()
-        .map_err(from_dialoguer)?;
-
-    match selection {
-        Some(0) => Ok(TagFormat::VersionOnly),
-        Some(1) => Ok(TagFormat::CratePrefixed),
-        _ => {
-            if is_single_package {
-                Ok(TagFormat::VersionOnly)
-            } else {
-                Ok(TagFormat::CratePrefixed)
-            }
-        }
-    }
+    let selection = select_from_options("Select tag format", options, default_idx)?;
+    Ok(selection.unwrap_or(options[default_idx].0))
 }
 
-fn select_changelog_location() -> Result<ChangelogLocation> {
-    let items = [
-        "root - Single CHANGELOG.md at project root (default)",
-        "per-package - CHANGELOG.md in each package directory",
-    ];
-
-    let selection = Select::new()
-        .with_prompt("Select changelog location")
-        .items(items)
-        .default(0)
-        .interact_opt()
-        .map_err(from_dialoguer)?;
-
-    match selection {
-        Some(0) => Ok(ChangelogLocation::Root),
-        Some(1) => Ok(ChangelogLocation::PerPackage),
-        _ => Ok(ChangelogLocation::default()),
-    }
+fn select_changelog_location() -> CliResult<ChangelogLocation> {
+    let selection =
+        select_variant::<ChangelogLocationSelectionOption>("Select changelog location", 0)?;
+    Ok(selection.map_or_else(ChangelogLocation::default, Into::into))
 }
 
-fn select_comparison_links() -> Result<ComparisonLinks> {
-    let items = [
-        "auto - Generate links if git remote detected (default)",
-        "enabled - Always generate comparison links",
-        "disabled - Never generate comparison links",
-    ];
-
-    let selection = Select::new()
-        .with_prompt("Select comparison links mode")
-        .items(items)
-        .default(0)
-        .interact_opt()
-        .map_err(from_dialoguer)?;
-
-    match selection {
-        Some(0) => Ok(ComparisonLinks::Auto),
-        Some(1) => Ok(ComparisonLinks::Enabled),
-        Some(2) => Ok(ComparisonLinks::Disabled),
-        _ => Ok(ComparisonLinks::default()),
-    }
+fn select_comparison_links() -> CliResult<ComparisonLinks> {
+    let selection =
+        select_variant::<ComparisonLinksSelectionOption>("Select comparison links mode", 0)?;
+    Ok(selection.map_or_else(ComparisonLinks::default, Into::into))
 }
 
-fn select_zero_version_behavior() -> Result<ZeroVersionBehavior> {
-    let items = [
-        "effective-minor - Major bump on 0.x increments minor (default)",
-        "auto-promote-on-major - Major bump on 0.x promotes to 1.0.0",
-    ];
-
-    let selection = Select::new()
-        .with_prompt("Select zero version (0.x.y) behavior")
-        .items(items)
-        .default(0)
-        .interact_opt()
-        .map_err(from_dialoguer)?;
-
-    match selection {
-        Some(0) => Ok(ZeroVersionBehavior::EffectiveMinor),
-        Some(1) => Ok(ZeroVersionBehavior::AutoPromoteOnMajor),
-        _ => Ok(ZeroVersionBehavior::default()),
-    }
+fn select_zero_version_behavior() -> CliResult<ZeroVersionBehavior> {
+    let selection = select_variant::<ZeroVersionBehaviorSelectionOption>(
+        "Select zero version (0.x.y) behavior",
+        0,
+    )?;
+    Ok(selection.map_or_else(ZeroVersionBehavior::default, Into::into))
 }
 
-fn select_none_bump_behavior() -> Result<NoneBumpBehavior> {
-    let items = [
-        "promote-to-patch - Treat none bumps as patch releases (default)",
-        "allow - Allow none bumps without version change",
-        "disallow - Reject changesets with none bump type",
-    ];
-
-    let selection = Select::new()
-        .with_prompt("Select none bump behavior")
-        .items(items)
-        .default(0)
-        .interact_opt()
-        .map_err(from_dialoguer)?;
-
-    match selection {
-        Some(0) => Ok(NoneBumpBehavior::PromoteToPatch),
-        Some(1) => Ok(NoneBumpBehavior::Allow),
-        Some(2) => Ok(NoneBumpBehavior::Disallow),
-        _ => Ok(NoneBumpBehavior::default()),
-    }
+fn select_none_bump_behavior() -> CliResult<NoneBumpBehavior> {
+    let selection =
+        select_variant::<NoneBumpBehaviorSelectionOption>("Select none bump behavior", 0)?;
+    Ok(selection.map_or_else(NoneBumpBehavior::default, Into::into))
 }
 
-fn prompt_commit_title_template() -> Result<String> {
+fn prompt_commit_title_template() -> CliResult<String> {
     Ok(Input::new()
         .with_prompt("Commit title template (placeholder: {new-version})")
         .default("{new-version}".to_string())
-        .interact_text()
-        .map_err(from_dialoguer)?)
+        .interact_text()?)
 }
 
-fn prompt_comparison_links_template() -> Result<String> {
+fn prompt_comparison_links_template() -> CliResult<String> {
     Ok(Input::new()
         .with_prompt(
             "Comparison links template (empty=auto-detect, placeholders: {repository}, {base}, {target})",
         )
         .default(String::new())
         .allow_empty(true)
-        .interact_text()
-        .map_err(from_dialoguer)?)
+        .interact_text()?)
 }
 
-fn prompt_dependency_bump_changelog_template() -> Result<String> {
+fn prompt_dependency_bump_changelog_template() -> CliResult<String> {
     Ok(Input::new()
         .with_prompt("Dependency bump changelog template (placeholders: {dependency}, {version})")
         .default("Updated dependency `{dependency}` to v{version}".to_string())
-        .interact_text()
-        .map_err(from_dialoguer)?)
+        .interact_text()?)
 }
 
-fn prompt_ignored_files_loop() -> Result<Vec<String>> {
-    Ok(prompt_multi_value(&MultiValuePromptConfig {
+fn prompt_ignored_files_loop() -> CliResult<Vec<String>> {
+    prompt_multi_value(&MultiValuePromptConfig {
         intro: "Enter file patterns to exclude from change detection \
                 (one per line, empty line to finish):",
         first_prompt: "Ignore pattern",
         additional_prompt: "Additional pattern",
         first_default: None,
-    })?)
+    })
 }
 
-fn prompt_none_bump_promote_message_template() -> Result<String> {
+fn prompt_none_bump_promote_message_template() -> CliResult<String> {
     Ok(Input::new()
         .with_prompt("Changelog message template for promoted none bumps")
         .default("Internal architectural changes".to_string())
-        .interact_text()
-        .map_err(from_dialoguer)?)
+        .interact_text()?)
 }

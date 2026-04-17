@@ -56,6 +56,14 @@ pub enum CliError {
 
 pub type Result<T> = std::result::Result<T, CliError>;
 
+impl From<dialoguer::Error> for CliError {
+    fn from(e: dialoguer::Error) -> Self {
+        match e {
+            dialoguer::Error::IO(io) => Self::Io(io),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::path::PathBuf;

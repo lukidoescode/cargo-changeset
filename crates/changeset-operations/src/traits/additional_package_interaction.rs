@@ -5,7 +5,7 @@ use changeset_core::{AdditionalPackageDeclaration, ManifestFormat};
 use crate::Result;
 use crate::traits::MenuSelection;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub enum AdditionalPackageField {
     Path,
     Influence,

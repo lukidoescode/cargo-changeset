@@ -391,6 +391,27 @@ pub(super) fn dialoguer_to_operation_error(e: dialoguer::Error) -> OperationErro
     }
 }
 
+pub(super) fn cli_error_to_operation_error(e: crate::error::CliError) -> OperationError {
+    use crate::error::CliError;
+    match e {
+        CliError::Io(io) => OperationError::Io(io),
+        CliError::NotATty => OperationError::InteractionRequired,
+        CliError::EditorFailed { source } => OperationError::Io(source),
+        CliError::Core(e) => OperationError::Core(e),
+        CliError::Git(e) => OperationError::Git(e),
+        CliError::Project(e) => OperationError::Project(e),
+        CliError::Operation(e) => e,
+        CliError::CurrentDir(io) => OperationError::Io(io),
+        CliError::ManifestFormatRequired | CliError::IncompleteArgs => {
+            OperationError::InteractionRequired
+        }
+        CliError::InvalidPackageBumpFormat { .. }
+        | CliError::InvalidBumpType { .. }
+        | CliError::VerificationFailed { .. }
+        | CliError::ChangesetDeleted { .. } => OperationError::Cancelled,
+    }
+}
+
 #[cfg(test)]
 mod dialoguer_conversion_tests {
     use std::io;

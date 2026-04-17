@@ -24,6 +24,7 @@ use changeset_operations::traits::{
 
 use crate::environment::is_interactive;
 use crate::error::{CliError, Result};
+use crate::interaction::{AdditionalPackageFieldSelectionOption, select_variant};
 
 #[derive(Args)]
 pub(crate) struct AdditionalPackagesArgs {
@@ -215,15 +216,14 @@ impl AdditionalPackageInteractionProvider for TerminalAdditionalPackageInteracti
         &self,
         package_path: &Path,
     ) -> changeset_operations::Result<Vec<String>> {
-        Ok(crate::interaction::prompt_multi_value(
-            &crate::interaction::MultiValuePromptConfig {
-                intro: "Enter glob patterns for files that influence this package \
+        crate::interaction::prompt_multi_value(&crate::interaction::MultiValuePromptConfig {
+            intro: "Enter glob patterns for files that influence this package \
                         (one per line, empty line to finish):",
-                first_prompt: "Glob pattern",
-                additional_prompt: "Additional pattern",
-                first_default: Some(format!("{}/**", package_path.display())),
-            },
-        )?)
+            first_prompt: "Glob pattern",
+            additional_prompt: "Additional pattern",
+            first_default: Some(format!("{}/**", package_path.display())),
+        })
+        .map_err(super::cli_error_to_operation_error)
     }
 
     fn prompt_manifest_file_path(&self) -> changeset_operations::Result<PathBuf> {
@@ -328,29 +328,20 @@ impl AdditionalPackageInteractionProvider for TerminalAdditionalPackageInteracti
     fn select_field_to_edit(
         &self,
     ) -> changeset_operations::Result<MenuSelection<AdditionalPackageField>> {
-        let options = [
-            "path",
-            "influence patterns",
-            "manifest file path",
-            "manifest format",
-            "manifest version path",
-            "Done",
-        ];
+        let selection = select_variant::<AdditionalPackageFieldSelectionOption>(
+            "Which field would you like to edit?",
+            0,
+        )
+        .map_err(super::cli_error_to_operation_error)?;
 
-        let selection = Select::new()
-            .with_prompt("Which field would you like to edit?")
-            .items(options)
-            .interact_opt()
-            .map_err(super::dialoguer_to_operation_error)?;
-
-        Ok(match selection {
-            Some(0) => MenuSelection::Selected(AdditionalPackageField::Path),
-            Some(1) => MenuSelection::Selected(AdditionalPackageField::Influence),
-            Some(2) => MenuSelection::Selected(AdditionalPackageField::ManifestFilePath),
-            Some(3) => MenuSelection::Selected(AdditionalPackageField::ManifestFormat),
-            Some(4) => MenuSelection::Selected(AdditionalPackageField::ManifestVersionFieldPath),
-            _ => MenuSelection::Cancelled,
-        })
+        Ok(
+            match Option::<AdditionalPackageField>::from(
+                selection.unwrap_or(AdditionalPackageFieldSelectionOption::Done),
+            ) {
+                Some(field) => MenuSelection::Selected(field),
+                None => MenuSelection::Cancelled,
+            },
+        )
     }
 
     fn confirm_removal(&self, name: &str) -> changeset_operations::Result<bool> {
