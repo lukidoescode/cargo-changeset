@@ -88,6 +88,10 @@ impl TerminalSession {
             .to_owned()
     }
 
+    pub fn debug_print_screen(&mut self) {
+        eprintln!("=== PTY screen ===\n{}\n==================", self.screen());
+    }
+
     pub fn wait_for(&mut self, needle: &str) -> &mut Self {
         let start = Instant::now();
         loop {
@@ -95,11 +99,10 @@ impl TerminalSession {
             if self.vt.screen().contents().contains(needle) {
                 return self;
             }
-            assert!(
-                start.elapsed() <= TIMEOUT,
-                "Timed out waiting for {needle:?}\nScreen:\n{}",
-                self.screen()
-            );
+            if start.elapsed() > TIMEOUT {
+                self.debug_print_screen();
+                panic!("Timed out waiting for {needle:?}");
+            }
             std::thread::sleep(POLL_INTERVAL);
         }
     }

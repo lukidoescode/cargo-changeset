@@ -1059,6 +1059,56 @@ mod help_and_ux_tests {
 }
 
 #[cfg(not(windows))]
+mod interactive_add_tests {
+    use std::path::PathBuf;
+
+    use changeset_test_helpers::terminal_session::TerminalSession;
+
+    use super::*;
+
+    fn bin_path() -> PathBuf {
+        assert_cmd::cargo::cargo_bin("cargo-changeset")
+    }
+
+    #[test]
+    fn interactive_add_accepts_influence_patterns() {
+        let workspace = create_workspace_with_helm_chart();
+
+        let mut session =
+            TerminalSession::spawn(&bin_path(), &workspace, &["additional-packages", "add"]);
+        session.wait_for("Package name");
+        session.type_line("my-helm-chart");
+        session.wait_for("Package directory path");
+        session.type_line("charts/my-chart");
+        session.wait_for("Glob pattern");
+        session.type_line("charts/my-chart/**");
+        session.wait_for("Additional pattern");
+        session.type_line("charts/shared/**");
+        session.wait_for("Additional pattern");
+        session.type_line("");
+        session.wait_for("version manifest file");
+        session.type_line("charts/my-chart/Chart.yaml");
+        session.wait_for("Manifest format");
+        session.confirm();
+        session.wait_for("version field");
+        session.type_line("version");
+        session.wait_for("Added additional package");
+        session.wait_for_exit();
+
+        let cargo_toml =
+            fs::read_to_string(workspace.path().join("Cargo.toml")).expect("read Cargo.toml");
+        assert!(
+            cargo_toml.contains("charts/my-chart/**"),
+            "expected first influence pattern in config, got:\n{cargo_toml}"
+        );
+        assert!(
+            cargo_toml.contains("charts/shared/**"),
+            "expected second influence pattern in config, got:\n{cargo_toml}"
+        );
+    }
+}
+
+#[cfg(not(windows))]
 mod interactive_dependencies_tests {
     use std::path::PathBuf;
 

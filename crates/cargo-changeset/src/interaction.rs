@@ -154,6 +154,13 @@ impl InteractionProvider for NonInteractiveProvider {
     }
 }
 
+pub(crate) struct MultiValuePromptConfig<'a> {
+    pub(crate) intro: &'a str,
+    pub(crate) first_prompt: &'a str,
+    pub(crate) additional_prompt: &'a str,
+    pub(crate) first_default: Option<String>,
+}
+
 #[derive(Default)]
 pub(crate) struct TerminalInitInteractionProvider;
 
@@ -311,13 +318,6 @@ impl InitInteractionProvider for TerminalInitInteractionProvider {
 
         Ok(Some(FilteringSettingsInput { ignored_files }))
     }
-}
-
-pub(crate) struct MultiValuePromptConfig<'a> {
-    pub(crate) intro: &'a str,
-    pub(crate) first_prompt: &'a str,
-    pub(crate) additional_prompt: &'a str,
-    pub(crate) first_default: Option<String>,
 }
 
 pub(crate) fn confirm_proceed(prompt: &str) -> crate::error::Result<bool> {
