@@ -786,6 +786,81 @@ mod workflow_tests {
     }
 }
 
+#[cfg(not(windows))]
+mod interactive_init_tests {
+    use std::path::PathBuf;
+
+    use changeset_test_helpers::terminal_session::TerminalSession;
+
+    use super::*;
+
+    fn bin_path() -> PathBuf {
+        assert_cmd::cargo::cargo_bin("cargo-changeset")
+    }
+
+    #[test]
+    fn interactive_init_filtering_adds_patterns() {
+        let dir = setup_single_package();
+
+        let mut session = TerminalSession::spawn(&bin_path(), &dir, &["changeset", "init"]);
+        session.wait_for("Configure git settings?");
+        session.send_raw("n");
+        session.wait_for("Configure changelog settings?");
+        session.send_raw("n");
+        session.wait_for("Configure version settings?");
+        session.send_raw("n");
+        session.wait_for("Configure file filtering?");
+        session.send_raw("y");
+        session.wait_for("Ignore pattern");
+        session.type_line("*.log");
+        session.wait_for("Additional pattern");
+        session.type_line("tmp/**");
+        session.wait_for("Additional pattern");
+        session.type_line("");
+        session.wait_for("Proceed with initialization?");
+        session.send_raw("y");
+        session.wait_for_exit();
+
+        let cargo_toml =
+            fs::read_to_string(dir.path().join("Cargo.toml")).expect("read Cargo.toml");
+        assert!(
+            cargo_toml.contains("*.log"),
+            "expected *.log pattern in config, got:\n{cargo_toml}"
+        );
+        assert!(
+            cargo_toml.contains("tmp/**"),
+            "expected tmp/** pattern in config, got:\n{cargo_toml}"
+        );
+    }
+
+    #[test]
+    fn interactive_init_filtering_empty_skips() {
+        let dir = setup_single_package();
+
+        let mut session = TerminalSession::spawn(&bin_path(), &dir, &["changeset", "init"]);
+        session.wait_for("Configure git settings?");
+        session.send_raw("n");
+        session.wait_for("Configure changelog settings?");
+        session.send_raw("n");
+        session.wait_for("Configure version settings?");
+        session.send_raw("n");
+        session.wait_for("Configure file filtering?");
+        session.send_raw("y");
+        session.wait_for("Ignore pattern");
+        session.type_line("");
+        session.wait_for("Proceed with initialization?");
+        session.send_raw("y");
+        session.wait_for_exit();
+
+        let cargo_toml =
+            fs::read_to_string(dir.path().join("Cargo.toml")).expect("read Cargo.toml");
+        assert!(
+            !cargo_toml.contains("ignored"),
+            "expected no ignored_files in config, got:\n{cargo_toml}"
+        );
+    }
+}
+
 mod project_type_scenarios {
     use super::*;
 
