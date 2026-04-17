@@ -1,7 +1,5 @@
 use std::fs;
 use std::path::MAIN_SEPARATOR_STR;
-use std::process::Command;
-use std::time::Duration;
 
 use changeset_test_helpers::workspaces::{
     WorkspaceBuilder, create_single_crate_workspace, create_virtual_workspace,
@@ -487,37 +485,23 @@ mod non_interactive {
 mod interactive {
     use std::os::unix::fs::PermissionsExt;
 
-    use expectrl::Expect;
-    use expectrl::session::OsSession;
+    use changeset_test_helpers::terminal_session::TerminalSession;
 
     use super::*;
 
-    fn spawn_add_in_workspace(workspace: &TempDir) -> OsSession {
+    fn spawn_add_in_workspace(workspace: &TempDir) -> TerminalSession {
         let bin_path = assert_cmd::cargo::cargo_bin!("cargo-changeset");
-
-        let mut cmd = Command::new(bin_path);
-        cmd.arg("add");
-        cmd.current_dir(workspace.path());
-        cmd.env("CARGO_CHANGESET_FORCE_TTY", "1");
-
-        let mut session = OsSession::spawn(cmd).expect("failed to spawn session");
-        session.set_expect_timeout(Some(Duration::from_secs(30)));
-        session
+        TerminalSession::spawn(bin_path, workspace, &["add"])
     }
 
-    fn spawn_add_with_editor(workspace: &TempDir, editor_path: &std::path::Path) -> OsSession {
+    fn spawn_add_with_editor(
+        workspace: &TempDir,
+        editor_path: &std::path::Path,
+    ) -> TerminalSession {
         let bin_path = assert_cmd::cargo::cargo_bin!("cargo-changeset");
-
-        let mut cmd = Command::new(bin_path);
-        cmd.arg("add");
-        cmd.arg("--editor");
-        cmd.current_dir(workspace.path());
-        cmd.env("CARGO_CHANGESET_FORCE_TTY", "1");
-        cmd.env("EDITOR", editor_path);
-
-        let mut session = OsSession::spawn(cmd).expect("failed to spawn session");
-        session.set_expect_timeout(Some(Duration::from_secs(30)));
-        session
+        TerminalSession::builder(bin_path, workspace, &["add", "--editor"])
+            .env("EDITOR", editor_path)
+            .spawn()
     }
 
     fn create_mock_editor(workspace: &TempDir, content: &str) -> std::path::PathBuf {
@@ -540,11 +524,9 @@ MOCK_EDITOR_EOF
         let workspace = create_virtual_workspace();
         let mut session = spawn_add_in_workspace(&workspace);
 
-        let result = session.expect("Select packages");
-        assert!(result.is_ok(), "Expected to see 'Select packages' prompt");
-
-        session.send("\x1b").expect("failed to send escape");
-        session.expect(expectrl::Eof).ok();
+        session.wait_for("Select packages");
+        session.cancel();
+        session.wait_for_exit();
     }
 
     #[test]
@@ -552,10 +534,9 @@ MOCK_EDITOR_EOF
         let workspace = create_virtual_workspace();
         let mut session = spawn_add_in_workspace(&workspace);
 
-        session.expect("crate-a").expect("Expected to see crate-a");
-
-        session.send("\x1b").expect("failed to send escape");
-        session.expect(expectrl::Eof).ok();
+        session.wait_for("crate-a");
+        session.cancel();
+        session.wait_for_exit();
     }
 
     #[test]
@@ -563,12 +544,9 @@ MOCK_EDITOR_EOF
         let workspace = create_virtual_workspace();
         let mut session = spawn_add_in_workspace(&workspace);
 
-        session.expect("Select packages").expect("Expected prompt");
-
-        session.send("\n").expect("failed to send enter");
-
-        let wait_result = session.expect(expectrl::Eof);
-        assert!(wait_result.is_ok(), "Process should exit cleanly");
+        session.wait_for("Select packages");
+        session.send_raw("\n");
+        session.wait_for_exit();
     }
 
     #[test]
@@ -576,15 +554,9 @@ MOCK_EDITOR_EOF
         let workspace = create_virtual_workspace();
         let mut session = spawn_add_in_workspace(&workspace);
 
-        session.expect("Select packages").expect("Expected prompt");
-
-        session.send("\x1b").expect("failed to send escape");
-
-        let wait_result = session.expect(expectrl::Eof);
-        assert!(
-            wait_result.is_ok(),
-            "Process should exit cleanly after cancellation"
-        );
+        session.wait_for("Select packages");
+        session.cancel();
+        session.wait_for_exit();
     }
 
     #[test]
@@ -592,23 +564,16 @@ MOCK_EDITOR_EOF
         let workspace = create_virtual_workspace();
         let mut session = spawn_add_in_workspace(&workspace);
 
-        session
-            .expect("Select packages")
-            .expect("Expected package selection prompt");
-        session.send(" ").expect("failed to select first package");
-        session.send("\n").expect("failed to confirm selection");
+        session.wait_for("Select packages");
+        session.send_raw(" ");
+        session.send_raw("\n");
 
-        session
-            .expect("bump type")
-            .expect("Expected bump type prompt");
-        session.send("\n").expect("failed to select bump type");
+        session.wait_for("bump type");
+        session.send_raw("\n");
 
-        session
-            .expect("category")
-            .expect("Expected category prompt");
-
-        session.send("\x1b").expect("failed to send escape");
-        session.expect(expectrl::Eof).ok();
+        session.wait_for("category");
+        session.cancel();
+        session.wait_for_exit();
     }
 
     #[test]
@@ -616,39 +581,23 @@ MOCK_EDITOR_EOF
         let workspace = create_single_crate_workspace();
         let mut session = spawn_add_in_workspace(&workspace);
 
-        session
-            .expect("Using package: test-crate")
-            .expect("Expected single package auto-selection");
+        session.wait_for("Using package: test-crate");
 
-        session
-            .expect("bump type")
-            .expect("Expected bump type prompt");
-        session.send("\n").expect("failed to select bump type");
+        session.wait_for("bump type");
+        session.send_raw("\n");
 
-        session
-            .expect("category")
-            .expect("Expected category prompt");
-        session.send("\n").expect("failed to select category");
+        session.wait_for("category");
+        session.send_raw("\n");
 
-        session
-            .expect("description")
-            .expect("Expected description prompt");
+        session.wait_for("description");
 
-        session
-            .send_line("Test description line 1")
-            .expect("failed to send line 1");
-        session
-            .send_line("Test description line 2")
-            .expect("failed to send line 2");
-        session.send_line("").expect("failed to send empty line 1");
-        session.send_line("").expect("failed to send empty line 2");
+        session.send_line("Test description line 1");
+        session.send_line("Test description line 2");
+        session.send_line("");
+        session.send_line("");
 
-        session
-            .expect("Created changeset")
-            .expect("Expected success message");
-
-        let wait_result = session.expect(expectrl::Eof);
-        assert!(wait_result.is_ok(), "Process should exit cleanly");
+        session.wait_for("Created changeset");
+        session.wait_for_exit();
 
         let changeset_dir = workspace.path().join(".changeset/changesets");
         assert!(
@@ -675,38 +624,24 @@ MOCK_EDITOR_EOF
         let workspace = create_virtual_workspace();
         let mut session = spawn_add_in_workspace(&workspace);
 
-        session
-            .expect("Select packages")
-            .expect("Expected package selection prompt");
-        session.send(" ").expect("failed to select first package");
-        session.send("\n").expect("failed to confirm selection");
+        session.wait_for("Select packages");
+        session.send_raw(" ");
+        session.send_raw("\n");
 
-        session
-            .expect("bump type")
-            .expect("Expected bump type prompt");
-        session.send("\n").expect("failed to select bump type");
+        session.wait_for("bump type");
+        session.send_raw("\n");
 
-        session
-            .expect("category")
-            .expect("Expected category prompt");
-        session.send("\n").expect("failed to select category");
+        session.wait_for("category");
+        session.send_raw("\n");
 
-        session
-            .expect("description")
-            .expect("Expected description prompt");
+        session.wait_for("description");
 
-        session
-            .send_line("Multi-package changeset")
-            .expect("failed to send description");
-        session.send_line("").expect("failed to send empty line 1");
-        session.send_line("").expect("failed to send empty line 2");
+        session.send_line("Multi-package changeset");
+        session.send_line("");
+        session.send_line("");
 
-        session
-            .expect("Created changeset")
-            .expect("Expected success message");
-
-        let wait_result = session.expect(expectrl::Eof);
-        assert!(wait_result.is_ok(), "Process should exit cleanly");
+        session.wait_for("Created changeset");
+        session.wait_for_exit();
     }
 
     #[test]
@@ -716,26 +651,16 @@ MOCK_EDITOR_EOF
 
         let mut session = spawn_add_with_editor(&workspace, &editor);
 
-        session
-            .expect("Using package: test-crate")
-            .expect("Expected single package auto-selection");
+        session.wait_for("Using package: test-crate");
 
-        session
-            .expect("bump type")
-            .expect("Expected bump type prompt");
-        session.send("\n").expect("failed to select bump type");
+        session.wait_for("bump type");
+        session.send_raw("\n");
 
-        session
-            .expect("category")
-            .expect("Expected category prompt");
-        session.send("\n").expect("failed to select category");
+        session.wait_for("category");
+        session.send_raw("\n");
 
-        session
-            .expect("Created changeset")
-            .expect("Expected success message");
-
-        let wait_result = session.expect(expectrl::Eof);
-        assert!(wait_result.is_ok(), "Process should exit cleanly");
+        session.wait_for("Created changeset");
+        session.wait_for_exit();
 
         let changeset_dir = workspace.path().join(".changeset/changesets");
         let files: Vec<_> = fs::read_dir(&changeset_dir)
@@ -761,25 +686,16 @@ MOCK_EDITOR_EOF
 
         let mut session = spawn_add_with_editor(&workspace, &editor);
 
-        session
-            .expect("Using package: test-crate")
-            .expect("Expected single package auto-selection");
+        session.wait_for("Using package: test-crate");
 
-        session
-            .expect("bump type")
-            .expect("Expected bump type prompt");
-        session.send("\n").expect("failed to select bump type");
+        session.wait_for("bump type");
+        session.send_raw("\n");
 
-        session
-            .expect("category")
-            .expect("Expected category prompt");
-        session.send("\n").expect("failed to select category");
+        session.wait_for("category");
+        session.send_raw("\n");
 
-        session
-            .expect("Created changeset")
-            .expect("Expected success message");
-
-        session.expect(expectrl::Eof).ok();
+        session.wait_for("Created changeset");
+        session.wait_for_exit();
 
         let changeset_dir = workspace.path().join(".changeset/changesets");
         let files: Vec<_> = fs::read_dir(&changeset_dir)
