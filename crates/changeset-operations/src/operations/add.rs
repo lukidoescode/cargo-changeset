@@ -162,10 +162,9 @@ where
             .project_provider
             .ensure_changeset_dir(&project, &root_config)?;
 
-        let filename = self
+        let file_path = self
             .changeset_writer
             .write_changeset(&changeset_dir, &changeset)?;
-        let file_path = changeset_dir.join(&filename);
 
         Ok(AddResult::Created {
             changeset,

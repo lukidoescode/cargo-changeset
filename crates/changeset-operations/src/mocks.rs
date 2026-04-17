@@ -322,8 +322,8 @@ impl ChangesetReader for MockChangesetReader {
 }
 
 impl ChangesetWriter for MockChangesetReader {
-    fn write_changeset(&self, _changeset_dir: &Path, _changeset: &Changeset) -> Result<String> {
-        Ok("mock-changeset.md".to_string())
+    fn write_changeset(&self, _changeset_dir: &Path, _changeset: &Changeset) -> Result<PathBuf> {
+        Ok(PathBuf::from("mock-changeset.md"))
     }
 
     fn restore_changeset(&self, path: &Path, changeset: &Changeset) -> Result<()> {
@@ -389,7 +389,7 @@ impl_arc_delegation! {
 
 impl_arc_delegation! {
     impl ChangesetWriter for Arc<MockChangesetReader> {
-        fn write_changeset(&self, changeset_dir: &Path, changeset: &Changeset) -> Result<String>;
+        fn write_changeset(&self, changeset_dir: &Path, changeset: &Changeset) -> Result<PathBuf>;
         fn restore_changeset(&self, path: &Path, changeset: &Changeset) -> Result<()>;
         fn filename_exists(&self, changeset_dir: &Path, filename: &str) -> bool;
         fn mark_consumed_for_prerelease(&self, changeset_dir: &Path, paths: &[&Path], version: &Version) -> Result<()>;
@@ -431,12 +431,12 @@ impl Default for MockChangesetWriter {
 }
 
 impl ChangesetWriter for MockChangesetWriter {
-    fn write_changeset(&self, changeset_dir: &Path, changeset: &Changeset) -> Result<String> {
+    fn write_changeset(&self, changeset_dir: &Path, changeset: &Changeset) -> Result<PathBuf> {
         self.written
             .lock()
             .expect("lock poisoned")
             .push((changeset_dir.to_path_buf(), changeset.clone()));
-        Ok(self.filename.clone())
+        Ok(changeset_dir.join(&self.filename))
     }
 
     fn restore_changeset(&self, path: &Path, changeset: &Changeset) -> Result<()> {
