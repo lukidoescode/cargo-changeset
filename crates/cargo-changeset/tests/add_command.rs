@@ -1,4 +1,5 @@
 use std::fs;
+use std::path::MAIN_SEPARATOR_STR;
 use std::process::Command;
 use std::time::Duration;
 
@@ -81,7 +82,10 @@ mod non_interactive {
             .success()
             .stdout(contains("Using package: test-crate"))
             .stdout(contains("Created changeset"))
-            .stdout(contains(".changeset/changesets/"))
+            .stdout(contains(format!(
+                ".changeset{sep}changesets{sep}",
+                sep = MAIN_SEPARATOR_STR
+            )))
             .stdout(contains("Fixed a bug"));
 
         let changeset_dir = workspace.path().join(".changeset/changesets");
