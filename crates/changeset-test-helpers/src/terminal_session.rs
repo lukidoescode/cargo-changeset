@@ -1,3 +1,4 @@
+use std::ffi::OsString;
 use std::path::Path;
 use std::process::Command;
 use std::time::{Duration, Instant};
@@ -13,25 +14,60 @@ const TIMEOUT: Duration = Duration::from_secs(30);
 const KEY_DELAY: Duration = Duration::from_millis(50);
 const POLL_INTERVAL: Duration = Duration::from_millis(10);
 
+pub struct TerminalSessionBuilder<'a> {
+    bin_path: &'a Path,
+    workspace: &'a TempDir,
+    args: &'a [&'a str],
+    env: Vec<(OsString, OsString)>,
+}
+
+impl TerminalSessionBuilder<'_> {
+    #[must_use]
+    pub fn env(mut self, key: impl Into<OsString>, val: impl Into<OsString>) -> Self {
+        self.env.push((key.into(), val.into()));
+        self
+    }
+
+    pub fn spawn(self) -> TerminalSession {
+        let mut cmd = Command::new(self.bin_path);
+        cmd.args(self.args);
+        cmd.current_dir(self.workspace.path());
+        cmd.env("CARGO_CHANGESET_FORCE_TTY", "1");
+        for (key, val) in self.env {
+            cmd.env(key, val);
+        }
+        let pty = OsSession::spawn(cmd).expect("failed to spawn session");
+        TerminalSession {
+            pty,
+            vt: vt100::Parser::new(24, 120, 100),
+        }
+    }
+}
+
 pub struct TerminalSession {
     pty: OsSession,
     vt: vt100::Parser,
 }
 
 impl TerminalSession {
-    pub fn spawn(bin_path: &Path, workspace: &TempDir, args: &[&str]) -> Self {
-        let mut cmd = Command::new(bin_path);
-        cmd.args(args);
-        cmd.current_dir(workspace.path());
-        cmd.env("CARGO_CHANGESET_FORCE_TTY", "1");
-        let pty = OsSession::spawn(cmd).expect("failed to spawn session");
-        Self {
-            pty,
-            vt: vt100::Parser::new(24, 120, 100),
+    pub fn builder<'a>(
+        bin_path: &'a Path,
+        workspace: &'a TempDir,
+        args: &'a [&'a str],
+    ) -> TerminalSessionBuilder<'a> {
+        TerminalSessionBuilder {
+            bin_path,
+            workspace,
+            args,
+            env: Vec::new(),
         }
     }
 
-    pub fn poll(&mut self) {
+    pub fn spawn(bin_path: &Path, workspace: &TempDir, args: &[&str]) -> Self {
+        Self::builder(bin_path, workspace, args).spawn()
+    }
+
+    fn poll(&mut self) {
         let mut buf = [0u8; 4096];
         loop {
             match self.pty.try_read(&mut buf) {
@@ -41,7 +77,7 @@ impl TerminalSession {
         }
     }
 
-    pub fn screen(&mut self) -> String {
+    fn screen(&mut self) -> String {
         self.poll();
         let raw = self.vt.screen().contents();
         raw.lines()
@@ -109,6 +145,17 @@ impl TerminalSession {
 
     pub fn cancel(&mut self) -> &mut Self {
         self.pty.send(ESC).expect("send escape key");
+        self
+    }
+
+    pub fn send_raw(&mut self, bytes: &str) -> &mut Self {
+        self.pty.send(bytes).expect("send raw bytes to PTY");
+        self
+    }
+
+    pub fn send_line(&mut self, text: &str) -> &mut Self {
+        self.pty.send(text).expect("send text to PTY");
+        self.pty.send("\n").expect("send newline to PTY");
         self
     }
 
