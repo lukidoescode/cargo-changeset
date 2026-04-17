@@ -335,9 +335,10 @@ impl AdditionalPackageInteractionProvider for TerminalAdditionalPackageInteracti
         .map_err(super::cli_error_to_operation_error)?;
 
         Ok(
-            match Option::<AdditionalPackageField>::from(
-                selection.unwrap_or(AdditionalPackageFieldSelectionOption::Done),
-            ) {
+            match selection
+                .unwrap_or(AdditionalPackageFieldSelectionOption::Done)
+                .into_field()
+            {
                 Some(field) => MenuSelection::Selected(field),
                 None => MenuSelection::Cancelled,
             },

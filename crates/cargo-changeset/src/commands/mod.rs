@@ -479,3 +479,85 @@ mod dialoguer_conversion_tests {
         }
     }
 }
+
+#[cfg(test)]
+mod cli_error_conversion_tests {
+    use std::io;
+
+    use changeset_operations::OperationError;
+
+    use crate::error::CliError;
+
+    use super::cli_error_to_operation_error;
+
+    #[test]
+    fn io_error_maps_to_operation_io() {
+        let err = CliError::Io(io::Error::new(io::ErrorKind::NotFound, "not found"));
+
+        let result = cli_error_to_operation_error(err);
+
+        assert!(matches!(result, OperationError::Io(_)));
+    }
+
+    #[test]
+    fn not_a_tty_maps_to_interaction_required() {
+        let err = CliError::NotATty;
+
+        let result = cli_error_to_operation_error(err);
+
+        assert!(matches!(result, OperationError::InteractionRequired));
+    }
+
+    #[test]
+    fn incomplete_args_maps_to_interaction_required() {
+        let err = CliError::IncompleteArgs;
+
+        let result = cli_error_to_operation_error(err);
+
+        assert!(matches!(result, OperationError::InteractionRequired));
+    }
+
+    #[test]
+    fn operation_error_passes_through() {
+        let inner = OperationError::Cancelled;
+        let err = CliError::Operation(inner);
+
+        let result = cli_error_to_operation_error(err);
+
+        assert!(matches!(result, OperationError::Cancelled));
+    }
+
+    #[test]
+    fn project_error_maps_to_operation_project() {
+        use std::path::PathBuf;
+        let err = CliError::Project(changeset_project::ProjectError::NotFound {
+            start_dir: PathBuf::from("/test"),
+        });
+
+        let result = cli_error_to_operation_error(err);
+
+        assert!(matches!(result, OperationError::Project(_)));
+    }
+
+    #[test]
+    fn editor_failed_maps_to_operation_io() {
+        let err = CliError::EditorFailed {
+            source: io::Error::new(io::ErrorKind::NotFound, "editor not found"),
+        };
+
+        let result = cli_error_to_operation_error(err);
+
+        assert!(matches!(result, OperationError::Io(_)));
+    }
+
+    #[test]
+    fn invalid_package_bump_format_maps_to_cancelled() {
+        let err = CliError::InvalidPackageBumpFormat {
+            input: "bad".to_string(),
+        };
+
+        let result = cli_error_to_operation_error(err);
+
+        assert!(matches!(result, OperationError::Cancelled));
+    }
+}

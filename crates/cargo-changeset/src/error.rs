@@ -161,4 +161,14 @@ mod tests {
 
         assert!(matches!(cli_err, CliError::Operation(_)));
     }
+
+    #[test]
+    fn dialoguer_error_converts_via_from() {
+        let io_err = std::io::Error::new(std::io::ErrorKind::BrokenPipe, "pipe closed");
+        let dialoguer_err = dialoguer::Error::IO(io_err);
+
+        let cli_err: CliError = dialoguer_err.into();
+
+        assert!(matches!(cli_err, CliError::Io(_)));
+    }
 }

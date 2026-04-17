@@ -1,3 +1,5 @@
+mod selection_options;
+
 use std::fs;
 use std::io::Write as _;
 use std::process::Command;
@@ -5,184 +7,27 @@ use std::process::Command;
 use dialoguer::{Confirm, Input, MultiSelect, Select};
 use strum::{EnumMessage, VariantArray};
 
-use changeset_core::{BumpType, ChangeCategory, PackageInfo};
+use changeset_core::{ChangeCategory, PackageInfo};
 use changeset_git::DEFAULT_BASE_BRANCH;
 use changeset_manifest::{
-    ChangelogLocation, ComparisonLinks, NoneBumpBehavior, TagFormat, ZeroVersionBehavior,
+    ChangelogLocation, ComparisonLinks, NoneBumpBehavior, ZeroVersionBehavior,
 };
 use changeset_operations::Result;
 use changeset_operations::traits::{
-    AdditionalPackageField, BumpSelection, CategorySelection, ChangelogSettingsInput,
-    DescriptionInput, FilteringSettingsInput, GitSettingsInput, InitInteractionProvider,
-    InteractionProvider, PackageSelection, ProjectContext, VersionSettingsInput,
+    BumpSelection, CategorySelection, ChangelogSettingsInput, DescriptionInput,
+    FilteringSettingsInput, GitSettingsInput, InitInteractionProvider, InteractionProvider,
+    PackageSelection, ProjectContext, VersionSettingsInput,
 };
 
 use crate::commands::{cli_error_to_operation_error, dialoguer_to_operation_error};
 use crate::environment::is_interactive;
 use crate::error::{CliError, Result as CliResult};
 
-#[derive(Clone, Copy, VariantArray, EnumMessage)]
-pub(crate) enum BumpTypeSelectionOption {
-    #[strum(message = "patch - Bug fixes (backwards compatible)")]
-    Patch,
-    #[strum(message = "minor - New features (backwards compatible)")]
-    Minor,
-    #[strum(message = "major - Breaking changes")]
-    Major,
-    #[strum(message = "none - No version bump (internal changes only)")]
-    None,
-}
-
-impl From<BumpTypeSelectionOption> for BumpType {
-    fn from(opt: BumpTypeSelectionOption) -> Self {
-        match opt {
-            BumpTypeSelectionOption::Patch => Self::Patch,
-            BumpTypeSelectionOption::Minor => Self::Minor,
-            BumpTypeSelectionOption::Major => Self::Major,
-            BumpTypeSelectionOption::None => Self::None,
-        }
-    }
-}
-
-#[derive(Clone, Copy, VariantArray, EnumMessage)]
-pub(crate) enum ChangeCategorySelectionOption {
-    #[strum(message = "changed - General changes (default)")]
-    Changed,
-    #[strum(message = "added - New features")]
-    Added,
-    #[strum(message = "fixed - Bug fixes")]
-    Fixed,
-    #[strum(message = "deprecated - Deprecated features")]
-    Deprecated,
-    #[strum(message = "removed - Removed features")]
-    Removed,
-    #[strum(message = "security - Security fixes")]
-    Security,
-}
-
-impl From<ChangeCategorySelectionOption> for ChangeCategory {
-    fn from(opt: ChangeCategorySelectionOption) -> Self {
-        match opt {
-            ChangeCategorySelectionOption::Changed => Self::Changed,
-            ChangeCategorySelectionOption::Added => Self::Added,
-            ChangeCategorySelectionOption::Fixed => Self::Fixed,
-            ChangeCategorySelectionOption::Deprecated => Self::Deprecated,
-            ChangeCategorySelectionOption::Removed => Self::Removed,
-            ChangeCategorySelectionOption::Security => Self::Security,
-        }
-    }
-}
-
-#[derive(Clone, Copy, VariantArray, EnumMessage)]
-pub(crate) enum ChangelogLocationSelectionOption {
-    #[strum(message = "root - Single CHANGELOG.md at project root (default)")]
-    Root,
-    #[strum(message = "per-package - CHANGELOG.md in each package directory")]
-    PerPackage,
-}
-
-impl From<ChangelogLocationSelectionOption> for ChangelogLocation {
-    fn from(opt: ChangelogLocationSelectionOption) -> Self {
-        match opt {
-            ChangelogLocationSelectionOption::Root => Self::Root,
-            ChangelogLocationSelectionOption::PerPackage => Self::PerPackage,
-        }
-    }
-}
-
-#[derive(Clone, Copy, VariantArray, EnumMessage)]
-pub(crate) enum ComparisonLinksSelectionOption {
-    #[strum(message = "auto - Generate links if git remote detected (default)")]
-    Auto,
-    #[strum(message = "enabled - Always generate comparison links")]
-    Enabled,
-    #[strum(message = "disabled - Never generate comparison links")]
-    Disabled,
-}
-
-impl From<ComparisonLinksSelectionOption> for ComparisonLinks {
-    fn from(opt: ComparisonLinksSelectionOption) -> Self {
-        match opt {
-            ComparisonLinksSelectionOption::Auto => Self::Auto,
-            ComparisonLinksSelectionOption::Enabled => Self::Enabled,
-            ComparisonLinksSelectionOption::Disabled => Self::Disabled,
-        }
-    }
-}
-
-#[derive(Clone, Copy, VariantArray, EnumMessage)]
-pub(crate) enum ZeroVersionBehaviorSelectionOption {
-    #[strum(message = "effective-minor - Major bump on 0.x increments minor (default)")]
-    EffectiveMinor,
-    #[strum(message = "auto-promote-on-major - Major bump on 0.x promotes to 1.0.0")]
-    AutoPromoteOnMajor,
-}
-
-impl From<ZeroVersionBehaviorSelectionOption> for ZeroVersionBehavior {
-    fn from(opt: ZeroVersionBehaviorSelectionOption) -> Self {
-        match opt {
-            ZeroVersionBehaviorSelectionOption::EffectiveMinor => Self::EffectiveMinor,
-            ZeroVersionBehaviorSelectionOption::AutoPromoteOnMajor => Self::AutoPromoteOnMajor,
-        }
-    }
-}
-
-#[derive(Clone, Copy, VariantArray, EnumMessage)]
-pub(crate) enum NoneBumpBehaviorSelectionOption {
-    #[strum(message = "promote-to-patch - Treat none bumps as patch releases (default)")]
-    PromoteToPatch,
-    #[strum(message = "allow - Allow none bumps without version change")]
-    Allow,
-    #[strum(message = "disallow - Reject changesets with none bump type")]
-    Disallow,
-}
-
-impl From<NoneBumpBehaviorSelectionOption> for NoneBumpBehavior {
-    fn from(opt: NoneBumpBehaviorSelectionOption) -> Self {
-        match opt {
-            NoneBumpBehaviorSelectionOption::PromoteToPatch => Self::PromoteToPatch,
-            NoneBumpBehaviorSelectionOption::Allow => Self::Allow,
-            NoneBumpBehaviorSelectionOption::Disallow => Self::Disallow,
-        }
-    }
-}
-
-#[derive(Clone, Copy, VariantArray, EnumMessage)]
-pub(crate) enum AdditionalPackageFieldSelectionOption {
-    #[strum(message = "path")]
-    Path,
-    #[strum(message = "influence patterns")]
-    Influence,
-    #[strum(message = "manifest file path")]
-    ManifestFilePath,
-    #[strum(message = "manifest format")]
-    ManifestFormat,
-    #[strum(message = "manifest version path")]
-    ManifestVersionFieldPath,
-    #[strum(message = "Done")]
-    Done,
-}
-
-impl From<AdditionalPackageFieldSelectionOption> for Option<AdditionalPackageField> {
-    fn from(opt: AdditionalPackageFieldSelectionOption) -> Self {
-        match opt {
-            AdditionalPackageFieldSelectionOption::Path => Some(AdditionalPackageField::Path),
-            AdditionalPackageFieldSelectionOption::Influence => {
-                Some(AdditionalPackageField::Influence)
-            }
-            AdditionalPackageFieldSelectionOption::ManifestFilePath => {
-                Some(AdditionalPackageField::ManifestFilePath)
-            }
-            AdditionalPackageFieldSelectionOption::ManifestFormat => {
-                Some(AdditionalPackageField::ManifestFormat)
-            }
-            AdditionalPackageFieldSelectionOption::ManifestVersionFieldPath => {
-                Some(AdditionalPackageField::ManifestVersionFieldPath)
-            }
-            AdditionalPackageFieldSelectionOption::Done => None,
-        }
-    }
-}
+pub(crate) use selection_options::{
+    AdditionalPackageFieldSelectionOption, BumpTypeSelectionOption, ChangeCategorySelectionOption,
+    ChangelogLocationSelectionOption, ComparisonLinksSelectionOption,
+    NoneBumpBehaviorSelectionOption, TagFormatSelectionOption, ZeroVersionBehaviorSelectionOption,
+};
 
 pub(crate) struct TerminalInteractionProvider {
     use_editor: bool,
@@ -516,9 +361,17 @@ where
     T: Copy + VariantArray + EnumMessage,
 {
     let variants = T::VARIANTS;
+    debug_assert!(
+        default < variants.len(),
+        "default index {default} is out of bounds for {} variants",
+        variants.len()
+    );
     let items: Vec<&str> = variants
         .iter()
-        .map(|v| v.get_message().unwrap_or(""))
+        .map(|v| {
+            v.get_message()
+                .expect("all strum variants must have a #[strum(message)] annotation")
+        })
         .collect();
     let selection = Select::new()
         .with_prompt(prompt)
@@ -620,36 +473,14 @@ fn select_bool(prompt: &str, default: bool) -> CliResult<bool> {
         .interact()?)
 }
 
-fn select_tag_format(is_single_package: bool) -> CliResult<TagFormat> {
-    let (options, default_idx): (&[(TagFormat, &str)], usize) = if is_single_package {
-        (
-            &[
-                (
-                    TagFormat::VersionOnly,
-                    "version-only - Tags like v1.0.0 (default)",
-                ),
-                (
-                    TagFormat::CratePrefixed,
-                    "crate-prefixed - Tags like crate-name@1.0.0",
-                ),
-            ],
-            0,
-        )
+fn select_tag_format(is_single_package: bool) -> CliResult<changeset_manifest::TagFormat> {
+    let default_idx: usize = if is_single_package { 0 } else { 1 };
+    let selection = select_variant::<TagFormatSelectionOption>("Select tag format", default_idx)?;
+    Ok(selection.map(Into::into).unwrap_or(if is_single_package {
+        changeset_manifest::TagFormat::VersionOnly
     } else {
-        (
-            &[
-                (TagFormat::VersionOnly, "version-only - Tags like v1.0.0"),
-                (
-                    TagFormat::CratePrefixed,
-                    "crate-prefixed - Tags like crate-name@1.0.0 (default)",
-                ),
-            ],
-            1,
-        )
-    };
-
-    let selection = select_from_options("Select tag format", options, default_idx)?;
-    Ok(selection.unwrap_or(options[default_idx].0))
+        changeset_manifest::TagFormat::CratePrefixed
+    }))
 }
 
 fn select_changelog_location() -> CliResult<ChangelogLocation> {
