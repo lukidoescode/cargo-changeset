@@ -44,12 +44,12 @@ serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.145"
 serde_yml = "0.0.12"
 clap = { version = "4.5.57", features = ["derive"] }
-toml = "0.9.11"
+toml = "1.1.2"
 semver = "1.0.27"
 glob = "0.3.3"
 git2 = { version = "0.20", default-features = false }
 dialoguer = "0.12.0"
-petname = "2.0.2"
+petname = "3.0.0"
 toml_edit = "0.25.0"
 yaml-edit = "0.2.1"
 jsonc-parser = { version = "0.32.3", features = ["cst"] }
