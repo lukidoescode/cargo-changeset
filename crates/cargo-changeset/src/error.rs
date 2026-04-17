@@ -56,6 +56,14 @@ pub enum CliError {
 
 pub type Result<T> = std::result::Result<T, CliError>;
 
+impl From<dialoguer::Error> for CliError {
+    fn from(e: dialoguer::Error) -> Self {
+        match e {
+            dialoguer::Error::IO(io) => Self::Io(io),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::path::PathBuf;
@@ -152,5 +160,15 @@ mod tests {
         let cli_err: CliError = op_err.into();
 
         assert!(matches!(cli_err, CliError::Operation(_)));
+    }
+
+    #[test]
+    fn dialoguer_error_converts_via_from() {
+        let io_err = std::io::Error::new(std::io::ErrorKind::BrokenPipe, "pipe closed");
+        let dialoguer_err = dialoguer::Error::IO(io_err);
+
+        let cli_err: CliError = dialoguer_err.into();
+
+        assert!(matches!(cli_err, CliError::Io(_)));
     }
 }

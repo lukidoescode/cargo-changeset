@@ -16,6 +16,7 @@ use changeset_operations::traits::{
 use super::{ManageArgs, ManageCommand, ManageGraduationArgs, ManagePrereleaseArgs};
 use crate::environment::is_interactive;
 use crate::error::{CliError, Result};
+use crate::interaction::select_from_options;
 
 struct TerminalManageInteractionProvider;
 
@@ -24,25 +25,21 @@ impl PrereleaseInteractionProvider for TerminalManageInteractionProvider {
         &self,
     ) -> changeset_operations::Result<MenuSelection<PrereleaseAction>> {
         let options = [
-            "Add crate to pre-release",
-            "Remove crate from pre-release",
-            "Graduate crate (move to graduation queue)",
-            "Done",
+            (PrereleaseAction::Add, "Add crate to pre-release"),
+            (PrereleaseAction::Remove, "Remove crate from pre-release"),
+            (
+                PrereleaseAction::Graduate,
+                "Graduate crate (move to graduation queue)",
+            ),
+            (PrereleaseAction::Done, "Done"),
         ];
 
-        let selection = Select::new()
-            .with_prompt("What would you like to do?")
-            .items(options)
-            .default(0)
-            .interact_opt()
-            .map_err(super::dialoguer_to_operation_error)?;
+        let selection = select_from_options("What would you like to do?", &options, 0)
+            .map_err(super::cli_error_to_operation_error)?;
 
-        Ok(match selection {
-            Some(0) => MenuSelection::Selected(PrereleaseAction::Add),
-            Some(1) => MenuSelection::Selected(PrereleaseAction::Remove),
-            Some(2) => MenuSelection::Selected(PrereleaseAction::Graduate),
-            _ => MenuSelection::Selected(PrereleaseAction::Done),
-        })
+        Ok(MenuSelection::Selected(
+            selection.unwrap_or(PrereleaseAction::Done),
+        ))
     }
 
     fn select_package_for_prerelease(
@@ -102,23 +99,20 @@ impl GraduationInteractionProvider for TerminalManageInteractionProvider {
         &self,
     ) -> changeset_operations::Result<MenuSelection<GraduationAction>> {
         let options = [
-            "Add crate to graduation queue",
-            "Remove crate from graduation queue",
-            "Done",
+            (GraduationAction::Add, "Add crate to graduation queue"),
+            (
+                GraduationAction::Remove,
+                "Remove crate from graduation queue",
+            ),
+            (GraduationAction::Done, "Done"),
         ];
 
-        let selection = Select::new()
-            .with_prompt("What would you like to do?")
-            .items(options)
-            .default(0)
-            .interact_opt()
-            .map_err(super::dialoguer_to_operation_error)?;
+        let selection = select_from_options("What would you like to do?", &options, 0)
+            .map_err(super::cli_error_to_operation_error)?;
 
-        Ok(match selection {
-            Some(0) => MenuSelection::Selected(GraduationAction::Add),
-            Some(1) => MenuSelection::Selected(GraduationAction::Remove),
-            _ => MenuSelection::Selected(GraduationAction::Done),
-        })
+        Ok(MenuSelection::Selected(
+            selection.unwrap_or(GraduationAction::Done),
+        ))
     }
 
     fn select_package_for_graduation(
