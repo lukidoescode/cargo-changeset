@@ -313,6 +313,13 @@ impl InitInteractionProvider for TerminalInitInteractionProvider {
     }
 }
 
+pub(crate) struct MultiValuePromptConfig<'a> {
+    pub(crate) intro: &'a str,
+    pub(crate) first_prompt: &'a str,
+    pub(crate) additional_prompt: &'a str,
+    pub(crate) first_default: Option<String>,
+}
+
 pub(crate) fn confirm_proceed(prompt: &str) -> crate::error::Result<bool> {
     if !is_interactive() {
         return Err(CliError::NotATty);
@@ -325,6 +332,40 @@ pub(crate) fn confirm_proceed(prompt: &str) -> crate::error::Result<bool> {
         .map_err(from_dialoguer)?;
 
     Ok(confirmed == Some(true))
+}
+
+pub(crate) fn prompt_multi_value(
+    config: &MultiValuePromptConfig<'_>,
+) -> std::io::Result<Vec<String>> {
+    let mut values = Vec::new();
+    println!("{}", config.intro);
+
+    let mut first_input = Input::<String>::new()
+        .with_prompt(config.first_prompt)
+        .allow_empty(true);
+    if let Some(ref default) = config.first_default {
+        first_input = first_input.default(default.clone());
+    }
+    let first = first_input.interact_text().map_err(from_dialoguer)?;
+    let first = first.trim().to_string();
+    if first.is_empty() {
+        return Ok(values);
+    }
+    values.push(first);
+
+    loop {
+        let s: String = Input::new()
+            .with_prompt(config.additional_prompt)
+            .allow_empty(true)
+            .interact_text()
+            .map_err(from_dialoguer)?;
+        let s = s.trim().to_string();
+        if s.is_empty() {
+            break;
+        }
+        values.push(s);
+    }
+    Ok(values)
 }
 
 fn from_dialoguer(e: dialoguer::Error) -> std::io::Error {
@@ -586,22 +627,13 @@ fn prompt_dependency_bump_changelog_template() -> Result<String> {
 }
 
 fn prompt_ignored_files_loop() -> Result<Vec<String>> {
-    let mut patterns = Vec::new();
-    loop {
-        let pattern: String = Input::new()
-            .with_prompt("Add ignore pattern (empty to finish)")
-            .default(String::new())
-            .allow_empty(true)
-            .interact_text()
-            .map_err(from_dialoguer)?;
-
-        let trimmed = pattern.trim().to_string();
-        if trimmed.is_empty() {
-            break;
-        }
-        patterns.push(trimmed);
-    }
-    Ok(patterns)
+    Ok(prompt_multi_value(&MultiValuePromptConfig {
+        intro: "Enter file patterns to exclude from change detection \
+                (one per line, empty line to finish):",
+        first_prompt: "Ignore pattern",
+        additional_prompt: "Additional pattern",
+        first_default: None,
+    })?)
 }
 
 fn prompt_none_bump_promote_message_template() -> Result<String> {

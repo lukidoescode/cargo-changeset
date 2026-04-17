@@ -215,33 +215,15 @@ impl AdditionalPackageInteractionProvider for TerminalAdditionalPackageInteracti
         &self,
         package_path: &Path,
     ) -> changeset_operations::Result<Vec<String>> {
-        let mut patterns = Vec::new();
-        println!(
-            "Enter glob patterns for files that influence this package (one per line, empty line to finish):"
-        );
-        let default = format!("{}/**", package_path.display());
-        let first: String = Input::new()
-            .with_prompt("Glob pattern")
-            .default(default)
-            .allow_empty(true)
-            .interact_text()
-            .map_err(super::dialoguer_to_operation_error)?;
-        if first.is_empty() {
-            return Ok(patterns);
-        }
-        patterns.push(first);
-        loop {
-            let s: String = Input::new()
-                .with_prompt("Additional pattern")
-                .allow_empty(true)
-                .interact_text()
-                .map_err(super::dialoguer_to_operation_error)?;
-            if s.is_empty() {
-                break;
-            }
-            patterns.push(s);
-        }
-        Ok(patterns)
+        Ok(crate::interaction::prompt_multi_value(
+            &crate::interaction::MultiValuePromptConfig {
+                intro: "Enter glob patterns for files that influence this package \
+                        (one per line, empty line to finish):",
+                first_prompt: "Glob pattern",
+                additional_prompt: "Additional pattern",
+                first_default: Some(format!("{}/**", package_path.display())),
+            },
+        )?)
     }
 
     fn prompt_manifest_file_path(&self) -> changeset_operations::Result<PathBuf> {
