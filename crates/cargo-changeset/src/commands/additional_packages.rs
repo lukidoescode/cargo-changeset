@@ -25,6 +25,7 @@ use changeset_operations::traits::{
 use crate::environment::is_interactive;
 use crate::error::{CliError, Result};
 use crate::interaction::{AdditionalPackageFieldSelectionOption, select_variant};
+use crate::output::CliWriter;
 
 #[derive(Args)]
 pub(crate) struct AdditionalPackagesArgs {
@@ -354,17 +355,25 @@ impl AdditionalPackageInteractionProvider for TerminalAdditionalPackageInteracti
     }
 }
 
-pub(crate) fn run(args: AdditionalPackagesArgs, start_path: &Path) -> Result<()> {
+pub(super) fn run(
+    args: AdditionalPackagesArgs,
+    start_path: &Path,
+    writer: &dyn CliWriter,
+) -> Result<()> {
     match args.command {
-        AdditionalPackageCommand::Add(args) => run_add(args, start_path),
-        AdditionalPackageCommand::Remove(args) => run_remove(args, start_path),
-        AdditionalPackageCommand::Edit(args) => run_edit(args, start_path),
-        AdditionalPackageCommand::List => run_list(start_path),
-        AdditionalPackageCommand::Dependencies(args) => run_dependencies(args, start_path),
+        AdditionalPackageCommand::Add(args) => run_add(args, start_path, writer),
+        AdditionalPackageCommand::Remove(args) => run_remove(args, start_path, writer),
+        AdditionalPackageCommand::Edit(args) => run_edit(args, start_path, writer),
+        AdditionalPackageCommand::List => run_list(start_path, writer),
+        AdditionalPackageCommand::Dependencies(args) => run_dependencies(args, start_path, writer),
     }
 }
 
-fn run_add(args: AddAdditionalPackageArgs, start_path: &Path) -> Result<()> {
+fn run_add(
+    args: AddAdditionalPackageArgs,
+    start_path: &Path,
+    writer: &dyn CliWriter,
+) -> Result<()> {
     let manifest_format = args.manifest_format.or_else(|| {
         args.manifest_file
             .as_deref()
@@ -412,11 +421,15 @@ fn run_add(args: AddAdditionalPackageArgs, start_path: &Path) -> Result<()> {
         return Err(CliError::IncompleteArgs);
     };
 
-    print_additional_package_events(&events);
+    print_additional_package_events(&events, writer);
     Ok(())
 }
 
-fn run_remove(args: RemoveAdditionalPackageArgs, start_path: &Path) -> Result<()> {
+fn run_remove(
+    args: RemoveAdditionalPackageArgs,
+    start_path: &Path,
+    writer: &dyn CliWriter,
+) -> Result<()> {
     let events = if let Some(name) = args.name {
         let op = AdditionalPackageDirectRemoveOperation::new(project_provider(), manifest_writer());
         op.execute(start_path, &name)?
@@ -431,11 +444,15 @@ fn run_remove(args: RemoveAdditionalPackageArgs, start_path: &Path) -> Result<()
         return Err(CliError::IncompleteArgs);
     };
 
-    print_additional_package_events(&events);
+    print_additional_package_events(&events, writer);
     Ok(())
 }
 
-fn run_edit(args: EditAdditionalPackageArgs, start_path: &Path) -> Result<()> {
+fn run_edit(
+    args: EditAdditionalPackageArgs,
+    start_path: &Path,
+    writer: &dyn CliWriter,
+) -> Result<()> {
     let has_updates = args.path.is_some()
         || !args.influence.is_empty()
         || args.manifest_file.is_some()
@@ -468,26 +485,34 @@ fn run_edit(args: EditAdditionalPackageArgs, start_path: &Path) -> Result<()> {
         return Err(CliError::IncompleteArgs);
     };
 
-    print_additional_package_events(&events);
+    print_additional_package_events(&events, writer);
     Ok(())
 }
 
-fn run_list(start_path: &Path) -> Result<()> {
+fn run_list(start_path: &Path, writer: &dyn CliWriter) -> Result<()> {
     let op = AdditionalPackageListOperation::new(project_provider());
     let events = op.execute(start_path)?;
-    print_additional_package_events(&events);
+    print_additional_package_events(&events, writer);
     Ok(())
 }
 
-fn run_dependencies(args: DependenciesArgs, start_path: &Path) -> Result<()> {
+fn run_dependencies(
+    args: DependenciesArgs,
+    start_path: &Path,
+    writer: &dyn CliWriter,
+) -> Result<()> {
     match args.command {
-        DependencySubcommand::Add(args) => run_dependency_add(args, start_path),
-        DependencySubcommand::Remove(args) => run_dependency_remove(args, start_path),
-        DependencySubcommand::List(args) => run_dependency_list(args, start_path),
+        DependencySubcommand::Add(args) => run_dependency_add(args, start_path, writer),
+        DependencySubcommand::Remove(args) => run_dependency_remove(args, start_path, writer),
+        DependencySubcommand::List(args) => run_dependency_list(args, start_path, writer),
     }
 }
 
-fn run_dependency_add(args: AddDependencyArgs, start_path: &Path) -> Result<()> {
+fn run_dependency_add(
+    args: AddDependencyArgs,
+    start_path: &Path,
+    writer: &dyn CliWriter,
+) -> Result<()> {
     let manifest_format = args.manifest_format.or_else(|| {
         args.manifest_file
             .as_deref()
@@ -548,7 +573,7 @@ fn run_dependency_add(args: AddDependencyArgs, start_path: &Path) -> Result<()> 
             .collect();
 
         if dep_items.is_empty() {
-            println!("No other packages available to select as a dependency.");
+            writer.line("No other packages available to select as a dependency.");
             return Ok(());
         }
 
@@ -576,11 +601,15 @@ fn run_dependency_add(args: AddDependencyArgs, start_path: &Path) -> Result<()> 
         return Err(CliError::IncompleteArgs);
     };
 
-    print_dependency_events(&events);
+    print_dependency_events(&events, writer);
     Ok(())
 }
 
-fn run_dependency_remove(args: RemoveDependencyArgs, start_path: &Path) -> Result<()> {
+fn run_dependency_remove(
+    args: RemoveDependencyArgs,
+    start_path: &Path,
+    writer: &dyn CliWriter,
+) -> Result<()> {
     let events = if let (Some(package), Some(dependency)) = (args.package, args.dependency) {
         execute_dependency_remove(package, dependency, start_path)?
     } else if is_interactive() {
@@ -607,7 +636,9 @@ fn run_dependency_remove(args: RemoveDependencyArgs, start_path: &Path) -> Resul
         );
 
         if dep_items.is_empty() {
-            println!("No version-tracking dependencies configured for '{package}'.");
+            writer.line(&format!(
+                "No version-tracking dependencies configured for '{package}'."
+            ));
             return Ok(());
         }
 
@@ -622,11 +653,15 @@ fn run_dependency_remove(args: RemoveDependencyArgs, start_path: &Path) -> Resul
         return Err(CliError::IncompleteArgs);
     };
 
-    print_dependency_events(&events);
+    print_dependency_events(&events, writer);
     Ok(())
 }
 
-fn run_dependency_list(args: ListDependencyArgs, start_path: &Path) -> Result<()> {
+fn run_dependency_list(
+    args: ListDependencyArgs,
+    start_path: &Path,
+    writer: &dyn CliWriter,
+) -> Result<()> {
     let events = if let Some(package) = args.package {
         let op = VersionTrackingDependencyListOperation::new(project_provider());
         op.execute(start_path, &package)?
@@ -649,7 +684,7 @@ fn run_dependency_list(args: ListDependencyArgs, start_path: &Path) -> Result<()
         return Err(CliError::IncompleteArgs);
     };
 
-    print_dependency_events(&events);
+    print_dependency_events(&events, writer);
     Ok(())
 }
 
@@ -682,79 +717,83 @@ fn execute_dependency_remove(
     Ok(op.execute(start_path, input)?)
 }
 
-fn print_dependency_events(events: &[VersionTrackingDependencyEvent]) {
+fn print_dependency_events(events: &[VersionTrackingDependencyEvent], writer: &dyn CliWriter) {
     for event in events {
         match event {
             VersionTrackingDependencyEvent::Added {
                 package_name,
                 dependency_name,
             } => {
-                println!(
+                writer.line(&format!(
                     "Added version-tracking dependency '{dependency_name}' to package '{package_name}'"
-                );
+                ));
             }
             VersionTrackingDependencyEvent::Removed {
                 package_name,
                 dependency_name,
             } => {
-                println!(
+                writer.line(&format!(
                     "Removed version-tracking dependency '{dependency_name}' from package '{package_name}'"
-                );
+                ));
             }
             VersionTrackingDependencyEvent::Listed(summaries) => {
-                println!();
-                println!("Version-tracking dependencies:");
+                writer.blank();
+                writer.heading("Version-tracking dependencies:");
                 for s in summaries {
-                    println!(
-                        "  {} -> {} [{}]",
+                    writer.indented(&format!(
+                        "{} -> {} [{}]",
                         s.dependency_name(),
                         s.manifest_file_path().display(),
                         s.manifest_format()
-                    );
-                    println!("    version field: {}", s.version_field_path());
+                    ));
+                    writer.indented(&format!("  version field: {}", s.version_field_path()));
                 }
-                println!();
+                writer.blank();
             }
             VersionTrackingDependencyEvent::NoDependencies { package_name } => {
-                println!("No version-tracking dependencies configured for '{package_name}'.");
+                writer.line(&format!(
+                    "No version-tracking dependencies configured for '{package_name}'."
+                ));
             }
         }
     }
 }
 
-fn print_additional_package_events(events: &[AdditionalPackageEvent]) {
+fn print_additional_package_events(events: &[AdditionalPackageEvent], writer: &dyn CliWriter) {
     for event in events {
         match event {
             AdditionalPackageEvent::Added { name } => {
-                println!("Added additional package '{name}'");
+                writer.line(&format!("Added additional package '{name}'"));
             }
             AdditionalPackageEvent::Removed { name } => {
-                println!("Removed additional package '{name}'");
+                writer.line(&format!("Removed additional package '{name}'"));
             }
             AdditionalPackageEvent::Updated { name, field } => {
-                println!("Updated additional package '{name}' (fields: {field})");
+                writer.line(&format!(
+                    "Updated additional package '{name}' (fields: {field})"
+                ));
             }
             AdditionalPackageEvent::Listed(summaries) => {
-                println!();
-                println!("Additional packages:");
+                writer.blank();
+                writer.heading("Additional packages:");
                 for s in summaries {
-                    println!("  {} ({})", s.name, s.path.display());
-                    println!(
-                        "    manifest: {} [{}]",
+                    writer.indented(&format!("{} ({})", s.name, s.path.display()));
+                    writer.indented(&format!(
+                        "  manifest: {} [{}]",
                         s.manifest_file_path.display(),
                         s.manifest_format
-                    );
+                    ));
                 }
-                println!();
+                writer.blank();
             }
             AdditionalPackageEvent::NotFound { name } => {
-                println!("Additional package '{name}' not found");
+                writer.line(&format!("Additional package '{name}' not found"));
             }
             AdditionalPackageEvent::AlreadyExists { name } => {
-                println!("A package named '{name}' already exists");
+                writer.line(&format!("A package named '{name}' already exists"));
             }
             AdditionalPackageEvent::NoAdditionalPackages => {
-                println!("No additional packages configured.");
+                writer.line("No additional packages configured.");
             }
         }
     }
@@ -1012,5 +1051,105 @@ mod tests {
     #[test]
     fn manifest_format_from_path_returns_none_for_no_extension() {
         assert_eq!(ManifestFormat::from_path(Path::new("Makefile")), None);
+    }
+
+    mod output_tests {
+        use std::path::PathBuf;
+
+        use changeset_core::ManifestFormat;
+        use changeset_operations::operations::{
+            AdditionalPackageEvent, AdditionalPackageSummaryData, VersionTrackingDependencyEvent,
+        };
+
+        use crate::commands::additional_packages::{
+            print_additional_package_events, print_dependency_events,
+        };
+        use crate::output::BufferCliWriter;
+
+        #[test]
+        fn added_package_shows_name() {
+            let writer = BufferCliWriter::new();
+            let events = vec![AdditionalPackageEvent::Added {
+                name: "my-chart".to_string(),
+            }];
+
+            print_additional_package_events(&events, &writer);
+
+            let text = writer.stdout_text();
+            assert!(text.contains("Added additional package 'my-chart'"));
+        }
+
+        #[test]
+        fn removed_package_shows_name() {
+            let writer = BufferCliWriter::new();
+            let events = vec![AdditionalPackageEvent::Removed {
+                name: "old-pkg".to_string(),
+            }];
+
+            print_additional_package_events(&events, &writer);
+
+            let text = writer.stdout_text();
+            assert!(text.contains("Removed additional package 'old-pkg'"));
+        }
+
+        #[test]
+        fn no_additional_packages_message() {
+            let writer = BufferCliWriter::new();
+            let events = vec![AdditionalPackageEvent::NoAdditionalPackages];
+
+            print_additional_package_events(&events, &writer);
+
+            let text = writer.stdout_text();
+            assert!(text.contains("No additional packages configured."));
+        }
+
+        #[test]
+        fn listed_packages_shows_details() {
+            let writer = BufferCliWriter::new();
+            let events = vec![AdditionalPackageEvent::Listed(vec![
+                AdditionalPackageSummaryData {
+                    name: "chart-a".to_string(),
+                    path: PathBuf::from("charts/chart-a"),
+                    manifest_file_path: PathBuf::from("charts/chart-a/Chart.yaml"),
+                    manifest_format: ManifestFormat::Yaml,
+                },
+            ])];
+
+            print_additional_package_events(&events, &writer);
+
+            let text = writer.stdout_text();
+            assert!(text.contains("Additional packages:"));
+            assert!(text.contains("chart-a"));
+            assert!(text.contains("charts/chart-a/Chart.yaml"));
+        }
+
+        #[test]
+        fn dependency_added_shows_both_names() {
+            let writer = BufferCliWriter::new();
+            let events = vec![VersionTrackingDependencyEvent::Added {
+                package_name: "my-chart".to_string(),
+                dependency_name: "core-lib".to_string(),
+            }];
+
+            print_dependency_events(&events, &writer);
+
+            let text = writer.stdout_text();
+            assert!(
+                text.contains("Added version-tracking dependency 'core-lib' to package 'my-chart'")
+            );
+        }
+
+        #[test]
+        fn dependency_no_deps_message() {
+            let writer = BufferCliWriter::new();
+            let events = vec![VersionTrackingDependencyEvent::NoDependencies {
+                package_name: "lonely-pkg".to_string(),
+            }];
+
+            print_dependency_events(&events, &writer);
+
+            let text = writer.stdout_text();
+            assert!(text.contains("No version-tracking dependencies configured for 'lonely-pkg'."));
+        }
     }
 }

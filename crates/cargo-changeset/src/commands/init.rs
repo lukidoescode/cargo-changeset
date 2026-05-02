@@ -16,8 +16,9 @@ use crate::commands::InitArgs;
 use crate::environment::is_interactive;
 use crate::error::Result;
 use crate::interaction::{TerminalInitInteractionProvider, confirm_proceed};
+use crate::output::{CliWriter, MessageLevel};
 
-pub(crate) fn run(args: InitArgs, start_path: &Path) -> Result<()> {
+pub(super) fn run(args: InitArgs, start_path: &Path, writer: &dyn CliWriter) -> Result<()> {
     let project_provider = FileSystemProjectProvider::new();
     let manifest_writer = FileSystemManifestWriter::new();
     let interaction_provider = TerminalInitInteractionProvider::new();
@@ -39,7 +40,7 @@ pub(crate) fn run(args: InitArgs, start_path: &Path) -> Result<()> {
     let input = match build_init_input(&args, provider, context) {
         Ok(input) => input,
         Err(crate::error::CliError::Operation(changeset_operations::OperationError::Cancelled)) => {
-            println!("Cancelled.");
+            writer.line("Cancelled.");
             return Ok(());
         }
         Err(e) => return Err(e),
@@ -67,11 +68,11 @@ pub(crate) fn run(args: InitArgs, start_path: &Path) -> Result<()> {
         config,
     );
 
-    print_summary(&plan);
+    print_summary(&plan, writer);
 
     let skip_confirmation = args.defaults || args.no_interactive || !interactive_mode;
     if !skip_confirmation && !confirm_proceed("Proceed with initialization?")? {
-        println!("Aborted.");
+        writer.line("Aborted.");
         return Ok(());
     }
 
@@ -81,31 +82,34 @@ pub(crate) fn run(args: InitArgs, start_path: &Path) -> Result<()> {
 
     let output = operation.execute_plan(start_path, &plan)?;
 
-    println!();
+    writer.blank();
     if output.created_dir() {
-        println!(
+        writer.line(&format!(
             "Created changeset directory at '{}'",
             output.changeset_dir().display()
-        );
+        ));
     } else {
-        println!(
+        writer.line(&format!(
             "Changeset directory already exists at '{}'",
             output.changeset_dir().display()
-        );
+        ));
     }
 
     if output.created_gitkeep() {
-        println!("Created .gitkeep file");
+        writer.line("Created .gitkeep file");
     }
 
     if output.wrote_config()
         && let Some(section) = output.config_location()
     {
-        println!("Wrote configuration to {section} in Cargo.toml");
+        writer.line(&format!("Wrote configuration to {section} in Cargo.toml"));
     }
 
-    println!();
-    println!("Tip: Use 'cargo changeset additional-packages add' to declare non-Rust packages.");
+    writer.blank();
+    writer.message(
+        MessageLevel::Hint,
+        "Tip: Use 'cargo changeset additional-packages add' to declare non-Rust packages.",
+    );
 
     Ok(())
 }
@@ -137,94 +141,112 @@ fn has_any_filtering_args(args: &InitArgs) -> bool {
     !args.ignored_files.is_empty()
 }
 
-fn print_summary(plan: &InitPlan) {
-    println!();
-    println!("=== Initialization Summary ===");
-    println!();
+fn print_summary(plan: &InitPlan, writer: &dyn CliWriter) {
+    writer.blank();
+    writer.heading("=== Initialization Summary ===");
+    writer.blank();
 
     if plan.dir_exists() {
-        println!(
+        writer.line(&format!(
             "Directory: {} (already exists)",
             plan.changeset_dir().display()
-        );
+        ));
     } else {
-        println!(
+        writer.line(&format!(
             "Directory: {} (will be created)",
             plan.changeset_dir().display()
-        );
+        ));
     }
 
     if !plan.gitkeep_exists() {
-        println!("  - .gitkeep file will be created");
+        writer.list_item(".gitkeep file will be created");
     }
 
     if !plan.config().is_empty() {
-        println!();
-        println!(
+        writer.blank();
+        writer.line(&format!(
             "Configuration to be written to {}:",
             plan.metadata_section()
-        );
-        print_config_summary(plan.config());
+        ));
+        print_config_summary(plan.config(), writer);
     } else {
-        println!();
-        println!("No configuration will be written (using defaults).");
+        writer.blank();
+        writer.line("No configuration will be written (using defaults).");
     }
 
-    println!();
+    writer.blank();
 }
 
-fn print_config_summary(config: &InitConfig) {
+fn print_config_summary(config: &InitConfig, writer: &dyn CliWriter) {
     if let Some(commit) = config.commit {
-        println!("  commit = {commit}");
+        writer.detail("commit", &commit.to_string());
     }
     if let Some(tags) = config.tags {
-        println!("  tags = {tags}");
+        writer.detail("tags", &tags.to_string());
     }
     if let Some(keep_changesets) = config.keep_changesets {
-        println!("  keep_changesets = {keep_changesets}");
+        writer.detail("keep_changesets", &keep_changesets.to_string());
     }
     if let Some(ref tag_format) = config.tag_format {
-        println!("  tag_format = \"{}\"", tag_format.as_str());
+        writer.detail("tag_format", &format!("\"{}\"", tag_format.as_str()));
     }
     if let Some(ref changelog) = config.changelog {
-        println!("  changelog = \"{}\"", changelog.as_str());
+        writer.detail("changelog", &format!("\"{}\"", changelog.as_str()));
     }
     if let Some(ref comparison_links) = config.comparison_links {
-        println!("  comparison_links = \"{}\"", comparison_links.as_str());
+        writer.detail(
+            "comparison_links",
+            &format!("\"{}\"", comparison_links.as_str()),
+        );
     }
     if let Some(ref zero_version_behavior) = config.zero_version_behavior {
-        println!(
-            "  zero_version_behavior = \"{}\"",
-            zero_version_behavior.as_str()
+        writer.detail(
+            "zero_version_behavior",
+            &format!("\"{}\"", zero_version_behavior.as_str()),
         );
     }
     if let Some(ref base_branch) = config.base_branch {
-        println!("  base_branch = \"{base_branch}\"");
+        writer.detail("base_branch", &format!("\"{base_branch}\""));
     }
     if let Some(ref none_bump_behavior) = config.none_bump_behavior {
-        println!("  none_bump_behavior = \"{}\"", none_bump_behavior.as_str());
+        writer.detail(
+            "none_bump_behavior",
+            &format!("\"{}\"", none_bump_behavior.as_str()),
+        );
     }
     if let Some(ref none_bump_promote_message_template) = config.none_bump_promote_message_template
     {
-        println!("  none_bump_promote_message_template = \"{none_bump_promote_message_template}\"");
+        writer.detail(
+            "none_bump_promote_message_template",
+            &format!("\"{none_bump_promote_message_template}\""),
+        );
     }
     if let Some(ref commit_title_template) = config.commit_title_template {
-        println!("  commit_title_template = \"{commit_title_template}\"");
+        writer.detail(
+            "commit_title_template",
+            &format!("\"{commit_title_template}\""),
+        );
     }
     if let Some(changes_in_body) = config.changes_in_body {
-        println!("  changes_in_body = {changes_in_body}");
+        writer.detail("changes_in_body", &changes_in_body.to_string());
     }
     if let Some(ref comparison_links_template) = config.comparison_links_template {
-        println!("  comparison_links_template = \"{comparison_links_template}\"");
+        writer.detail(
+            "comparison_links_template",
+            &format!("\"{comparison_links_template}\""),
+        );
     }
     if let Some(ref dependency_bump_changelog_template) = config.dependency_bump_changelog_template
     {
-        println!("  dependency_bump_changelog_template = \"{dependency_bump_changelog_template}\"");
+        writer.detail(
+            "dependency_bump_changelog_template",
+            &format!("\"{dependency_bump_changelog_template}\""),
+        );
     }
     if let Some(ref ignored_files) = config.ignored_files
         && !ignored_files.is_empty()
     {
-        println!("  ignored_files = {:?}", ignored_files);
+        writer.detail("ignored_files", &format!("{ignored_files:?}"));
     }
 }
 
@@ -307,6 +329,7 @@ fn build_init_input(
 mod tests {
     use super::*;
     use crate::commands::NoneBumpBehaviorArg;
+    use crate::output::BufferCliWriter;
 
     fn default_init_args() -> InitArgs {
         InitArgs {
@@ -352,21 +375,29 @@ mod tests {
 
     #[test]
     fn print_config_summary_includes_none_bump_behavior() {
+        let writer = BufferCliWriter::new();
         let config = changeset_manifest::InitConfig {
             none_bump_behavior: Some(changeset_manifest::NoneBumpBehavior::Disallow),
             ..Default::default()
         };
-        print_config_summary(&config);
+        print_config_summary(&config, &writer);
+        let text = writer.stdout_text();
+        assert!(text.contains("none_bump_behavior"));
+        assert!(text.contains("disallow"));
     }
 
     #[test]
     fn print_config_summary_includes_none_bump_promote_message_template() {
+        let writer = BufferCliWriter::new();
         let config = changeset_manifest::InitConfig {
             none_bump_behavior: Some(changeset_manifest::NoneBumpBehavior::PromoteToPatch),
             none_bump_promote_message_template: Some("Internal changes".to_string()),
             ..Default::default()
         };
-        print_config_summary(&config);
+        print_config_summary(&config, &writer);
+        let text = writer.stdout_text();
+        assert!(text.contains("none_bump_promote_message_template"));
+        assert!(text.contains("Internal changes"));
     }
 
     #[test]
@@ -578,6 +609,7 @@ mod tests {
 
     #[test]
     fn print_config_summary_shows_new_fields() {
+        let writer = BufferCliWriter::new();
         let config = changeset_manifest::InitConfig {
             commit_title_template: Some("Release {new-version}".to_string()),
             changes_in_body: Some(true),
@@ -590,6 +622,12 @@ mod tests {
             ignored_files: Some(vec!["*.lock".to_string()]),
             ..Default::default()
         };
-        print_config_summary(&config);
+        print_config_summary(&config, &writer);
+        let text = writer.stdout_text();
+        assert!(text.contains("commit_title_template"));
+        assert!(text.contains("changes_in_body"));
+        assert!(text.contains("comparison_links_template"));
+        assert!(text.contains("dependency_bump_changelog_template"));
+        assert!(text.contains("ignored_files"));
     }
 }

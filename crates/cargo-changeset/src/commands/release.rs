@@ -16,6 +16,7 @@ use changeset_version::is_prerelease;
 
 use super::ReleaseArgs;
 use crate::error::Result;
+use crate::output::CliWriter;
 
 #[derive(Debug, Clone)]
 pub(crate) struct ParsedPrereleaseArgs {
@@ -29,7 +30,7 @@ struct ParsedGraduateArgs {
     all: bool,
 }
 
-pub(crate) fn run(args: ReleaseArgs, start_path: &Path) -> Result<()> {
+pub(super) fn run(args: ReleaseArgs, start_path: &Path, writer: &dyn CliWriter) -> Result<()> {
     let project_provider = FileSystemProjectProvider::new();
     let project = project_provider.discover_project(start_path)?;
     let changeset_io = FileSystemChangesetIO::new(project.root());
@@ -79,7 +80,7 @@ pub(crate) fn run(args: ReleaseArgs, start_path: &Path) -> Result<()> {
         .expect("all fields have defaults");
     let outcome = operation.execute(start_path, &input)?;
 
-    print_outcome(&outcome);
+    print_outcome(&outcome, writer);
 
     Ok(())
 }
@@ -152,94 +153,341 @@ fn parse_graduate_args(args: &[String]) -> ParsedGraduateArgs {
     ParsedGraduateArgs { packages, all }
 }
 
-fn print_outcome(outcome: &ReleaseOutcome) {
+fn print_outcome(outcome: &ReleaseOutcome, writer: &dyn CliWriter) {
     match outcome {
         ReleaseOutcome::NoChangesets => {
-            println!("No pending changesets to release.");
+            writer.line("No pending changesets to release.");
         }
         ReleaseOutcome::DryRun(output) => {
-            println!("Dry run - no changes will be made.\n");
-            print_release_output(output);
+            writer.line("Dry run - no changes will be made.");
+            writer.blank();
+            print_release_output(output, writer);
         }
         ReleaseOutcome::Executed(output) => {
-            print_release_output(output);
-            println!("\nRelease complete.");
+            print_release_output(output, writer);
+            writer.blank();
+            writer.message(crate::output::MessageLevel::Success, "Release complete.");
         }
     }
 }
 
-fn print_release_output(output: &ReleaseOutput) {
+fn print_release_output(output: &ReleaseOutput, writer: &dyn CliWriter) {
     if output.planned_releases().is_empty() {
-        println!("No packages to release.");
+        writer.line("No packages to release.");
         return;
     }
 
-    println!("Releases:");
+    writer.heading("Releases:");
     for release in output.planned_releases() {
         let auto_label = if release.auto_bumped() {
             " (dependency update)"
         } else {
             ""
         };
-        println!(
-            "  - {} {} -> {}{}",
+        writer.list_item(&format!(
+            "{} {} -> {}{}",
             release.name(),
             release.current_version(),
             release.new_version(),
             auto_label
-        );
+        ));
     }
 
     if !output.unchanged_packages().is_empty() {
-        println!("\nUnchanged packages:");
+        writer.blank();
+        writer.heading("Unchanged packages:");
         for name in output.unchanged_packages() {
-            println!("  - {name}");
+            writer.list_item(name);
         }
     }
 
     if !output.changelog_updates().is_empty() {
-        println!("\nChangelogs updated:");
+        writer.blank();
+        writer.heading("Changelogs updated:");
         for update in output.changelog_updates() {
             let status = if update.created() {
                 "created"
             } else {
                 "updated"
             };
-            println!("  - {} ({})", update.path().display(), status);
+            writer.list_item(&format!("{} ({})", update.path().display(), status));
         }
     }
 
     if let Some(git_result) = output.git_result() {
-        print_git_result(git_result);
+        print_git_result(git_result, writer);
     }
 
     if !output.changesets_consumed().is_empty() {
-        println!(
-            "\nConsumed {} changeset file(s)",
+        writer.blank();
+        writer.line(&format!(
+            "Consumed {} changeset file(s)",
             output.changesets_consumed().len()
-        );
+        ));
     }
 }
 
-fn print_git_result(git_result: &GitOperationResult) {
+fn print_git_result(git_result: &GitOperationResult, writer: &dyn CliWriter) {
     if let Some(commit) = git_result.commit() {
-        println!(
-            "\nCommit created: {}",
+        writer.blank();
+        writer.line(&format!(
+            "Commit created: {}",
             &commit.sha()[..7.min(commit.sha().len())]
-        );
+        ));
     }
 
     if !git_result.tags_created().is_empty() {
-        println!("\nTags created:");
+        writer.blank();
+        writer.heading("Tags created:");
         for tag in git_result.tags_created() {
-            println!("  - {}", tag.name());
+            writer.list_item(tag.name());
         }
     }
 
     if !git_result.changesets_deleted().is_empty() {
-        println!(
-            "\nDeleted {} changeset file(s)",
+        writer.blank();
+        writer.line(&format!(
+            "Deleted {} changeset file(s)",
             git_result.changesets_deleted().len()
+        ));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::PathBuf;
+
+    use changeset_core::BumpType;
+    use changeset_operations::operations::{
+        ChangelogUpdate, CommitResult, GitOperationResult, PackageVersion, ReleaseOutcome,
+        ReleaseOutput, TagResult,
+    };
+    use semver::Version;
+
+    use super::{print_git_result, print_outcome, print_release_output};
+    use crate::output::BufferCliWriter;
+
+    fn make_package_version(name: &str, from: &str, to: &str, auto_bumped: bool) -> PackageVersion {
+        PackageVersion::new(
+            name.to_string(),
+            Version::parse(from).expect("valid semver"),
+            Version::parse(to).expect("valid semver"),
+            BumpType::Minor,
+            auto_bumped,
+        )
+    }
+
+    fn make_release_output_minimal() -> ReleaseOutput {
+        ReleaseOutput::new(
+            vec![make_package_version("my-crate", "1.0.0", "1.1.0", false)],
+            vec![],
+            vec![],
+            vec![],
+            None,
+        )
+    }
+
+    #[test]
+    fn print_outcome_no_changesets() {
+        let writer = BufferCliWriter::new();
+
+        print_outcome(&ReleaseOutcome::NoChangesets, &writer);
+
+        let text = writer.stdout_text();
+        assert!(text.contains("No pending changesets to release."));
+    }
+
+    #[test]
+    fn print_outcome_dry_run_shows_prefix() {
+        let writer = BufferCliWriter::new();
+        let output = make_release_output_minimal();
+
+        print_outcome(&ReleaseOutcome::DryRun(output), &writer);
+
+        let text = writer.stdout_text();
+        assert!(text.contains("Dry run - no changes will be made."));
+        assert!(text.contains("my-crate"));
+    }
+
+    #[test]
+    fn print_outcome_executed_shows_complete_message() {
+        let writer = BufferCliWriter::new();
+        let output = make_release_output_minimal();
+
+        print_outcome(&ReleaseOutcome::Executed(output), &writer);
+
+        let text = writer.stdout_text();
+        assert!(text.contains("Release complete."));
+        assert!(text.contains("my-crate"));
+    }
+
+    #[test]
+    fn print_release_output_empty_planned_releases() {
+        let writer = BufferCliWriter::new();
+        let output = ReleaseOutput::new(vec![], vec![], vec![], vec![], None);
+
+        print_release_output(&output, &writer);
+
+        let text = writer.stdout_text();
+        assert!(text.contains("No packages to release."));
+    }
+
+    #[test]
+    fn print_release_output_shows_version_transitions() {
+        let writer = BufferCliWriter::new();
+        let output = ReleaseOutput::new(
+            vec![
+                make_package_version("crate-a", "1.0.0", "1.1.0", false),
+                make_package_version("crate-b", "2.0.0", "2.1.0", true),
+            ],
+            vec![],
+            vec![],
+            vec![],
+            None,
         );
+
+        print_release_output(&output, &writer);
+
+        let text = writer.stdout_text();
+        assert!(text.contains("Releases:"));
+        assert!(text.contains("crate-a 1.0.0 -> 1.1.0"));
+        assert!(text.contains("crate-b 2.0.0 -> 2.1.0 (dependency update)"));
+    }
+
+    #[test]
+    fn print_release_output_shows_unchanged_packages() {
+        let writer = BufferCliWriter::new();
+        let output = ReleaseOutput::new(
+            vec![make_package_version("crate-a", "1.0.0", "1.1.0", false)],
+            vec!["unchanged-crate".to_string()],
+            vec![],
+            vec![],
+            None,
+        );
+
+        print_release_output(&output, &writer);
+
+        let text = writer.stdout_text();
+        assert!(text.contains("Unchanged packages:"));
+        assert!(text.contains("unchanged-crate"));
+    }
+
+    #[test]
+    fn print_release_output_shows_changelog_updates() {
+        let writer = BufferCliWriter::new();
+        let output = ReleaseOutput::new(
+            vec![make_package_version("crate-a", "1.0.0", "1.1.0", false)],
+            vec![],
+            vec![],
+            vec![
+                ChangelogUpdate::new(
+                    PathBuf::from("CHANGELOG.md"),
+                    None,
+                    Version::parse("1.1.0").expect("valid semver"),
+                    false,
+                ),
+                ChangelogUpdate::new(
+                    PathBuf::from("crates/b/CHANGELOG.md"),
+                    Some("crate-b".to_string()),
+                    Version::parse("2.0.0").expect("valid semver"),
+                    true,
+                ),
+            ],
+            None,
+        );
+
+        print_release_output(&output, &writer);
+
+        let text = writer.stdout_text();
+        assert!(text.contains("Changelogs updated:"));
+        assert!(text.contains("CHANGELOG.md (updated)"));
+        assert!(text.contains("crates/b/CHANGELOG.md (created)"));
+    }
+
+    #[test]
+    fn print_release_output_shows_consumed_changesets() {
+        let writer = BufferCliWriter::new();
+        let output = ReleaseOutput::new(
+            vec![make_package_version("crate-a", "1.0.0", "1.1.0", false)],
+            vec![],
+            vec![
+                PathBuf::from(".changeset/abc.md"),
+                PathBuf::from(".changeset/def.md"),
+            ],
+            vec![],
+            None,
+        );
+
+        print_release_output(&output, &writer);
+
+        let text = writer.stdout_text();
+        assert!(text.contains("Consumed 2 changeset file(s)"));
+    }
+
+    #[test]
+    fn print_git_result_with_commit() {
+        let writer = BufferCliWriter::new();
+        let git = GitOperationResult::new(
+            Some(CommitResult::new(
+                "abc1234def5678".to_string(),
+                "release v1.1.0".to_string(),
+            )),
+            vec![],
+            vec![],
+        );
+
+        print_git_result(&git, &writer);
+
+        let text = writer.stdout_text();
+        assert!(text.contains("Commit created: abc1234"));
+    }
+
+    #[test]
+    fn print_git_result_with_tags() {
+        let writer = BufferCliWriter::new();
+        let git = GitOperationResult::new(
+            None,
+            vec![
+                TagResult::new("v1.1.0".to_string(), "abc1234".to_string()),
+                TagResult::new("crate-b@2.1.0".to_string(), "abc1234".to_string()),
+            ],
+            vec![],
+        );
+
+        print_git_result(&git, &writer);
+
+        let text = writer.stdout_text();
+        assert!(text.contains("Tags created:"));
+        assert!(text.contains("v1.1.0"));
+        assert!(text.contains("crate-b@2.1.0"));
+    }
+
+    #[test]
+    fn print_git_result_with_deleted_changesets() {
+        let writer = BufferCliWriter::new();
+        let git = GitOperationResult::new(
+            None,
+            vec![],
+            vec![
+                PathBuf::from(".changeset/a.md"),
+                PathBuf::from(".changeset/b.md"),
+                PathBuf::from(".changeset/c.md"),
+            ],
+        );
+
+        print_git_result(&git, &writer);
+
+        let text = writer.stdout_text();
+        assert!(text.contains("Deleted 3 changeset file(s)"));
+    }
+
+    #[test]
+    fn print_git_result_empty_is_silent() {
+        let writer = BufferCliWriter::new();
+        let git = GitOperationResult::default();
+
+        print_git_result(&git, &writer);
+
+        assert!(writer.stdout_entries().is_empty());
     }
 }
