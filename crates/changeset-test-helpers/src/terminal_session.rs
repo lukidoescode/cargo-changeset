@@ -11,7 +11,7 @@ const ARROW_DOWN: &str = "\x1b[B";
 const ENTER: &str = "\r";
 const ESC: &str = "\x1b";
 const TIMEOUT: Duration = Duration::from_secs(30);
-const KEY_DELAY: Duration = Duration::from_millis(50);
+const KEY_DELAY: Duration = Duration::from_millis(20);
 const POLL_INTERVAL: Duration = Duration::from_millis(10);
 
 pub struct TerminalSessionBuilder<'a> {
@@ -39,7 +39,7 @@ impl TerminalSessionBuilder<'_> {
         let pty = OsSession::spawn(cmd).expect("failed to spawn session");
         TerminalSession {
             pty,
-            vt: vt100::Parser::new(24, 120, 100),
+            vt: vt100::Parser::new(1200, 400, 0),
         }
     }
 }
@@ -146,8 +146,22 @@ impl TerminalSession {
         self
     }
 
+    pub fn toggle_item(&mut self, index: usize) -> &mut Self {
+        for _ in 0..index {
+            self.pty.send(ARROW_DOWN).expect("send arrow-down key");
+            std::thread::sleep(KEY_DELAY);
+        }
+        self.pty.send(" ").expect("send space to toggle item");
+        self
+    }
+
     pub fn cancel(&mut self) -> &mut Self {
         self.pty.send(ESC).expect("send escape key");
+        self
+    }
+
+    pub fn ctrl_c(&mut self) -> &mut Self {
+        self.pty.send("\x03").expect("send Ctrl+C");
         self
     }
 

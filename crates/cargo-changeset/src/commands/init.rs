@@ -36,7 +36,14 @@ pub(crate) fn run(args: InitArgs, start_path: &Path) -> Result<()> {
     } else {
         None
     };
-    let input = build_init_input(&args, provider, context)?;
+    let input = match build_init_input(&args, provider, context) {
+        Ok(input) => input,
+        Err(crate::error::CliError::Operation(changeset_operations::OperationError::Cancelled)) => {
+            println!("Cancelled.");
+            return Ok(());
+        }
+        Err(e) => return Err(e),
+    };
 
     let config = build_config_from_input(&input, context);
 

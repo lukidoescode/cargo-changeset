@@ -791,11 +791,1107 @@ mod interactive_init_tests {
     use std::path::PathBuf;
 
     use changeset_test_helpers::terminal_session::TerminalSession;
+    use indoc::indoc;
 
     use super::*;
 
     fn bin_path() -> PathBuf {
         assert_cmd::cargo::cargo_bin("cargo-changeset")
+    }
+
+    fn skip_all_sections(session: &mut TerminalSession) {
+        session.wait_for("Configure git settings?");
+        session.assert_screen(
+            "git settings prompt",
+            indoc! {"
+            Configure git settings? [Y/n]"},
+        );
+        session.send_raw("n");
+        session.wait_for("Configure changelog settings?");
+        session.assert_screen(
+            "changelog settings prompt",
+            indoc! {"
+                Configure git settings? no
+                Configure changelog settings? [Y/n]"},
+        );
+        session.send_raw("n");
+        session.wait_for("Configure version settings?");
+        session.assert_screen(
+            "version settings prompt",
+            indoc! {"
+                Configure git settings? no
+                Configure changelog settings? no
+                Configure version settings? [Y/n]"},
+        );
+        session.send_raw("n");
+        session.wait_for("Configure file filtering?");
+        session.assert_screen(
+            "file filtering prompt",
+            indoc! {"
+                Configure git settings? no
+                Configure changelog settings? no
+                Configure version settings? no
+                Configure file filtering? [y/N]"},
+        );
+        session.send_raw("n");
+    }
+
+    #[test]
+    fn interactive_init_skip_all_sections() {
+        let dir = setup_single_package();
+
+        let mut session = TerminalSession::spawn(&bin_path(), &dir, &["changeset", "init"]);
+        skip_all_sections(&mut session);
+        session.wait_for("Proceed with initialization?");
+        session.wait_for("No configuration will be written (using defaults).");
+        let canonical = dir.path().canonicalize().expect("canonicalize temp dir");
+        session.assert_screen(
+            "final confirmation with defaults",
+            &format!(
+                indoc! {"
+                    Configure git settings? no
+                    Configure changelog settings? no
+                    Configure version settings? no
+                    Configure file filtering? no
+
+                    === Initialization Summary ===
+
+                    Directory: {}/.changeset (will be created)
+                      - .gitkeep file will be created
+
+                    No configuration will be written (using defaults).
+
+                    Proceed with initialization? [Y/n]"},
+                canonical.display()
+            ),
+        );
+        session.send_raw("y");
+        session.wait_for_exit();
+
+        assert!(
+            dir.path().join(".changeset").exists(),
+            ".changeset directory must be created"
+        );
+    }
+
+    #[test]
+    fn interactive_init_cancel_at_final_confirmation() {
+        let dir = setup_single_package();
+
+        let mut session = TerminalSession::spawn(&bin_path(), &dir, &["changeset", "init"]);
+        skip_all_sections(&mut session);
+        session.wait_for("Proceed with initialization?");
+        session.wait_for("No configuration will be written (using defaults).");
+        let canonical = dir.path().canonicalize().expect("canonicalize temp dir");
+        session.assert_screen(
+            "final confirmation with defaults before cancel",
+            &format!(
+                indoc! {"
+                    Configure git settings? no
+                    Configure changelog settings? no
+                    Configure version settings? no
+                    Configure file filtering? no
+
+                    === Initialization Summary ===
+
+                    Directory: {}/.changeset (will be created)
+                      - .gitkeep file will be created
+
+                    No configuration will be written (using defaults).
+
+                    Proceed with initialization? [Y/n]"},
+                canonical.display()
+            ),
+        );
+        session.send_raw("n");
+        session.wait_for_exit();
+
+        assert!(
+            !dir.path().join(".changeset").exists(),
+            ".changeset directory must not be created after declining"
+        );
+    }
+
+    #[test]
+    fn interactive_init_cancel_at_git_settings() {
+        let dir = setup_single_package();
+
+        let mut session = TerminalSession::spawn(&bin_path(), &dir, &["changeset", "init"]);
+        session.wait_for("Configure git settings?");
+        session.assert_screen(
+            "git settings prompt before cancel",
+            indoc! {"
+            Configure git settings? [Y/n]"},
+        );
+        session.cancel();
+        session.wait_for_exit();
+
+        assert!(
+            !dir.path().join(".changeset").exists(),
+            ".changeset directory must not be created after cancelling at git settings"
+        );
+    }
+
+    #[test]
+    fn interactive_init_cancel_at_changelog_settings() {
+        let dir = setup_single_package();
+
+        let mut session = TerminalSession::spawn(&bin_path(), &dir, &["changeset", "init"]);
+        session.wait_for("Configure git settings?");
+        session.assert_screen(
+            "git settings prompt",
+            indoc! {"
+            Configure git settings? [Y/n]"},
+        );
+        session.send_raw("n");
+        session.wait_for("Configure changelog settings?");
+        session.assert_screen(
+            "changelog settings prompt before cancel",
+            indoc! {"
+                Configure git settings? no
+                Configure changelog settings? [Y/n]"},
+        );
+        session.cancel();
+        session.wait_for_exit();
+
+        assert!(
+            !dir.path().join(".changeset").exists(),
+            ".changeset directory must not be created after cancelling at changelog settings"
+        );
+    }
+
+    #[test]
+    fn interactive_init_cancel_at_version_settings() {
+        let dir = setup_single_package();
+
+        let mut session = TerminalSession::spawn(&bin_path(), &dir, &["changeset", "init"]);
+        session.wait_for("Configure git settings?");
+        session.assert_screen(
+            "git settings prompt",
+            indoc! {"
+            Configure git settings? [Y/n]"},
+        );
+        session.send_raw("n");
+        session.wait_for("Configure changelog settings?");
+        session.assert_screen(
+            "changelog settings prompt",
+            indoc! {"
+                Configure git settings? no
+                Configure changelog settings? [Y/n]"},
+        );
+        session.send_raw("n");
+        session.wait_for("Configure version settings?");
+        session.assert_screen(
+            "version settings prompt before cancel",
+            indoc! {"
+                Configure git settings? no
+                Configure changelog settings? no
+                Configure version settings? [Y/n]"},
+        );
+        session.cancel();
+        session.wait_for_exit();
+
+        assert!(
+            !dir.path().join(".changeset").exists(),
+            ".changeset directory must not be created after cancelling at version settings"
+        );
+    }
+
+    #[test]
+    fn interactive_init_cancel_at_filtering() {
+        let dir = setup_single_package();
+
+        let mut session = TerminalSession::spawn(&bin_path(), &dir, &["changeset", "init"]);
+        session.wait_for("Configure git settings?");
+        session.assert_screen(
+            "git settings prompt",
+            indoc! {"
+            Configure git settings? [Y/n]"},
+        );
+        session.send_raw("n");
+        session.wait_for("Configure changelog settings?");
+        session.assert_screen(
+            "changelog settings prompt",
+            indoc! {"
+                Configure git settings? no
+                Configure changelog settings? [Y/n]"},
+        );
+        session.send_raw("n");
+        session.wait_for("Configure version settings?");
+        session.assert_screen(
+            "version settings prompt",
+            indoc! {"
+                Configure git settings? no
+                Configure changelog settings? no
+                Configure version settings? [Y/n]"},
+        );
+        session.send_raw("n");
+        session.wait_for("Configure file filtering?");
+        session.assert_screen(
+            "file filtering prompt before cancel",
+            indoc! {"
+                Configure git settings? no
+                Configure changelog settings? no
+                Configure version settings? no
+                Configure file filtering? [y/N]"},
+        );
+        session.cancel();
+        session.wait_for_exit();
+
+        assert!(
+            !dir.path().join(".changeset").exists(),
+            ".changeset directory must not be created after cancelling at filtering"
+        );
+    }
+
+    #[test]
+    fn interactive_init_cancel_mid_git_section() {
+        let dir = setup_single_package();
+
+        let mut session = TerminalSession::spawn(&bin_path(), &dir, &["changeset", "init"]);
+        session.wait_for("Configure git settings?");
+        session.assert_screen(
+            "git settings prompt",
+            indoc! {"
+            Configure git settings? [Y/n]"},
+        );
+        session.send_raw("y");
+        session.wait_for("Create git commits on release?");
+        session.assert_screen(
+            "commits prompt before cancel",
+            indoc! {"
+                Configure git settings? yes
+                Create git commits on release? [Y/n]"},
+        );
+        session.cancel();
+        session.wait_for_exit();
+
+        assert!(
+            !dir.path().join(".changeset").exists(),
+            ".changeset directory must not be created after cancelling mid git section"
+        );
+    }
+
+    #[test]
+    fn interactive_init_cancel_mid_changelog_section() {
+        let dir = setup_workspace();
+
+        let mut session = TerminalSession::spawn(&bin_path(), &dir, &["changeset", "init"]);
+        session.wait_for("Configure git settings?");
+        session.assert_screen(
+            "git settings prompt",
+            indoc! {"
+            Configure git settings? [Y/n]"},
+        );
+        session.send_raw("n");
+        session.wait_for("Configure changelog settings?");
+        session.assert_screen(
+            "changelog settings prompt",
+            indoc! {"
+                Configure git settings? no
+                Configure changelog settings? [Y/n]"},
+        );
+        session.send_raw("y");
+        session.wait_for("Select changelog location");
+        session.assert_screen(
+            "changelog location menu before cancel",
+            indoc! {"
+                Configure git settings? no
+                Configure changelog settings? yes
+                Select changelog location:
+                > root - Single CHANGELOG.md at project root (default)
+                  per-package - CHANGELOG.md in each package directory"},
+        );
+        session.cancel();
+        session.wait_for_exit();
+
+        assert!(
+            !dir.path().join(".changeset").exists(),
+            ".changeset directory must not be created after cancelling mid changelog section"
+        );
+    }
+
+    #[test]
+    fn interactive_init_cancel_mid_version_section() {
+        let dir = setup_single_package();
+
+        let mut session = TerminalSession::spawn(&bin_path(), &dir, &["changeset", "init"]);
+        session.wait_for("Configure git settings?");
+        session.assert_screen(
+            "git settings prompt",
+            indoc! {"
+            Configure git settings? [Y/n]"},
+        );
+        session.send_raw("n");
+        session.wait_for("Configure changelog settings?");
+        session.assert_screen(
+            "changelog settings prompt",
+            indoc! {"
+                Configure git settings? no
+                Configure changelog settings? [Y/n]"},
+        );
+        session.send_raw("n");
+        session.wait_for("Configure version settings?");
+        session.assert_screen(
+            "version settings prompt",
+            indoc! {"
+                Configure git settings? no
+                Configure changelog settings? no
+                Configure version settings? [Y/n]"},
+        );
+        session.send_raw("y");
+        session.wait_for("Select zero version");
+        session.assert_screen(
+            "zero version menu before cancel",
+            indoc! {"
+                Configure git settings? no
+                Configure changelog settings? no
+                Configure version settings? yes
+                Select zero version (0.x.y) behavior:
+                > effective-minor - Major bump on 0.x increments minor (default)
+                  auto-promote-on-major - Major bump on 0.x promotes to 1.0.0"},
+        );
+        session.cancel();
+        session.wait_for_exit();
+
+        assert!(
+            !dir.path().join(".changeset").exists(),
+            ".changeset directory must not be created after cancelling mid version section"
+        );
+    }
+
+    #[test]
+    fn interactive_init_git_settings_full_flow() {
+        let dir = setup_single_package();
+
+        let mut session = TerminalSession::spawn(&bin_path(), &dir, &["changeset", "init"]);
+        session.wait_for("Configure git settings?");
+        session.assert_screen(
+            "configure git prompt",
+            indoc! {"
+            Configure git settings? [Y/n]"},
+        );
+        session.send_raw("y");
+
+        session.wait_for("Create git commits on release?");
+        session.assert_screen(
+            "commits prompt",
+            indoc! {"
+                Configure git settings? yes
+                Create git commits on release? [Y/n]"},
+        );
+        session.send_raw("y");
+
+        session.wait_for("Create git tags on release?");
+        session.assert_screen(
+            "tags prompt",
+            indoc! {"
+                Configure git settings? yes
+                Create git commits on release? yes
+                Create git tags on release? [Y/n]"},
+        );
+        session.send_raw("n");
+
+        session.wait_for("Keep changeset files after release?");
+        session.assert_screen(
+            "keep changesets prompt",
+            indoc! {"
+                Configure git settings? yes
+                Create git commits on release? yes
+                Create git tags on release? no
+                Keep changeset files after release? [y/N]"},
+        );
+        session.send_raw("y");
+
+        session.wait_for("Select tag format");
+        session.assert_screen(
+            "tag format menu",
+            indoc! {"
+                Configure git settings? yes
+                Create git commits on release? yes
+                Create git tags on release? no
+                Keep changeset files after release? yes
+                Select tag format:
+                > version-only - Tags like v1.0.0
+                  crate-prefixed - Tags like crate-name@1.0.0"},
+        );
+        session.confirm();
+
+        session.wait_for("Default base branch");
+        session.assert_screen(
+            "base branch prompt",
+            indoc! {"
+                Configure git settings? yes
+                Create git commits on release? yes
+                Create git tags on release? no
+                Keep changeset files after release? yes
+                Select tag format: version-only - Tags like v1.0.0
+                Default base branch for git comparisons [main]:"},
+        );
+        session.confirm();
+
+        session.wait_for("Commit title template");
+        session.assert_screen(
+            "commit title prompt",
+            indoc! {"
+                Configure git settings? yes
+                Create git commits on release? yes
+                Create git tags on release? no
+                Keep changeset files after release? yes
+                Select tag format: version-only - Tags like v1.0.0
+                Default base branch for git comparisons: main
+                Commit title template (placeholder: {new-version}) [{new-version}]:"},
+        );
+        session.confirm();
+
+        session.wait_for("Include version details in commit body?");
+        session.assert_screen(
+            "commit body prompt",
+            indoc! {"
+                Configure git settings? yes
+                Create git commits on release? yes
+                Create git tags on release? no
+                Keep changeset files after release? yes
+                Select tag format: version-only - Tags like v1.0.0
+                Default base branch for git comparisons: main
+                Commit title template (placeholder: {new-version}): {new-version}
+                Include version details in commit body? [Y/n]"},
+        );
+        session.send_raw("y");
+
+        session.wait_for("Configure changelog settings?");
+        session.assert_screen(
+            "changelog section after git",
+            indoc! {"
+                Configure git settings? yes
+                Create git commits on release? yes
+                Create git tags on release? no
+                Keep changeset files after release? yes
+                Select tag format: version-only - Tags like v1.0.0
+                Default base branch for git comparisons: main
+                Commit title template (placeholder: {new-version}): {new-version}
+                Include version details in commit body? yes
+                Configure changelog settings? [Y/n]"},
+        );
+        session.send_raw("n");
+
+        session.wait_for("Configure version settings?");
+        session.assert_screen(
+            "version settings prompt after git",
+            indoc! {"
+                Configure git settings? yes
+                Create git commits on release? yes
+                Create git tags on release? no
+                Keep changeset files after release? yes
+                Select tag format: version-only - Tags like v1.0.0
+                Default base branch for git comparisons: main
+                Commit title template (placeholder: {new-version}): {new-version}
+                Include version details in commit body? yes
+                Configure changelog settings? no
+                Configure version settings? [Y/n]"},
+        );
+        session.send_raw("n");
+        session.wait_for("Configure file filtering?");
+        session.assert_screen(
+            "file filtering prompt after git",
+            indoc! {"
+                Configure git settings? yes
+                Create git commits on release? yes
+                Create git tags on release? no
+                Keep changeset files after release? yes
+                Select tag format: version-only - Tags like v1.0.0
+                Default base branch for git comparisons: main
+                Commit title template (placeholder: {new-version}): {new-version}
+                Include version details in commit body? yes
+                Configure changelog settings? no
+                Configure version settings? no
+                Configure file filtering? [y/N]"},
+        );
+        session.send_raw("n");
+        session.wait_for("Proceed with initialization?");
+        let canonical = dir.path().canonicalize().expect("canonicalize temp dir");
+        session.assert_screen(
+            "final confirmation after git settings",
+            &format!(
+                indoc! {"
+                    Configure git settings? yes
+                    Create git commits on release? yes
+                    Create git tags on release? no
+                    Keep changeset files after release? yes
+                    Select tag format: version-only - Tags like v1.0.0
+                    Default base branch for git comparisons: main
+                    Commit title template (placeholder: {{new-version}}): {{new-version}}
+                    Include version details in commit body? yes
+                    Configure changelog settings? no
+                    Configure version settings? no
+                    Configure file filtering? no
+
+                    === Initialization Summary ===
+
+                    Directory: {}/.changeset (will be created)
+                      - .gitkeep file will be created
+
+                    Configuration to be written to [package.metadata.changeset]:
+                      commit = true
+                      tags = false
+                      keep_changesets = true
+                      tag_format = \"version-only\"
+                      base_branch = \"main\"
+                      commit_title_template = \"{{new-version}}\"
+                      changes_in_body = true
+
+                    Proceed with initialization? [Y/n]"},
+                canonical.display()
+            ),
+        );
+        session.send_raw("y");
+        session.wait_for_exit();
+
+        let cargo_toml =
+            fs::read_to_string(dir.path().join("Cargo.toml")).expect("read Cargo.toml");
+        assert!(
+            cargo_toml.contains("tags = false"),
+            "expected tags = false, got:\n{cargo_toml}"
+        );
+        assert!(
+            cargo_toml.contains("keep-changesets = true"),
+            "expected keep-changesets = true, got:\n{cargo_toml}"
+        );
+    }
+
+    #[test]
+    fn interactive_init_git_no_commit_skips_title_and_body() {
+        let dir = setup_single_package();
+
+        let mut session = TerminalSession::spawn(&bin_path(), &dir, &["changeset", "init"]);
+        session.wait_for("Configure git settings?");
+        session.assert_screen(
+            "configure git prompt",
+            indoc! {"
+            Configure git settings? [Y/n]"},
+        );
+        session.send_raw("y");
+
+        session.wait_for("Create git commits on release?");
+        session.assert_screen(
+            "commits prompt",
+            indoc! {"
+                Configure git settings? yes
+                Create git commits on release? [Y/n]"},
+        );
+        session.send_raw("n");
+
+        session.wait_for("Create git tags on release?");
+        session.assert_screen(
+            "tags prompt",
+            indoc! {"
+                Configure git settings? yes
+                Create git commits on release? no
+                Create git tags on release? [Y/n]"},
+        );
+        session.send_raw("y");
+
+        session.wait_for("Keep changeset files after release?");
+        session.assert_screen(
+            "keep changesets prompt",
+            indoc! {"
+                Configure git settings? yes
+                Create git commits on release? no
+                Create git tags on release? yes
+                Keep changeset files after release? [y/N]"},
+        );
+        session.send_raw("n");
+
+        session.wait_for("Select tag format");
+        session.assert_screen(
+            "tag format menu",
+            indoc! {"
+                Configure git settings? yes
+                Create git commits on release? no
+                Create git tags on release? yes
+                Keep changeset files after release? no
+                Select tag format:
+                > version-only - Tags like v1.0.0
+                  crate-prefixed - Tags like crate-name@1.0.0"},
+        );
+        session.confirm();
+
+        session.wait_for("Default base branch");
+        session.assert_screen(
+            "base branch prompt",
+            indoc! {"
+                Configure git settings? yes
+                Create git commits on release? no
+                Create git tags on release? yes
+                Keep changeset files after release? no
+                Select tag format: version-only - Tags like v1.0.0
+                Default base branch for git comparisons [main]:"},
+        );
+        session.confirm();
+
+        session.wait_for("Configure changelog settings?");
+        session.assert_screen(
+            "skipped to changelog after base branch",
+            indoc! {"
+                Configure git settings? yes
+                Create git commits on release? no
+                Create git tags on release? yes
+                Keep changeset files after release? no
+                Select tag format: version-only - Tags like v1.0.0
+                Default base branch for git comparisons: main
+                Configure changelog settings? [Y/n]"},
+        );
+        session.send_raw("n");
+
+        session.wait_for("Configure version settings?");
+        session.assert_screen(
+            "version settings prompt after git no-commit",
+            indoc! {"
+                Configure git settings? yes
+                Create git commits on release? no
+                Create git tags on release? yes
+                Keep changeset files after release? no
+                Select tag format: version-only - Tags like v1.0.0
+                Default base branch for git comparisons: main
+                Configure changelog settings? no
+                Configure version settings? [Y/n]"},
+        );
+        session.send_raw("n");
+        session.wait_for("Configure file filtering?");
+        session.assert_screen(
+            "file filtering prompt after git no-commit",
+            indoc! {"
+                Configure git settings? yes
+                Create git commits on release? no
+                Create git tags on release? yes
+                Keep changeset files after release? no
+                Select tag format: version-only - Tags like v1.0.0
+                Default base branch for git comparisons: main
+                Configure changelog settings? no
+                Configure version settings? no
+                Configure file filtering? [y/N]"},
+        );
+        session.send_raw("n");
+        session.wait_for("Proceed with initialization?");
+        let canonical = dir.path().canonicalize().expect("canonicalize temp dir");
+        session.assert_screen(
+            "final confirmation after git no-commit",
+            &format!(
+                indoc! {"
+                    Configure git settings? yes
+                    Create git commits on release? no
+                    Create git tags on release? yes
+                    Keep changeset files after release? no
+                    Select tag format: version-only - Tags like v1.0.0
+                    Default base branch for git comparisons: main
+                    Configure changelog settings? no
+                    Configure version settings? no
+                    Configure file filtering? no
+
+                    === Initialization Summary ===
+
+                    Directory: {}/.changeset (will be created)
+                      - .gitkeep file will be created
+
+                    Configuration to be written to [package.metadata.changeset]:
+                      commit = false
+                      tags = true
+                      keep_changesets = false
+                      tag_format = \"version-only\"
+                      base_branch = \"main\"
+
+                    Proceed with initialization? [Y/n]"},
+                canonical.display()
+            ),
+        );
+        session.send_raw("y");
+        session.wait_for_exit();
+
+        let cargo_toml =
+            fs::read_to_string(dir.path().join("Cargo.toml")).expect("read Cargo.toml");
+        assert!(
+            cargo_toml.contains("commit = false"),
+            "expected commit = false, got:\n{cargo_toml}"
+        );
+        assert!(
+            !cargo_toml.contains("commit-title"),
+            "commit-title should not appear when commit=false, got:\n{cargo_toml}"
+        );
+        assert!(
+            !cargo_toml.contains("changes-in-body"),
+            "changes-in-body should not appear when commit=false, got:\n{cargo_toml}"
+        );
+    }
+
+    #[test]
+    fn interactive_init_changelog_settings_full_flow() {
+        let dir = setup_workspace();
+
+        let mut session = TerminalSession::spawn(&bin_path(), &dir, &["changeset", "init"]);
+        session.wait_for("Configure git settings?");
+        session.assert_screen(
+            "git settings prompt",
+            indoc! {"
+            Configure git settings? [Y/n]"},
+        );
+        session.send_raw("n");
+
+        session.wait_for("Configure changelog settings?");
+        session.assert_screen(
+            "changelog settings prompt",
+            indoc! {"
+                Configure git settings? no
+                Configure changelog settings? [Y/n]"},
+        );
+        session.send_raw("y");
+
+        session.wait_for("Select changelog location");
+        session.assert_screen(
+            "changelog location menu",
+            indoc! {"
+                Configure git settings? no
+                Configure changelog settings? yes
+                Select changelog location:
+                > root - Single CHANGELOG.md at project root (default)
+                  per-package - CHANGELOG.md in each package directory"},
+        );
+        session.select_item(0);
+
+        session.wait_for("Select comparison links mode");
+        session.assert_screen(
+            "comparison links menu",
+            indoc! {"
+                Configure git settings? no
+                Configure changelog settings? yes
+                Select changelog location: per-package - CHANGELOG.md in each package directory
+                Select comparison links mode:
+                > auto - Generate links if git remote detected (default)
+                  enabled - Always generate comparison links
+                  disabled - Never generate comparison links"},
+        );
+        session.select_item(0);
+
+        session.wait_for("Comparison links template");
+        session.assert_screen(
+            "comparison links template prompt",
+            indoc! {"
+                Configure git settings? no
+                Configure changelog settings? yes
+                Select changelog location: per-package - CHANGELOG.md in each package directory
+                Select comparison links mode: enabled - Always generate comparison links
+                Comparison links template (empty=auto-detect, placeholders: {repository}, {base}, {target}) []:"},
+        );
+        session.confirm();
+
+        session.wait_for("Dependency bump changelog template");
+        session.assert_screen(
+            "dependency bump template prompt",
+            indoc! {"
+                Configure git settings? no
+                Configure changelog settings? yes
+                Select changelog location: per-package - CHANGELOG.md in each package directory
+                Select comparison links mode: enabled - Always generate comparison links
+                Comparison links template (empty=auto-detect, placeholders: {repository}, {base}, {target}):
+                Dependency bump changelog template (placeholders: {dependency}, {version}) [Updated dependency `{dependency}` to v{version}]:"},
+        );
+        session.confirm();
+
+        session.wait_for("Configure version settings?");
+        session.assert_screen(
+            "version settings prompt after changelog",
+            indoc! {"
+                Configure git settings? no
+                Configure changelog settings? yes
+                Select changelog location: per-package - CHANGELOG.md in each package directory
+                Select comparison links mode: enabled - Always generate comparison links
+                Comparison links template (empty=auto-detect, placeholders: {repository}, {base}, {target}):
+                Dependency bump changelog template (placeholders: {dependency}, {version}): Updated dependency `{dependency}` to v{version}
+                Configure version settings? [Y/n]"},
+        );
+        session.send_raw("n");
+        session.wait_for("Configure file filtering?");
+        session.assert_screen(
+            "file filtering prompt after changelog",
+            indoc! {"
+                Configure git settings? no
+                Configure changelog settings? yes
+                Select changelog location: per-package - CHANGELOG.md in each package directory
+                Select comparison links mode: enabled - Always generate comparison links
+                Comparison links template (empty=auto-detect, placeholders: {repository}, {base}, {target}):
+                Dependency bump changelog template (placeholders: {dependency}, {version}): Updated dependency `{dependency}` to v{version}
+                Configure version settings? no
+                Configure file filtering? [y/N]"},
+        );
+        session.send_raw("n");
+        session.wait_for("Proceed with initialization?");
+        let canonical = dir.path().canonicalize().expect("canonicalize temp dir");
+        session.assert_screen(
+            "final confirmation after changelog settings",
+            &format!(
+                indoc! {"
+                    Configure git settings? no
+                    Configure changelog settings? yes
+                    Select changelog location: per-package - CHANGELOG.md in each package directory
+                    Select comparison links mode: enabled - Always generate comparison links
+                    Comparison links template (empty=auto-detect, placeholders: {{repository}}, {{base}}, {{target}}):
+                    Dependency bump changelog template (placeholders: {{dependency}}, {{version}}): Updated dependency `{{dependency}}` to v{{version}}
+                    Configure version settings? no
+                    Configure file filtering? no
+
+                    === Initialization Summary ===
+
+                    Directory: {}/.changeset (will be created)
+                      - .gitkeep file will be created
+
+                    Configuration to be written to [workspace.metadata.changeset]:
+                      changelog = \"per-package\"
+                      comparison_links = \"enabled\"
+
+                    Proceed with initialization? [Y/n]"},
+                canonical.display()
+            ),
+        );
+        session.send_raw("y");
+        session.wait_for_exit();
+
+        let cargo_toml =
+            fs::read_to_string(dir.path().join("Cargo.toml")).expect("read Cargo.toml");
+        assert!(
+            cargo_toml.contains("[workspace.metadata.changeset]"),
+            "expected changeset config, got:\n{cargo_toml}"
+        );
+    }
+
+    #[test]
+    fn interactive_init_version_settings_full_flow() {
+        let dir = setup_single_package();
+
+        let mut session = TerminalSession::spawn(&bin_path(), &dir, &["changeset", "init"]);
+        session.wait_for("Configure git settings?");
+        session.assert_screen(
+            "git settings prompt",
+            indoc! {"
+            Configure git settings? [Y/n]"},
+        );
+        session.send_raw("n");
+        session.wait_for("Configure changelog settings?");
+        session.assert_screen(
+            "changelog settings prompt",
+            indoc! {"
+                Configure git settings? no
+                Configure changelog settings? [Y/n]"},
+        );
+        session.send_raw("n");
+
+        session.wait_for("Configure version settings?");
+        session.assert_screen(
+            "version settings prompt",
+            indoc! {"
+                Configure git settings? no
+                Configure changelog settings? no
+                Configure version settings? [Y/n]"},
+        );
+        session.send_raw("y");
+
+        session.wait_for("Select zero version");
+        session.assert_screen(
+            "zero version menu",
+            indoc! {"
+                Configure git settings? no
+                Configure changelog settings? no
+                Configure version settings? yes
+                Select zero version (0.x.y) behavior:
+                > effective-minor - Major bump on 0.x increments minor (default)
+                  auto-promote-on-major - Major bump on 0.x promotes to 1.0.0"},
+        );
+        session.confirm();
+
+        session.wait_for("Select none bump behavior");
+        session.assert_screen(
+            "none bump menu",
+            indoc! {"
+                Configure git settings? no
+                Configure changelog settings? no
+                Configure version settings? yes
+                Select zero version (0.x.y) behavior: effective-minor - Major bump on 0.x increments minor (default)
+                Select none bump behavior:
+                > promote-to-patch - Treat none bumps as patch releases (default)
+                  allow - Allow none bumps without version change
+                  disallow - Reject changesets with none bump type"},
+        );
+        session.confirm();
+
+        session.wait_for("Changelog message template");
+        session.assert_screen(
+            "promote message prompt",
+            indoc! {"
+                Configure git settings? no
+                Configure changelog settings? no
+                Configure version settings? yes
+                Select zero version (0.x.y) behavior: effective-minor - Major bump on 0.x increments minor (default)
+                Select none bump behavior: promote-to-patch - Treat none bumps as patch releases (default)
+                Changelog message template for promoted none bumps [Internal architectural changes]:"},
+        );
+        session.confirm();
+
+        session.wait_for("Configure file filtering?");
+        session.assert_screen(
+            "file filtering prompt after version settings",
+            indoc! {"
+                Configure git settings? no
+                Configure changelog settings? no
+                Configure version settings? yes
+                Select zero version (0.x.y) behavior: effective-minor - Major bump on 0.x increments minor (default)
+                Select none bump behavior: promote-to-patch - Treat none bumps as patch releases (default)
+                Changelog message template for promoted none bumps: Internal architectural changes
+                Configure file filtering? [y/N]"},
+        );
+        session.send_raw("n");
+        session.wait_for("Proceed with initialization?");
+        let canonical = dir.path().canonicalize().expect("canonicalize temp dir");
+        session.assert_screen(
+            "final confirmation after version settings",
+            &format!(
+                indoc! {"
+                    Configure git settings? no
+                    Configure changelog settings? no
+                    Configure version settings? yes
+                    Select zero version (0.x.y) behavior: effective-minor - Major bump on 0.x increments minor (default)
+                    Select none bump behavior: promote-to-patch - Treat none bumps as patch releases (default)
+                    Changelog message template for promoted none bumps: Internal architectural changes
+                    Configure file filtering? no
+
+                    === Initialization Summary ===
+
+                    Directory: {}/.changeset (will be created)
+                      - .gitkeep file will be created
+
+                    Configuration to be written to [package.metadata.changeset]:
+                      zero_version_behavior = \"effective-minor\"
+                      none_bump_behavior = \"promote-to-patch\"
+                      none_bump_promote_message_template = \"Internal architectural changes\"
+
+                    Proceed with initialization? [Y/n]"},
+                canonical.display()
+            ),
+        );
+        session.send_raw("y");
+        session.wait_for_exit();
+
+        let cargo_toml =
+            fs::read_to_string(dir.path().join("Cargo.toml")).expect("read Cargo.toml");
+        assert!(
+            cargo_toml.contains("[package.metadata.changeset]"),
+            "expected changeset config, got:\n{cargo_toml}"
+        );
+    }
+
+    #[test]
+    fn interactive_init_version_allow_skips_promote_message() {
+        let dir = setup_single_package();
+
+        let mut session = TerminalSession::spawn(&bin_path(), &dir, &["changeset", "init"]);
+        session.wait_for("Configure git settings?");
+        session.assert_screen(
+            "git settings prompt",
+            indoc! {"
+            Configure git settings? [Y/n]"},
+        );
+        session.send_raw("n");
+        session.wait_for("Configure changelog settings?");
+        session.assert_screen(
+            "changelog settings prompt",
+            indoc! {"
+                Configure git settings? no
+                Configure changelog settings? [Y/n]"},
+        );
+        session.send_raw("n");
+
+        session.wait_for("Configure version settings?");
+        session.assert_screen(
+            "version settings prompt",
+            indoc! {"
+                Configure git settings? no
+                Configure changelog settings? no
+                Configure version settings? [Y/n]"},
+        );
+        session.send_raw("y");
+
+        session.wait_for("Select zero version");
+        session.assert_screen(
+            "zero version menu",
+            indoc! {"
+                Configure git settings? no
+                Configure changelog settings? no
+                Configure version settings? yes
+                Select zero version (0.x.y) behavior:
+                > effective-minor - Major bump on 0.x increments minor (default)
+                  auto-promote-on-major - Major bump on 0.x promotes to 1.0.0"},
+        );
+        session.confirm();
+
+        session.wait_for("Select none bump behavior");
+        session.assert_screen(
+            "none bump menu before selecting allow",
+            indoc! {"
+                Configure git settings? no
+                Configure changelog settings? no
+                Configure version settings? yes
+                Select zero version (0.x.y) behavior: effective-minor - Major bump on 0.x increments minor (default)
+                Select none bump behavior:
+                > promote-to-patch - Treat none bumps as patch releases (default)
+                  allow - Allow none bumps without version change
+                  disallow - Reject changesets with none bump type"},
+        );
+        session.select_item(0);
+
+        session.wait_for("Configure file filtering?");
+        session.assert_screen(
+            "skipped to filtering after allow",
+            indoc! {"
+                Configure git settings? no
+                Configure changelog settings? no
+                Configure version settings? yes
+                Select zero version (0.x.y) behavior: effective-minor - Major bump on 0.x increments minor (default)
+                Select none bump behavior: allow - Allow none bumps without version change
+                Configure file filtering? [y/N]"},
+        );
+        session.send_raw("n");
+        session.wait_for("Proceed with initialization?");
+        let canonical = dir.path().canonicalize().expect("canonicalize temp dir");
+        session.assert_screen(
+            "final confirmation after version allow",
+            &format!(
+                indoc! {"
+                    Configure git settings? no
+                    Configure changelog settings? no
+                    Configure version settings? yes
+                    Select zero version (0.x.y) behavior: effective-minor - Major bump on 0.x increments minor (default)
+                    Select none bump behavior: allow - Allow none bumps without version change
+                    Configure file filtering? no
+
+                    === Initialization Summary ===
+
+                    Directory: {}/.changeset (will be created)
+                      - .gitkeep file will be created
+
+                    Configuration to be written to [package.metadata.changeset]:
+                      zero_version_behavior = \"effective-minor\"
+                      none_bump_behavior = \"allow\"
+
+                    Proceed with initialization? [Y/n]"},
+                canonical.display()
+            ),
+        );
+        session.send_raw("y");
+        session.wait_for_exit();
+
+        let cargo_toml =
+            fs::read_to_string(dir.path().join("Cargo.toml")).expect("read Cargo.toml");
+        assert!(
+            !cargo_toml.contains("none-bump-promote-message-template"),
+            "promote message template should not appear when behavior=allow, got:\n{cargo_toml}"
+        );
     }
 
     #[test]
@@ -804,20 +1900,105 @@ mod interactive_init_tests {
 
         let mut session = TerminalSession::spawn(&bin_path(), &dir, &["changeset", "init"]);
         session.wait_for("Configure git settings?");
+        session.assert_screen(
+            "git settings prompt",
+            indoc! {"
+            Configure git settings? [Y/n]"},
+        );
         session.send_raw("n");
         session.wait_for("Configure changelog settings?");
+        session.assert_screen(
+            "changelog settings prompt",
+            indoc! {"
+                Configure git settings? no
+                Configure changelog settings? [Y/n]"},
+        );
         session.send_raw("n");
         session.wait_for("Configure version settings?");
+        session.assert_screen(
+            "version settings prompt",
+            indoc! {"
+                Configure git settings? no
+                Configure changelog settings? no
+                Configure version settings? [Y/n]"},
+        );
         session.send_raw("n");
         session.wait_for("Configure file filtering?");
+        session.assert_screen(
+            "file filtering prompt",
+            indoc! {"
+                Configure git settings? no
+                Configure changelog settings? no
+                Configure version settings? no
+                Configure file filtering? [y/N]"},
+        );
         session.send_raw("y");
         session.wait_for("Ignore pattern");
+        session.assert_screen(
+            "first pattern prompt",
+            indoc! {"
+                Configure git settings? no
+                Configure changelog settings? no
+                Configure version settings? no
+                Configure file filtering? yes
+                Enter file patterns to exclude from change detection (one per line, empty line to finish):
+                Ignore pattern:"},
+        );
         session.type_line("*.log");
         session.wait_for("Additional pattern");
+        session.assert_screen(
+            "additional pattern prompt",
+            indoc! {"
+                Configure git settings? no
+                Configure changelog settings? no
+                Configure version settings? no
+                Configure file filtering? yes
+                Enter file patterns to exclude from change detection (one per line, empty line to finish):
+                Ignore pattern: *.log
+                Additional pattern:"},
+        );
         session.type_line("tmp/**");
-        session.wait_for("Additional pattern");
+        session.wait_for("tmp/**\nAdditional pattern:");
+        session.assert_screen(
+            "second additional pattern prompt",
+            indoc! {"
+                Configure git settings? no
+                Configure changelog settings? no
+                Configure version settings? no
+                Configure file filtering? yes
+                Enter file patterns to exclude from change detection (one per line, empty line to finish):
+                Ignore pattern: *.log
+                Additional pattern: tmp/**
+                Additional pattern:"},
+        );
         session.type_line("");
         session.wait_for("Proceed with initialization?");
+        let canonical = dir.path().canonicalize().expect("canonicalize temp dir");
+        session.assert_screen(
+            "final confirmation after filtering",
+            &format!(
+                indoc! {"
+                    Configure git settings? no
+                    Configure changelog settings? no
+                    Configure version settings? no
+                    Configure file filtering? yes
+                    Enter file patterns to exclude from change detection (one per line, empty line to finish):
+                    Ignore pattern: *.log
+                    Additional pattern: tmp/**
+                    Additional pattern:
+
+                    === Initialization Summary ===
+
+                    Directory: {}/.changeset (will be created)
+                      - .gitkeep file will be created
+
+                    Configuration to be written to [package.metadata.changeset]:
+                      ignored_files = [\"*.log\", \"tmp/**\"]
+
+                    Proceed with initialization? [Y/n]"},
+                canonical.display()
+            ),
+        );
         session.send_raw("y");
         session.wait_for_exit();
 
@@ -839,16 +2020,75 @@ mod interactive_init_tests {
 
         let mut session = TerminalSession::spawn(&bin_path(), &dir, &["changeset", "init"]);
         session.wait_for("Configure git settings?");
+        session.assert_screen(
+            "git settings prompt",
+            indoc! {"
+            Configure git settings? [Y/n]"},
+        );
         session.send_raw("n");
         session.wait_for("Configure changelog settings?");
+        session.assert_screen(
+            "changelog settings prompt",
+            indoc! {"
+                Configure git settings? no
+                Configure changelog settings? [Y/n]"},
+        );
         session.send_raw("n");
         session.wait_for("Configure version settings?");
+        session.assert_screen(
+            "version settings prompt",
+            indoc! {"
+                Configure git settings? no
+                Configure changelog settings? no
+                Configure version settings? [Y/n]"},
+        );
         session.send_raw("n");
         session.wait_for("Configure file filtering?");
+        session.assert_screen(
+            "file filtering prompt",
+            indoc! {"
+                Configure git settings? no
+                Configure changelog settings? no
+                Configure version settings? no
+                Configure file filtering? [y/N]"},
+        );
         session.send_raw("y");
         session.wait_for("Ignore pattern");
+        session.assert_screen(
+            "first pattern prompt",
+            indoc! {"
+                Configure git settings? no
+                Configure changelog settings? no
+                Configure version settings? no
+                Configure file filtering? yes
+                Enter file patterns to exclude from change detection (one per line, empty line to finish):
+                Ignore pattern:"},
+        );
         session.type_line("");
         session.wait_for("Proceed with initialization?");
+        let canonical = dir.path().canonicalize().expect("canonicalize temp dir");
+        session.assert_screen(
+            "final confirmation after empty filtering",
+            &format!(
+                indoc! {"
+                    Configure git settings? no
+                    Configure changelog settings? no
+                    Configure version settings? no
+                    Configure file filtering? yes
+                    Enter file patterns to exclude from change detection (one per line, empty line to finish):
+                    Ignore pattern:
+
+                    === Initialization Summary ===
+
+                    Directory: {}/.changeset (will be created)
+                      - .gitkeep file will be created
+
+                    No configuration will be written (using defaults).
+
+                    Proceed with initialization? [Y/n]"},
+                canonical.display()
+            ),
+        );
         session.send_raw("y");
         session.wait_for_exit();
 
@@ -857,6 +2097,421 @@ mod interactive_init_tests {
         assert!(
             !cargo_toml.contains("ignored"),
             "expected no ignored_files in config, got:\n{cargo_toml}"
+        );
+    }
+
+    #[test]
+    fn interactive_init_full_flow_all_sections() {
+        let dir = setup_workspace();
+
+        let mut session = TerminalSession::spawn(&bin_path(), &dir, &["changeset", "init"]);
+
+        session.wait_for("Configure git settings?");
+        session.assert_screen(
+            "configure git prompt",
+            indoc! {"
+            Configure git settings? [Y/n]"},
+        );
+        session.send_raw("y");
+
+        session.wait_for("Create git commits on release?");
+        session.assert_screen(
+            "commits prompt",
+            indoc! {"
+                Configure git settings? yes
+                Create git commits on release? [Y/n]"},
+        );
+        session.send_raw("y");
+
+        session.wait_for("Create git tags on release?");
+        session.assert_screen(
+            "tags prompt",
+            indoc! {"
+                Configure git settings? yes
+                Create git commits on release? yes
+                Create git tags on release? [Y/n]"},
+        );
+        session.send_raw("y");
+
+        session.wait_for("Keep changeset files after release?");
+        session.assert_screen(
+            "keep changesets prompt",
+            indoc! {"
+                Configure git settings? yes
+                Create git commits on release? yes
+                Create git tags on release? yes
+                Keep changeset files after release? [y/N]"},
+        );
+        session.send_raw("n");
+
+        session.wait_for("Select tag format");
+        session.assert_screen(
+            "tag format menu (workspace default = crate-prefixed)",
+            indoc! {"
+                Configure git settings? yes
+                Create git commits on release? yes
+                Create git tags on release? yes
+                Keep changeset files after release? no
+                Select tag format:
+                  version-only - Tags like v1.0.0
+                > crate-prefixed - Tags like crate-name@1.0.0"},
+        );
+        session.select_item(0);
+
+        session.wait_for("Default base branch");
+        session.assert_screen(
+            "base branch prompt",
+            indoc! {"
+                Configure git settings? yes
+                Create git commits on release? yes
+                Create git tags on release? yes
+                Keep changeset files after release? no
+                Select tag format: version-only - Tags like v1.0.0
+                Default base branch for git comparisons [main]:"},
+        );
+        session.type_line("develop");
+
+        session.wait_for("Commit title template");
+        session.assert_screen(
+            "commit title prompt",
+            indoc! {"
+                Configure git settings? yes
+                Create git commits on release? yes
+                Create git tags on release? yes
+                Keep changeset files after release? no
+                Select tag format: version-only - Tags like v1.0.0
+                Default base branch for git comparisons: develop
+                Commit title template (placeholder: {new-version}) [{new-version}]:"},
+        );
+        session.type_line("release: {new-version}");
+
+        session.wait_for("Include version details in commit body?");
+        session.assert_screen(
+            "commit body prompt",
+            indoc! {"
+                Configure git settings? yes
+                Create git commits on release? yes
+                Create git tags on release? yes
+                Keep changeset files after release? no
+                Select tag format: version-only - Tags like v1.0.0
+                Default base branch for git comparisons: develop
+                Commit title template (placeholder: {new-version}): release: {new-version}
+                Include version details in commit body? [Y/n]"},
+        );
+        session.send_raw("n");
+
+        session.wait_for("Configure changelog settings?");
+        session.assert_screen(
+            "changelog section",
+            indoc! {"
+                Configure git settings? yes
+                Create git commits on release? yes
+                Create git tags on release? yes
+                Keep changeset files after release? no
+                Select tag format: version-only - Tags like v1.0.0
+                Default base branch for git comparisons: develop
+                Commit title template (placeholder: {new-version}): release: {new-version}
+                Include version details in commit body? no
+                Configure changelog settings? [Y/n]"},
+        );
+        session.send_raw("y");
+
+        session.wait_for("Select changelog location");
+        session.assert_screen(
+            "changelog location menu",
+            indoc! {"
+                Configure git settings? yes
+                Create git commits on release? yes
+                Create git tags on release? yes
+                Keep changeset files after release? no
+                Select tag format: version-only - Tags like v1.0.0
+                Default base branch for git comparisons: develop
+                Commit title template (placeholder: {new-version}): release: {new-version}
+                Include version details in commit body? no
+                Configure changelog settings? yes
+                Select changelog location:
+                > root - Single CHANGELOG.md at project root (default)
+                  per-package - CHANGELOG.md in each package directory"},
+        );
+        session.select_item(0);
+
+        session.wait_for("Select comparison links mode");
+        session.assert_screen(
+            "comparison links menu",
+            indoc! {"
+                Configure git settings? yes
+                Create git commits on release? yes
+                Create git tags on release? yes
+                Keep changeset files after release? no
+                Select tag format: version-only - Tags like v1.0.0
+                Default base branch for git comparisons: develop
+                Commit title template (placeholder: {new-version}): release: {new-version}
+                Include version details in commit body? no
+                Configure changelog settings? yes
+                Select changelog location: per-package - CHANGELOG.md in each package directory
+                Select comparison links mode:
+                > auto - Generate links if git remote detected (default)
+                  enabled - Always generate comparison links
+                  disabled - Never generate comparison links"},
+        );
+        session.confirm();
+
+        session.wait_for("Comparison links template");
+        session.assert_screen(
+            "comparison links template prompt",
+            indoc! {"
+                Configure git settings? yes
+                Create git commits on release? yes
+                Create git tags on release? yes
+                Keep changeset files after release? no
+                Select tag format: version-only - Tags like v1.0.0
+                Default base branch for git comparisons: develop
+                Commit title template (placeholder: {new-version}): release: {new-version}
+                Include version details in commit body? no
+                Configure changelog settings? yes
+                Select changelog location: per-package - CHANGELOG.md in each package directory
+                Select comparison links mode: auto - Generate links if git remote detected (default)
+                Comparison links template (empty=auto-detect, placeholders: {repository}, {base}, {target}) []:"},
+        );
+        session.confirm();
+
+        session.wait_for("Dependency bump changelog template");
+        session.assert_screen(
+            "dependency bump template prompt",
+            indoc! {"
+                Configure git settings? yes
+                Create git commits on release? yes
+                Create git tags on release? yes
+                Keep changeset files after release? no
+                Select tag format: version-only - Tags like v1.0.0
+                Default base branch for git comparisons: develop
+                Commit title template (placeholder: {new-version}): release: {new-version}
+                Include version details in commit body? no
+                Configure changelog settings? yes
+                Select changelog location: per-package - CHANGELOG.md in each package directory
+                Select comparison links mode: auto - Generate links if git remote detected (default)
+                Comparison links template (empty=auto-detect, placeholders: {repository}, {base}, {target}):
+                Dependency bump changelog template (placeholders: {dependency}, {version}) [Updated dependency `{dependency}` to v{version}]:"},
+        );
+        session.confirm();
+
+        session.wait_for("Configure version settings?");
+        session.assert_screen(
+            "version settings prompt in full flow",
+            indoc! {"
+                Configure git settings? yes
+                Create git commits on release? yes
+                Create git tags on release? yes
+                Keep changeset files after release? no
+                Select tag format: version-only - Tags like v1.0.0
+                Default base branch for git comparisons: develop
+                Commit title template (placeholder: {new-version}): release: {new-version}
+                Include version details in commit body? no
+                Configure changelog settings? yes
+                Select changelog location: per-package - CHANGELOG.md in each package directory
+                Select comparison links mode: auto - Generate links if git remote detected (default)
+                Comparison links template (empty=auto-detect, placeholders: {repository}, {base}, {target}):
+                Dependency bump changelog template (placeholders: {dependency}, {version}): Updated dependency `{dependency}` to v{version}
+                Configure version settings? [Y/n]"},
+        );
+        session.send_raw("y");
+
+        session.wait_for("Select zero version");
+        session.assert_screen(
+            "zero version menu in full flow",
+            indoc! {"
+                Configure git settings? yes
+                Create git commits on release? yes
+                Create git tags on release? yes
+                Keep changeset files after release? no
+                Select tag format: version-only - Tags like v1.0.0
+                Default base branch for git comparisons: develop
+                Commit title template (placeholder: {new-version}): release: {new-version}
+                Include version details in commit body? no
+                Configure changelog settings? yes
+                Select changelog location: per-package - CHANGELOG.md in each package directory
+                Select comparison links mode: auto - Generate links if git remote detected (default)
+                Comparison links template (empty=auto-detect, placeholders: {repository}, {base}, {target}):
+                Dependency bump changelog template (placeholders: {dependency}, {version}): Updated dependency `{dependency}` to v{version}
+                Configure version settings? yes
+                Select zero version (0.x.y) behavior:
+                > effective-minor - Major bump on 0.x increments minor (default)
+                  auto-promote-on-major - Major bump on 0.x promotes to 1.0.0"},
+        );
+        session.select_item(0);
+
+        session.wait_for("Select none bump behavior");
+        session.assert_screen(
+            "none bump menu in full flow",
+            indoc! {"
+                Configure git settings? yes
+                Create git commits on release? yes
+                Create git tags on release? yes
+                Keep changeset files after release? no
+                Select tag format: version-only - Tags like v1.0.0
+                Default base branch for git comparisons: develop
+                Commit title template (placeholder: {new-version}): release: {new-version}
+                Include version details in commit body? no
+                Configure changelog settings? yes
+                Select changelog location: per-package - CHANGELOG.md in each package directory
+                Select comparison links mode: auto - Generate links if git remote detected (default)
+                Comparison links template (empty=auto-detect, placeholders: {repository}, {base}, {target}):
+                Dependency bump changelog template (placeholders: {dependency}, {version}): Updated dependency `{dependency}` to v{version}
+                Configure version settings? yes
+                Select zero version (0.x.y) behavior: auto-promote-on-major - Major bump on 0.x promotes to 1.0.0
+                Select none bump behavior:
+                > promote-to-patch - Treat none bumps as patch releases (default)
+                  allow - Allow none bumps without version change
+                  disallow - Reject changesets with none bump type"},
+        );
+        session.select_item(1);
+
+        session.wait_for("Configure file filtering?");
+        session.assert_screen(
+            "file filtering prompt in full flow",
+            indoc! {"
+                Configure git settings? yes
+                Create git commits on release? yes
+                Create git tags on release? yes
+                Keep changeset files after release? no
+                Select tag format: version-only - Tags like v1.0.0
+                Default base branch for git comparisons: develop
+                Commit title template (placeholder: {new-version}): release: {new-version}
+                Include version details in commit body? no
+                Configure changelog settings? yes
+                Select changelog location: per-package - CHANGELOG.md in each package directory
+                Select comparison links mode: auto - Generate links if git remote detected (default)
+                Comparison links template (empty=auto-detect, placeholders: {repository}, {base}, {target}):
+                Dependency bump changelog template (placeholders: {dependency}, {version}): Updated dependency `{dependency}` to v{version}
+                Configure version settings? yes
+                Select zero version (0.x.y) behavior: auto-promote-on-major - Major bump on 0.x promotes to 1.0.0
+                Select none bump behavior: disallow - Reject changesets with none bump type
+                Configure file filtering? [y/N]"},
+        );
+        session.send_raw("y");
+
+        session.wait_for("Ignore pattern");
+        session.assert_screen(
+            "ignore pattern prompt in full flow",
+            indoc! {"
+                Configure git settings? yes
+                Create git commits on release? yes
+                Create git tags on release? yes
+                Keep changeset files after release? no
+                Select tag format: version-only - Tags like v1.0.0
+                Default base branch for git comparisons: develop
+                Commit title template (placeholder: {new-version}): release: {new-version}
+                Include version details in commit body? no
+                Configure changelog settings? yes
+                Select changelog location: per-package - CHANGELOG.md in each package directory
+                Select comparison links mode: auto - Generate links if git remote detected (default)
+                Comparison links template (empty=auto-detect, placeholders: {repository}, {base}, {target}):
+                Dependency bump changelog template (placeholders: {dependency}, {version}): Updated dependency `{dependency}` to v{version}
+                Configure version settings? yes
+                Select zero version (0.x.y) behavior: auto-promote-on-major - Major bump on 0.x promotes to 1.0.0
+                Select none bump behavior: disallow - Reject changesets with none bump type
+                Configure file filtering? yes
+                Enter file patterns to exclude from change detection (one per line, empty line to finish):
+                Ignore pattern:"},
+        );
+        session.type_line("*.tmp");
+        session.wait_for("Additional pattern");
+        session.assert_screen(
+            "additional pattern prompt in full flow",
+            indoc! {"
+                Configure git settings? yes
+                Create git commits on release? yes
+                Create git tags on release? yes
+                Keep changeset files after release? no
+                Select tag format: version-only - Tags like v1.0.0
+                Default base branch for git comparisons: develop
+                Commit title template (placeholder: {new-version}): release: {new-version}
+                Include version details in commit body? no
+                Configure changelog settings? yes
+                Select changelog location: per-package - CHANGELOG.md in each package directory
+                Select comparison links mode: auto - Generate links if git remote detected (default)
+                Comparison links template (empty=auto-detect, placeholders: {repository}, {base}, {target}):
+                Dependency bump changelog template (placeholders: {dependency}, {version}): Updated dependency `{dependency}` to v{version}
+                Configure version settings? yes
+                Select zero version (0.x.y) behavior: auto-promote-on-major - Major bump on 0.x promotes to 1.0.0
+                Select none bump behavior: disallow - Reject changesets with none bump type
+                Configure file filtering? yes
+                Enter file patterns to exclude from change detection (one per line, empty line to finish):
+                Ignore pattern: *.tmp
+                Additional pattern:"},
+        );
+        session.type_line("");
+
+        session.wait_for("Proceed with initialization?");
+        let canonical = dir.path().canonicalize().expect("canonicalize temp dir");
+        session.assert_screen(
+            "final confirmation in full flow",
+            &format!(
+                indoc! {"
+                    Configure git settings? yes
+                    Create git commits on release? yes
+                    Create git tags on release? yes
+                    Keep changeset files after release? no
+                    Select tag format: version-only - Tags like v1.0.0
+                    Default base branch for git comparisons: develop
+                    Commit title template (placeholder: {{new-version}}): release: {{new-version}}
+                    Include version details in commit body? no
+                    Configure changelog settings? yes
+                    Select changelog location: per-package - CHANGELOG.md in each package directory
+                    Select comparison links mode: auto - Generate links if git remote detected (default)
+                    Comparison links template (empty=auto-detect, placeholders: {{repository}}, {{base}}, {{target}}):
+                    Dependency bump changelog template (placeholders: {{dependency}}, {{version}}): Updated dependency `{{dependency}}` to v{{version}}
+                    Configure version settings? yes
+                    Select zero version (0.x.y) behavior: auto-promote-on-major - Major bump on 0.x promotes to 1.0.0
+                    Select none bump behavior: disallow - Reject changesets with none bump type
+                    Configure file filtering? yes
+                    Enter file patterns to exclude from change detection (one per line, empty line to finish):
+                    Ignore pattern: *.tmp
+                    Additional pattern:
+
+                    === Initialization Summary ===
+
+                    Directory: {}/.changeset (will be created)
+                      - .gitkeep file will be created
+
+                    Configuration to be written to [workspace.metadata.changeset]:
+                      commit = true
+                      tags = true
+                      keep_changesets = false
+                      tag_format = \"version-only\"
+                      changelog = \"per-package\"
+                      comparison_links = \"auto\"
+                      zero_version_behavior = \"auto-promote-on-major\"
+                      base_branch = \"develop\"
+                      none_bump_behavior = \"disallow\"
+                      commit_title_template = \"release: {{new-version}}\"
+                      changes_in_body = false
+                      ignored_files = [\"*.tmp\"]
+
+                    Proceed with initialization? [Y/n]"},
+                canonical.display()
+            ),
+        );
+        session.send_raw("y");
+        session.wait_for_exit();
+
+        let cargo_toml =
+            fs::read_to_string(dir.path().join("Cargo.toml")).expect("read Cargo.toml");
+        assert!(
+            cargo_toml.contains("base-branch = \"develop\""),
+            "expected base-branch = develop, got:\n{cargo_toml}"
+        );
+        assert!(
+            cargo_toml.contains("release: {new-version}"),
+            "expected custom commit title, got:\n{cargo_toml}"
+        );
+        assert!(
+            cargo_toml.contains("changes-in-body = false"),
+            "expected changes-in-body = false, got:\n{cargo_toml}"
+        );
+        assert!(
+            cargo_toml.contains("*.tmp"),
+            "expected *.tmp pattern, got:\n{cargo_toml}"
         );
     }
 }

@@ -12,12 +12,12 @@ use changeset_git::DEFAULT_BASE_BRANCH;
 use changeset_manifest::{
     ChangelogLocation, ComparisonLinks, NoneBumpBehavior, ZeroVersionBehavior,
 };
-use changeset_operations::Result;
 use changeset_operations::traits::{
     BumpSelection, CategorySelection, ChangelogSettingsInput, DescriptionInput,
     FilteringSettingsInput, GitSettingsInput, InitInteractionProvider, InteractionProvider,
     PackageSelection, ProjectContext, VersionSettingsInput,
 };
+use changeset_operations::{OperationError, Result};
 
 use crate::commands::{cli_error_to_operation_error, dialoguer_to_operation_error};
 use crate::environment::is_interactive;
@@ -163,16 +163,21 @@ impl InitInteractionProvider for TerminalInitInteractionProvider {
             .interact_opt()
             .map_err(dialoguer_to_operation_error)?;
 
-        if configure != Some(true) {
-            return Ok(None);
+        match configure {
+            Some(true) => {}
+            Some(false) => return Ok(None),
+            None => return Err(OperationError::Cancelled),
         }
 
         let commit = select_bool("Create git commits on release?", true)
-            .map_err(cli_error_to_operation_error)?;
+            .map_err(cli_error_to_operation_error)?
+            .ok_or(OperationError::Cancelled)?;
         let tags = select_bool("Create git tags on release?", true)
-            .map_err(cli_error_to_operation_error)?;
+            .map_err(cli_error_to_operation_error)?
+            .ok_or(OperationError::Cancelled)?;
         let keep_changesets = select_bool("Keep changeset files after release?", false)
-            .map_err(cli_error_to_operation_error)?;
+            .map_err(cli_error_to_operation_error)?
+            .ok_or(OperationError::Cancelled)?;
         let tag_format =
             select_tag_format(context.is_single_package).map_err(cli_error_to_operation_error)?;
         let base_branch = prompt_base_branch().map_err(cli_error_to_operation_error)?;
@@ -180,7 +185,8 @@ impl InitInteractionProvider for TerminalInitInteractionProvider {
         let (commit_title_template, changes_in_body) = if commit {
             let template = prompt_commit_title_template().map_err(cli_error_to_operation_error)?;
             let body = select_bool("Include version details in commit body?", true)
-                .map_err(cli_error_to_operation_error)?;
+                .map_err(cli_error_to_operation_error)?
+                .ok_or(OperationError::Cancelled)?;
             (Some(template), Some(body))
         } else {
             (None, None)
@@ -211,8 +217,10 @@ impl InitInteractionProvider for TerminalInitInteractionProvider {
             .interact_opt()
             .map_err(dialoguer_to_operation_error)?;
 
-        if configure != Some(true) {
-            return Ok(None);
+        match configure {
+            Some(true) => {}
+            Some(false) => return Ok(None),
+            None => return Err(OperationError::Cancelled),
         }
 
         let changelog = if context.is_single_package {
@@ -262,8 +270,10 @@ impl InitInteractionProvider for TerminalInitInteractionProvider {
             .interact_opt()
             .map_err(dialoguer_to_operation_error)?;
 
-        if configure != Some(true) {
-            return Ok(None);
+        match configure {
+            Some(true) => {}
+            Some(false) => return Ok(None),
+            None => return Err(OperationError::Cancelled),
         }
 
         let zero_version_behavior =
@@ -298,8 +308,10 @@ impl InitInteractionProvider for TerminalInitInteractionProvider {
             .interact_opt()
             .map_err(dialoguer_to_operation_error)?;
 
-        if configure != Some(true) {
-            return Ok(None);
+        match configure {
+            Some(true) => {}
+            Some(false) => return Ok(None),
+            None => return Err(OperationError::Cancelled),
         }
 
         let ignored_files = prompt_ignored_files_loop().map_err(cli_error_to_operation_error)?;
@@ -466,33 +478,35 @@ fn prompt_base_branch() -> CliResult<String> {
         .interact_text()?)
 }
 
-fn select_bool(prompt: &str, default: bool) -> CliResult<bool> {
+fn select_bool(prompt: &str, default: bool) -> CliResult<Option<bool>> {
     Ok(Confirm::new()
         .with_prompt(prompt)
         .default(default)
-        .interact()?)
+        .interact_opt()?)
 }
 
 fn select_tag_format(is_single_package: bool) -> CliResult<changeset_manifest::TagFormat> {
     let default_idx: usize = if is_single_package { 0 } else { 1 };
     let selection = select_variant::<TagFormatSelectionOption>("Select tag format", default_idx)?;
-    Ok(selection.map(Into::into).unwrap_or(if is_single_package {
-        changeset_manifest::TagFormat::VersionOnly
-    } else {
-        changeset_manifest::TagFormat::CratePrefixed
-    }))
+    Ok(selection
+        .ok_or(CliError::Operation(OperationError::Cancelled))?
+        .into())
 }
 
 fn select_changelog_location() -> CliResult<ChangelogLocation> {
     let selection =
         select_variant::<ChangelogLocationSelectionOption>("Select changelog location", 0)?;
-    Ok(selection.map_or_else(ChangelogLocation::default, Into::into))
+    Ok(selection
+        .ok_or(CliError::Operation(OperationError::Cancelled))?
+        .into())
 }
 
 fn select_comparison_links() -> CliResult<ComparisonLinks> {
     let selection =
         select_variant::<ComparisonLinksSelectionOption>("Select comparison links mode", 0)?;
-    Ok(selection.map_or_else(ComparisonLinks::default, Into::into))
+    Ok(selection
+        .ok_or(CliError::Operation(OperationError::Cancelled))?
+        .into())
 }
 
 fn select_zero_version_behavior() -> CliResult<ZeroVersionBehavior> {
@@ -500,13 +514,17 @@ fn select_zero_version_behavior() -> CliResult<ZeroVersionBehavior> {
         "Select zero version (0.x.y) behavior",
         0,
     )?;
-    Ok(selection.map_or_else(ZeroVersionBehavior::default, Into::into))
+    Ok(selection
+        .ok_or(CliError::Operation(OperationError::Cancelled))?
+        .into())
 }
 
 fn select_none_bump_behavior() -> CliResult<NoneBumpBehavior> {
     let selection =
         select_variant::<NoneBumpBehaviorSelectionOption>("Select none bump behavior", 0)?;
-    Ok(selection.map_or_else(NoneBumpBehavior::default, Into::into))
+    Ok(selection
+        .ok_or(CliError::Operation(OperationError::Cancelled))?
+        .into())
 }
 
 fn prompt_commit_title_template() -> CliResult<String> {

@@ -486,6 +486,7 @@ mod interactive {
     use std::os::unix::fs::PermissionsExt;
 
     use changeset_test_helpers::terminal_session::TerminalSession;
+    use indoc::indoc;
 
     use super::*;
 
@@ -520,23 +521,44 @@ MOCK_EDITOR_EOF
     }
 
     #[test]
-    fn interactive_selection_shows_prompt() {
+    fn interactive_package_selection_renders_menu() {
         let workspace = create_virtual_workspace();
         let mut session = spawn_add_in_workspace(&workspace);
 
-        session.wait_for("Select packages");
+        session.wait_for("Select packages to include in changeset");
+        session.assert_screen(
+            "package multi-select menu",
+            indoc! {"
+                Select packages to include in changeset:
+                > [ ] crate-a (0.1.0)
+                  [ ] crate-b (0.2.0)"},
+        );
+
         session.cancel();
         session.wait_for_exit();
     }
 
     #[test]
-    fn interactive_shows_crate_names() {
+    fn interactive_cancel_at_package_selection() {
         let workspace = create_virtual_workspace();
         let mut session = spawn_add_in_workspace(&workspace);
 
-        session.wait_for("crate-a");
+        session.wait_for("Select packages to include in changeset");
+        session.assert_screen(
+            "package menu before cancel",
+            indoc! {"
+                Select packages to include in changeset:
+                > [ ] crate-a (0.1.0)
+                  [ ] crate-b (0.2.0)"},
+        );
         session.cancel();
         session.wait_for_exit();
+
+        let changeset_dir = workspace.path().join(".changeset/changesets");
+        assert!(
+            !changeset_dir.exists(),
+            "no changeset directory should be created on cancel"
+        );
     }
 
     #[test]
@@ -544,34 +566,212 @@ MOCK_EDITOR_EOF
         let workspace = create_virtual_workspace();
         let mut session = spawn_add_in_workspace(&workspace);
 
-        session.wait_for("Select packages");
-        session.send_raw("\n");
+        session.wait_for("Select packages to include in changeset");
+        session.assert_screen(
+            "package menu before empty confirm",
+            indoc! {"
+                Select packages to include in changeset:
+                > [ ] crate-a (0.1.0)
+                  [ ] crate-b (0.2.0)"},
+        );
+        session.confirm();
         session.wait_for_exit();
+
+        let changeset_dir = workspace.path().join(".changeset/changesets");
+        assert!(
+            !changeset_dir.exists(),
+            "no changeset directory should be created on empty selection"
+        );
     }
 
     #[test]
-    fn interactive_cancellation_exits_cleanly() {
+    fn interactive_cancel_at_bump_type() {
         let workspace = create_virtual_workspace();
         let mut session = spawn_add_in_workspace(&workspace);
 
-        session.wait_for("Select packages");
+        session.wait_for("Select packages to include in changeset");
+        session.toggle_item(0);
+        session.confirm();
+        session.wait_for("Select bump type for 'crate-a'");
+        session.assert_screen(
+            "bump type menu before cancel",
+            indoc! {"
+                Select packages to include in changeset: crate-a (0.1.0)
+                Select bump type for 'crate-a':
+                > patch - Bug fixes (backwards compatible)
+                  minor - New features (backwards compatible)
+                  major - Breaking changes
+                  none - No version bump (internal changes only)"},
+        );
+        session.cancel();
+        session.wait_for_exit();
+
+        let changeset_dir = workspace.path().join(".changeset/changesets");
+        assert!(
+            !changeset_dir.exists(),
+            "no changeset directory should be created on cancel"
+        );
+    }
+
+    #[test]
+    fn interactive_cancel_at_category() {
+        let workspace = create_virtual_workspace();
+        let mut session = spawn_add_in_workspace(&workspace);
+
+        session.wait_for("Select packages to include in changeset");
+        session.toggle_item(0);
+        session.confirm();
+        session.wait_for("Select bump type for 'crate-a'");
+        session.confirm();
+        session.wait_for("Select change category");
+        session.assert_screen(
+            "category menu before cancel",
+            indoc! {"
+                Select packages to include in changeset: crate-a (0.1.0)
+                Select bump type for 'crate-a': patch - Bug fixes (backwards compatible)
+                Select change category:
+                > changed - General changes (default)
+                  added - New features
+                  fixed - Bug fixes
+                  deprecated - Deprecated features
+                  removed - Removed features
+                  security - Security fixes"},
+        );
+        session.cancel();
+        session.wait_for_exit();
+
+        let changeset_dir = workspace.path().join(".changeset/changesets");
+        assert!(
+            !changeset_dir.exists(),
+            "no changeset directory should be created on cancel"
+        );
+    }
+
+    #[test]
+    fn interactive_cancel_at_description() {
+        let workspace = create_single_crate_workspace();
+        let mut session = spawn_add_in_workspace(&workspace);
+
+        session.wait_for("Select bump type for 'test-crate'");
+        session.assert_screen(
+            "bump type menu",
+            indoc! {"
+                Using package: test-crate (1.0.0)
+                Select bump type for 'test-crate':
+                > patch - Bug fixes (backwards compatible)
+                  minor - New features (backwards compatible)
+                  major - Breaking changes
+                  none - No version bump (internal changes only)"},
+        );
+        session.confirm();
+        session.wait_for("Select change category");
+        session.assert_screen(
+            "category menu",
+            indoc! {"
+                Using package: test-crate (1.0.0)
+                Select bump type for 'test-crate': patch - Bug fixes (backwards compatible)
+                Select change category:
+                > changed - General changes (default)
+                  added - New features
+                  fixed - Bug fixes
+                  deprecated - Deprecated features
+                  removed - Removed features
+                  security - Security fixes"},
+        );
+        session.confirm();
+        session.wait_for("Enter description (press Enter 3 times to finish):");
+        session.assert_screen(
+            "description prompt before ctrl-c",
+            indoc! {"
+                Using package: test-crate (1.0.0)
+                Select bump type for 'test-crate': patch - Bug fixes (backwards compatible)
+                Select change category: changed - General changes (default)
+
+                Enter description (press Enter 3 times to finish):"},
+        );
+        session.ctrl_c();
+        session.wait_for_exit();
+
+        let changeset_dir = workspace.path().join(".changeset/changesets");
+        assert!(
+            !changeset_dir.exists(),
+            "no changeset directory should be created on Ctrl+C at description"
+        );
+    }
+
+    #[test]
+    fn interactive_bump_type_menu_rendering() {
+        let workspace = create_virtual_workspace();
+        let mut session = spawn_add_in_workspace(&workspace);
+
+        session.wait_for("Select packages to include in changeset");
+        session.assert_screen(
+            "package menu before toggle",
+            indoc! {"
+                Select packages to include in changeset:
+                > [ ] crate-a (0.1.0)
+                  [ ] crate-b (0.2.0)"},
+        );
+        session.toggle_item(0);
+        session.confirm();
+        session.wait_for("Select bump type for 'crate-a'");
+        session.assert_screen(
+            "bump type select menu",
+            indoc! {"
+                Select packages to include in changeset: crate-a (0.1.0)
+                Select bump type for 'crate-a':
+                > patch - Bug fixes (backwards compatible)
+                  minor - New features (backwards compatible)
+                  major - Breaking changes
+                  none - No version bump (internal changes only)"},
+        );
+
         session.cancel();
         session.wait_for_exit();
     }
 
     #[test]
-    fn interactive_select_package_and_bump_type() {
+    fn interactive_category_menu_rendering() {
         let workspace = create_virtual_workspace();
         let mut session = spawn_add_in_workspace(&workspace);
 
-        session.wait_for("Select packages");
-        session.send_raw(" ");
-        session.send_raw("\n");
+        session.wait_for("Select packages to include in changeset");
+        session.assert_screen(
+            "package menu before toggle",
+            indoc! {"
+                Select packages to include in changeset:
+                > [ ] crate-a (0.1.0)
+                  [ ] crate-b (0.2.0)"},
+        );
+        session.toggle_item(0);
+        session.confirm();
+        session.wait_for("Select bump type for 'crate-a'");
+        session.assert_screen(
+            "bump type menu before confirm",
+            indoc! {"
+                Select packages to include in changeset: crate-a (0.1.0)
+                Select bump type for 'crate-a':
+                > patch - Bug fixes (backwards compatible)
+                  minor - New features (backwards compatible)
+                  major - Breaking changes
+                  none - No version bump (internal changes only)"},
+        );
+        session.confirm();
+        session.wait_for("Select change category");
+        session.assert_screen(
+            "category select menu",
+            indoc! {"
+                Select packages to include in changeset: crate-a (0.1.0)
+                Select bump type for 'crate-a': patch - Bug fixes (backwards compatible)
+                Select change category:
+                > changed - General changes (default)
+                  added - New features
+                  fixed - Bug fixes
+                  deprecated - Deprecated features
+                  removed - Removed features
+                  security - Security fixes"},
+        );
 
-        session.wait_for("bump type");
-        session.send_raw("\n");
-
-        session.wait_for("category");
         session.cancel();
         session.wait_for_exit();
     }
@@ -581,20 +781,49 @@ MOCK_EDITOR_EOF
         let workspace = create_single_crate_workspace();
         let mut session = spawn_add_in_workspace(&workspace);
 
-        session.wait_for("Using package: test-crate");
+        session.wait_for("Select bump type for 'test-crate'");
+        session.assert_screen(
+            "single-crate bump type menu",
+            indoc! {"
+                Using package: test-crate (1.0.0)
+                Select bump type for 'test-crate':
+                > patch - Bug fixes (backwards compatible)
+                  minor - New features (backwards compatible)
+                  major - Breaking changes
+                  none - No version bump (internal changes only)"},
+        );
+        session.confirm();
 
-        session.wait_for("bump type");
-        session.send_raw("\n");
+        session.wait_for("Select change category");
+        session.assert_screen(
+            "single-crate category menu",
+            indoc! {"
+                Using package: test-crate (1.0.0)
+                Select bump type for 'test-crate': patch - Bug fixes (backwards compatible)
+                Select change category:
+                > changed - General changes (default)
+                  added - New features
+                  fixed - Bug fixes
+                  deprecated - Deprecated features
+                  removed - Removed features
+                  security - Security fixes"},
+        );
+        session.confirm();
 
-        session.wait_for("category");
-        session.send_raw("\n");
+        session.wait_for("Enter description (press Enter 3 times to finish):");
+        session.assert_screen(
+            "description prompt",
+            indoc! {"
+                Using package: test-crate (1.0.0)
+                Select bump type for 'test-crate': patch - Bug fixes (backwards compatible)
+                Select change category: changed - General changes (default)
 
-        session.wait_for("description");
-
-        session.send_line("Test description line 1");
-        session.send_line("Test description line 2");
-        session.send_line("");
-        session.send_line("");
+                Enter description (press Enter 3 times to finish):"},
+        );
+        session.type_line("Test description line 1");
+        session.type_line("Test description line 2");
+        session.type_line("");
+        session.type_line("");
 
         session.wait_for("Created changeset");
         session.wait_for_exit();
@@ -624,24 +853,187 @@ MOCK_EDITOR_EOF
         let workspace = create_virtual_workspace();
         let mut session = spawn_add_in_workspace(&workspace);
 
-        session.wait_for("Select packages");
-        session.send_raw(" ");
-        session.send_raw("\n");
+        session.wait_for("Select packages to include in changeset");
+        session.assert_screen(
+            "package multi-select menu",
+            indoc! {"
+                Select packages to include in changeset:
+                > [ ] crate-a (0.1.0)
+                  [ ] crate-b (0.2.0)"},
+        );
+        session.toggle_item(0);
+        session.toggle_item(1);
+        session.confirm();
 
-        session.wait_for("bump type");
-        session.send_raw("\n");
+        session.wait_for("Select bump type for 'crate-a'");
+        session.assert_screen(
+            "bump type for crate-a",
+            indoc! {"
+                Select packages to include in changeset: crate-a (0.1.0), crate-b (0.2.0)
+                Select bump type for 'crate-a':
+                > patch - Bug fixes (backwards compatible)
+                  minor - New features (backwards compatible)
+                  major - Breaking changes
+                  none - No version bump (internal changes only)"},
+        );
+        session.confirm();
 
-        session.wait_for("category");
-        session.send_raw("\n");
+        session.wait_for("Select bump type for 'crate-b'");
+        session.assert_screen(
+            "bump type for crate-b",
+            indoc! {"
+                Select packages to include in changeset: crate-a (0.1.0), crate-b (0.2.0)
+                Select bump type for 'crate-a': patch - Bug fixes (backwards compatible)
+                Select bump type for 'crate-b':
+                > patch - Bug fixes (backwards compatible)
+                  minor - New features (backwards compatible)
+                  major - Breaking changes
+                  none - No version bump (internal changes only)"},
+        );
+        session.confirm();
 
-        session.wait_for("description");
+        session.wait_for("Select change category");
+        session.assert_screen(
+            "category menu",
+            indoc! {"
+                Select packages to include in changeset: crate-a (0.1.0), crate-b (0.2.0)
+                Select bump type for 'crate-a': patch - Bug fixes (backwards compatible)
+                Select bump type for 'crate-b': patch - Bug fixes (backwards compatible)
+                Select change category:
+                > changed - General changes (default)
+                  added - New features
+                  fixed - Bug fixes
+                  deprecated - Deprecated features
+                  removed - Removed features
+                  security - Security fixes"},
+        );
+        session.confirm();
 
-        session.send_line("Multi-package changeset");
-        session.send_line("");
-        session.send_line("");
+        session.wait_for("Enter description (press Enter 3 times to finish):");
+        session.assert_screen(
+            "description prompt",
+            indoc! {"
+                Select packages to include in changeset: crate-a (0.1.0), crate-b (0.2.0)
+                Select bump type for 'crate-a': patch - Bug fixes (backwards compatible)
+                Select bump type for 'crate-b': patch - Bug fixes (backwards compatible)
+                Select change category: changed - General changes (default)
+
+                Enter description (press Enter 3 times to finish):"},
+        );
+        session.type_line("Multi-package changeset");
+        session.type_line("");
+        session.type_line("");
 
         session.wait_for("Created changeset");
         session.wait_for_exit();
+
+        let changeset_dir = workspace.path().join(".changeset/changesets");
+        let files: Vec<_> = fs::read_dir(&changeset_dir)
+            .expect("read dir")
+            .filter_map(|e| e.ok())
+            .filter(|e| e.path().extension().is_some_and(|ext| ext == "md"))
+            .collect();
+        assert_eq!(files.len(), 1, "should have one changeset file");
+
+        let content = fs::read_to_string(files[0].path()).expect("read file");
+        assert!(content.contains("crate-a"));
+        assert!(content.contains("patch"));
+        assert!(content.contains("crate-b"));
+        assert!(content.contains("patch"));
+        assert!(content.contains("Multi-package changeset"));
+    }
+
+    #[test]
+    fn interactive_multi_package_different_bumps() {
+        let workspace = create_virtual_workspace();
+        let mut session = spawn_add_in_workspace(&workspace);
+
+        session.wait_for("Select packages to include in changeset");
+        session.assert_screen(
+            "package multi-select menu",
+            indoc! {"
+                Select packages to include in changeset:
+                > [ ] crate-a (0.1.0)
+                  [ ] crate-b (0.2.0)"},
+        );
+        session.toggle_item(0);
+        session.toggle_item(1);
+        session.confirm();
+
+        session.wait_for("Select bump type for 'crate-a'");
+        session.assert_screen(
+            "bump type for crate-a",
+            indoc! {"
+                Select packages to include in changeset: crate-a (0.1.0), crate-b (0.2.0)
+                Select bump type for 'crate-a':
+                > patch - Bug fixes (backwards compatible)
+                  minor - New features (backwards compatible)
+                  major - Breaking changes
+                  none - No version bump (internal changes only)"},
+        );
+        session.select_item(1);
+
+        session.wait_for("Select bump type for 'crate-b'");
+        session.assert_screen(
+            "bump type for crate-b after crate-a got major",
+            indoc! {"
+                Select packages to include in changeset: crate-a (0.1.0), crate-b (0.2.0)
+                Select bump type for 'crate-a': major - Breaking changes
+                Select bump type for 'crate-b':
+                > patch - Bug fixes (backwards compatible)
+                  minor - New features (backwards compatible)
+                  major - Breaking changes
+                  none - No version bump (internal changes only)"},
+        );
+        session.confirm();
+
+        session.wait_for("Select change category");
+        session.assert_screen(
+            "category menu after different bumps",
+            indoc! {"
+                Select packages to include in changeset: crate-a (0.1.0), crate-b (0.2.0)
+                Select bump type for 'crate-a': major - Breaking changes
+                Select bump type for 'crate-b': patch - Bug fixes (backwards compatible)
+                Select change category:
+                > changed - General changes (default)
+                  added - New features
+                  fixed - Bug fixes
+                  deprecated - Deprecated features
+                  removed - Removed features
+                  security - Security fixes"},
+        );
+        session.confirm();
+
+        session.wait_for("Enter description (press Enter 3 times to finish):");
+        session.assert_screen(
+            "description prompt",
+            indoc! {"
+                Select packages to include in changeset: crate-a (0.1.0), crate-b (0.2.0)
+                Select bump type for 'crate-a': major - Breaking changes
+                Select bump type for 'crate-b': patch - Bug fixes (backwards compatible)
+                Select change category: changed - General changes (default)
+
+                Enter description (press Enter 3 times to finish):"},
+        );
+        session.type_line("Different bumps per package");
+        session.type_line("");
+        session.type_line("");
+
+        session.wait_for("Created changeset");
+        session.wait_for_exit();
+
+        let changeset_dir = workspace.path().join(".changeset/changesets");
+        let files: Vec<_> = fs::read_dir(&changeset_dir)
+            .expect("read dir")
+            .filter_map(|e| e.ok())
+            .filter(|e| e.path().extension().is_some_and(|ext| ext == "md"))
+            .collect();
+
+        let content = fs::read_to_string(files[0].path()).expect("read file");
+        assert!(content.contains("crate-a"));
+        assert!(content.contains("major"));
+        assert!(content.contains("crate-b"));
+        assert!(content.contains("patch"));
     }
 
     #[test]
@@ -651,13 +1043,34 @@ MOCK_EDITOR_EOF
 
         let mut session = spawn_add_with_editor(&workspace, &editor);
 
-        session.wait_for("Using package: test-crate");
+        session.wait_for("Select bump type for 'test-crate'");
+        session.assert_screen(
+            "editor mode bump type menu",
+            indoc! {"
+                Using package: test-crate (1.0.0)
+                Select bump type for 'test-crate':
+                > patch - Bug fixes (backwards compatible)
+                  minor - New features (backwards compatible)
+                  major - Breaking changes
+                  none - No version bump (internal changes only)"},
+        );
+        session.confirm();
 
-        session.wait_for("bump type");
-        session.send_raw("\n");
-
-        session.wait_for("category");
-        session.send_raw("\n");
+        session.wait_for("Select change category");
+        session.assert_screen(
+            "editor mode category menu",
+            indoc! {"
+                Using package: test-crate (1.0.0)
+                Select bump type for 'test-crate': patch - Bug fixes (backwards compatible)
+                Select change category:
+                > changed - General changes (default)
+                  added - New features
+                  fixed - Bug fixes
+                  deprecated - Deprecated features
+                  removed - Removed features
+                  security - Security fixes"},
+        );
+        session.confirm();
 
         session.wait_for("Created changeset");
         session.wait_for_exit();
@@ -686,13 +1099,34 @@ MOCK_EDITOR_EOF
 
         let mut session = spawn_add_with_editor(&workspace, &editor);
 
-        session.wait_for("Using package: test-crate");
+        session.wait_for("Select bump type for 'test-crate'");
+        session.assert_screen(
+            "editor comments bump type menu",
+            indoc! {"
+                Using package: test-crate (1.0.0)
+                Select bump type for 'test-crate':
+                > patch - Bug fixes (backwards compatible)
+                  minor - New features (backwards compatible)
+                  major - Breaking changes
+                  none - No version bump (internal changes only)"},
+        );
+        session.confirm();
 
-        session.wait_for("bump type");
-        session.send_raw("\n");
-
-        session.wait_for("category");
-        session.send_raw("\n");
+        session.wait_for("Select change category");
+        session.assert_screen(
+            "editor comments category menu",
+            indoc! {"
+                Using package: test-crate (1.0.0)
+                Select bump type for 'test-crate': patch - Bug fixes (backwards compatible)
+                Select change category:
+                > changed - General changes (default)
+                  added - New features
+                  fixed - Bug fixes
+                  deprecated - Deprecated features
+                  removed - Removed features
+                  security - Security fixes"},
+        );
+        session.confirm();
 
         session.wait_for("Created changeset");
         session.wait_for_exit();

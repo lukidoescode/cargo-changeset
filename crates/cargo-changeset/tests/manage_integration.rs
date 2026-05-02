@@ -584,3 +584,611 @@ mod manage_graduation {
             .stderr(contains("stable"));
     }
 }
+
+#[cfg(not(windows))]
+mod interactive_prerelease_tests {
+    use std::path::PathBuf;
+
+    use changeset_test_helpers::terminal_session::TerminalSession;
+    use indoc::indoc;
+
+    use super::*;
+
+    fn bin_path() -> PathBuf {
+        assert_cmd::cargo::cargo_bin("cargo-changeset")
+    }
+
+    fn spawn_prerelease(workspace: &TempDir) -> TerminalSession {
+        TerminalSession::spawn(&bin_path(), workspace, &["manage", "pre-release"])
+    }
+
+    fn workspace_with_changeset_dir() -> TempDir {
+        let workspace = create_virtual_workspace();
+        fs::create_dir_all(workspace.path().join(".changeset")).expect("create changeset dir");
+        workspace
+    }
+
+    #[test]
+    fn interactive_prerelease_action_menu_rendering() {
+        let workspace = workspace_with_changeset_dir();
+
+        let mut session = spawn_prerelease(&workspace);
+        session.wait_for("What would you like to do?");
+        session.assert_screen(
+            "prerelease action menu",
+            indoc! {"
+                What would you like to do?:
+                > Add crate to pre-release
+                  Remove crate from pre-release
+                  Graduate crate (move to graduation queue)
+                  Done"},
+        );
+        session.cancel();
+        session.wait_for_exit();
+    }
+
+    #[test]
+    fn interactive_prerelease_done_exits_cleanly() {
+        let workspace = workspace_with_changeset_dir();
+
+        let mut session = spawn_prerelease(&workspace);
+        session.wait_for("What would you like to do?");
+        session.assert_screen(
+            "action menu before Done",
+            indoc! {"
+                What would you like to do?:
+                > Add crate to pre-release
+                  Remove crate from pre-release
+                  Graduate crate (move to graduation queue)
+                  Done"},
+        );
+        session.select_item(2);
+        session.wait_for_exit();
+
+        assert!(
+            !workspace
+                .path()
+                .join(".changeset/pre-release.toml")
+                .exists(),
+            "pre-release.toml must not be created"
+        );
+    }
+
+    #[test]
+    fn interactive_prerelease_cancel_at_action_menu() {
+        let workspace = workspace_with_changeset_dir();
+
+        let mut session = spawn_prerelease(&workspace);
+        session.wait_for("What would you like to do?");
+        session.assert_screen(
+            "action menu before cancel",
+            indoc! {"
+                What would you like to do?:
+                > Add crate to pre-release
+                  Remove crate from pre-release
+                  Graduate crate (move to graduation queue)
+                  Done"},
+        );
+        session.cancel();
+        session.wait_for_exit();
+
+        assert!(
+            !workspace
+                .path()
+                .join(".changeset/pre-release.toml")
+                .exists(),
+            "pre-release.toml must not be created after cancel"
+        );
+    }
+
+    #[test]
+    fn interactive_prerelease_add_cancel_at_crate_selection() {
+        let workspace = workspace_with_changeset_dir();
+
+        let mut session = spawn_prerelease(&workspace);
+        session.wait_for("What would you like to do?");
+        session.assert_screen(
+            "action menu",
+            indoc! {"
+                What would you like to do?:
+                > Add crate to pre-release
+                  Remove crate from pre-release
+                  Graduate crate (move to graduation queue)
+                  Done"},
+        );
+        session.confirm();
+        session.wait_for("Select a crate to add to pre-release");
+        session.assert_screen(
+            "crate selection",
+            indoc! {"
+                What would you like to do?: Add crate to pre-release
+                Select a crate to add to pre-release:
+                  crate-a (0.1.0)
+                  crate-b (0.2.0)"},
+        );
+        session.cancel();
+        session.wait_for("> Add crate to pre-release");
+        session.assert_screen(
+            "action menu after cancel",
+            indoc! {"
+                What would you like to do?: Add crate to pre-release
+                What would you like to do?:
+                > Add crate to pre-release
+                  Remove crate from pre-release
+                  Graduate crate (move to graduation queue)
+                  Done"},
+        );
+        session.cancel();
+        session.wait_for_exit();
+
+        assert!(
+            !workspace
+                .path()
+                .join(".changeset/pre-release.toml")
+                .exists(),
+            "pre-release.toml must not be created after cancel"
+        );
+    }
+
+    #[test]
+    fn interactive_prerelease_add_full_flow() {
+        let workspace = workspace_with_changeset_dir();
+
+        let mut session = spawn_prerelease(&workspace);
+        session.wait_for("What would you like to do?");
+        session.assert_screen(
+            "action menu",
+            indoc! {"
+                What would you like to do?:
+                > Add crate to pre-release
+                  Remove crate from pre-release
+                  Graduate crate (move to graduation queue)
+                  Done"},
+        );
+        session.confirm();
+        session.wait_for("Select a crate to add to pre-release");
+        session.assert_screen(
+            "crate selection",
+            indoc! {"
+                What would you like to do?: Add crate to pre-release
+                Select a crate to add to pre-release:
+                  crate-a (0.1.0)
+                  crate-b (0.2.0)"},
+        );
+        session.select_item(0);
+        session.wait_for("Enter pre-release tag");
+        session.assert_screen(
+            "tag input",
+            indoc! {"
+                What would you like to do?: Add crate to pre-release
+                Select a crate to add to pre-release: crate-a (0.1.0)
+                Enter pre-release tag (e.g., alpha, beta, rc):"},
+        );
+        session.type_line("alpha");
+        session.wait_for("> Add crate to pre-release");
+        session.assert_screen(
+            "action menu after add",
+            indoc! {"
+                What would you like to do?: Add crate to pre-release
+                Select a crate to add to pre-release: crate-a (0.1.0)
+                Enter pre-release tag (e.g., alpha, beta, rc): alpha
+                What would you like to do?:
+                > Add crate to pre-release
+                  Remove crate from pre-release
+                  Graduate crate (move to graduation queue)
+                  Done"},
+        );
+        session.select_item(2);
+        session.wait_for_exit();
+
+        let path = workspace.path().join(".changeset/pre-release.toml");
+        assert!(path.exists(), "pre-release.toml should be created");
+        let content = fs::read_to_string(&path).expect("read pre-release.toml");
+        assert!(content.contains("crate-a"));
+        assert!(content.contains("alpha"));
+    }
+
+    #[test]
+    fn interactive_prerelease_remove_full_flow() {
+        let workspace = workspace_with_changeset_dir();
+        assert_cmd::cargo::cargo_bin_cmd!("cargo-changeset")
+            .args(["manage", "pre-release", "--add", "crate-a:alpha"])
+            .current_dir(workspace.path())
+            .assert()
+            .success();
+
+        let mut session = spawn_prerelease(&workspace);
+        session.wait_for("> Add crate to pre-release");
+        session.assert_screen(
+            "action menu",
+            indoc! {"
+                What would you like to do?:
+                > Add crate to pre-release
+                  Remove crate from pre-release
+                  Graduate crate (move to graduation queue)
+                  Done"},
+        );
+        session.select_item(0);
+        session.wait_for("Select a crate to remove from pre-release");
+        session.assert_screen(
+            "crate selection",
+            indoc! {"
+                What would you like to do?: Remove crate from pre-release
+                Select a crate to remove from pre-release:
+                  crate-a: alpha"},
+        );
+        session.select_item(0);
+        session.wait_for("> Add crate to pre-release");
+        session.assert_screen(
+            "action menu after remove",
+            indoc! {"
+                What would you like to do?: Remove crate from pre-release
+                Select a crate to remove from pre-release: crate-a: alpha
+                What would you like to do?:
+                > Add crate to pre-release
+                  Remove crate from pre-release
+                  Graduate crate (move to graduation queue)
+                  Done"},
+        );
+        session.select_item(2);
+        session.wait_for_exit();
+
+        assert!(
+            !workspace
+                .path()
+                .join(".changeset/pre-release.toml")
+                .exists(),
+            "pre-release.toml should be deleted after removing last entry"
+        );
+    }
+
+    #[test]
+    fn interactive_prerelease_graduate_flow() {
+        let workspace = workspace_with_changeset_dir();
+        assert_cmd::cargo::cargo_bin_cmd!("cargo-changeset")
+            .args(["manage", "pre-release", "--add", "crate-a:alpha"])
+            .current_dir(workspace.path())
+            .assert()
+            .success();
+
+        let mut session = spawn_prerelease(&workspace);
+        session.wait_for("> Add crate to pre-release");
+        session.assert_screen(
+            "action menu",
+            indoc! {"
+                What would you like to do?:
+                > Add crate to pre-release
+                  Remove crate from pre-release
+                  Graduate crate (move to graduation queue)
+                  Done"},
+        );
+        session.select_item(1);
+        session.wait_for("Select a crate to graduate (move to graduation queue)");
+        session.assert_screen(
+            "crate selection",
+            indoc! {"
+                What would you like to do?: Graduate crate (move to graduation queue)
+                Select a crate to graduate (move to graduation queue):
+                  crate-a (0.1.0)
+                  crate-b (0.2.0)"},
+        );
+        session.select_item(0);
+        session.wait_for("> Add crate to pre-release");
+        session.assert_screen(
+            "action menu after graduate",
+            indoc! {"
+                What would you like to do?: Graduate crate (move to graduation queue)
+                Select a crate to graduate (move to graduation queue): crate-a (0.1.0)
+                What would you like to do?:
+                > Add crate to pre-release
+                  Remove crate from pre-release
+                  Graduate crate (move to graduation queue)
+                  Done"},
+        );
+        session.select_item(2);
+        session.wait_for_exit();
+
+        assert!(
+            !workspace
+                .path()
+                .join(".changeset/pre-release.toml")
+                .exists(),
+            "pre-release.toml should be removed after graduation"
+        );
+        let graduation_path = workspace.path().join(".changeset/graduation.toml");
+        assert!(
+            graduation_path.exists(),
+            "graduation.toml should be created"
+        );
+        let content = fs::read_to_string(&graduation_path).expect("read graduation.toml");
+        assert!(content.contains("crate-a"));
+    }
+
+    #[test]
+    fn interactive_prerelease_remove_no_packages_shows_message() {
+        let workspace = workspace_with_changeset_dir();
+
+        let mut session = spawn_prerelease(&workspace);
+        session.wait_for("What would you like to do?");
+        session.assert_screen(
+            "action menu",
+            indoc! {"
+                What would you like to do?:
+                > Add crate to pre-release
+                  Remove crate from pre-release
+                  Graduate crate (move to graduation queue)
+                  Done"},
+        );
+        session.select_item(0);
+        session.wait_for("What would you like to do?");
+        session.assert_screen(
+            "action menu after remove attempt",
+            indoc! {"
+                What would you like to do?: Remove crate from pre-release
+                What would you like to do?:
+                > Add crate to pre-release
+                  Remove crate from pre-release
+                  Graduate crate (move to graduation queue)
+                  Done"},
+        );
+        session.select_item(2);
+        session.wait_for("No packages are currently in pre-release mode");
+        session.wait_for_exit();
+    }
+}
+
+#[cfg(not(windows))]
+mod interactive_graduation_tests {
+    use std::path::PathBuf;
+
+    use changeset_test_helpers::terminal_session::TerminalSession;
+    use indoc::indoc;
+
+    use super::*;
+
+    fn bin_path() -> PathBuf {
+        assert_cmd::cargo::cargo_bin("cargo-changeset")
+    }
+
+    fn spawn_graduation(workspace: &TempDir) -> TerminalSession {
+        TerminalSession::spawn(&bin_path(), workspace, &["manage", "graduation"])
+    }
+
+    fn workspace_with_changeset_dir() -> TempDir {
+        let workspace = create_virtual_workspace();
+        fs::create_dir_all(workspace.path().join(".changeset")).expect("create changeset dir");
+        workspace
+    }
+
+    #[test]
+    fn interactive_graduation_action_menu_rendering() {
+        let workspace = workspace_with_changeset_dir();
+
+        let mut session = spawn_graduation(&workspace);
+        session.wait_for("What would you like to do?");
+        session.assert_screen(
+            "graduation action menu",
+            indoc! {"
+                What would you like to do?:
+                > Add crate to graduation queue
+                  Remove crate from graduation queue
+                  Done"},
+        );
+        session.cancel();
+        session.wait_for_exit();
+    }
+
+    #[test]
+    fn interactive_graduation_done_exits_cleanly() {
+        let workspace = workspace_with_changeset_dir();
+
+        let mut session = spawn_graduation(&workspace);
+        session.wait_for("What would you like to do?");
+        session.assert_screen(
+            "action menu before Done",
+            indoc! {"
+                What would you like to do?:
+                > Add crate to graduation queue
+                  Remove crate from graduation queue
+                  Done"},
+        );
+        session.select_item(1);
+        session.wait_for_exit();
+
+        assert!(
+            !workspace.path().join(".changeset/graduation.toml").exists(),
+            "graduation.toml must not be created"
+        );
+    }
+
+    #[test]
+    fn interactive_graduation_cancel_at_action_menu() {
+        let workspace = workspace_with_changeset_dir();
+
+        let mut session = spawn_graduation(&workspace);
+        session.wait_for("What would you like to do?");
+        session.assert_screen(
+            "action menu before cancel",
+            indoc! {"
+                What would you like to do?:
+                > Add crate to graduation queue
+                  Remove crate from graduation queue
+                  Done"},
+        );
+        session.cancel();
+        session.wait_for_exit();
+
+        assert!(
+            !workspace.path().join(".changeset/graduation.toml").exists(),
+            "graduation.toml must not be created after cancel"
+        );
+    }
+
+    #[test]
+    fn interactive_graduation_add_cancel_at_crate_selection() {
+        let workspace = workspace_with_changeset_dir();
+
+        let mut session = spawn_graduation(&workspace);
+        session.wait_for("What would you like to do?");
+        session.assert_screen(
+            "action menu",
+            indoc! {"
+                What would you like to do?:
+                > Add crate to graduation queue
+                  Remove crate from graduation queue
+                  Done"},
+        );
+        session.confirm();
+        session.wait_for("Select a crate to graduate (move to graduation queue)");
+        session.assert_screen(
+            "crate selection",
+            indoc! {"
+                What would you like to do?: Add crate to graduation queue
+                Select a crate to graduate (move to graduation queue):
+                  crate-a (0.1.0)
+                  crate-b (0.2.0)"},
+        );
+        session.cancel();
+        session.wait_for("> Add crate to graduation queue");
+        session.assert_screen(
+            "action menu after cancel",
+            indoc! {"
+                What would you like to do?: Add crate to graduation queue
+                What would you like to do?:
+                > Add crate to graduation queue
+                  Remove crate from graduation queue
+                  Done"},
+        );
+        session.cancel();
+        session.wait_for_exit();
+
+        assert!(
+            !workspace.path().join(".changeset/graduation.toml").exists(),
+            "graduation.toml must not be created after cancel"
+        );
+    }
+
+    #[test]
+    fn interactive_graduation_add_full_flow() {
+        let workspace = workspace_with_changeset_dir();
+
+        let mut session = spawn_graduation(&workspace);
+        session.wait_for("What would you like to do?");
+        session.assert_screen(
+            "action menu",
+            indoc! {"
+                What would you like to do?:
+                > Add crate to graduation queue
+                  Remove crate from graduation queue
+                  Done"},
+        );
+        session.confirm();
+        session.wait_for("Select a crate to graduate (move to graduation queue)");
+        session.assert_screen(
+            "crate selection",
+            indoc! {"
+                What would you like to do?: Add crate to graduation queue
+                Select a crate to graduate (move to graduation queue):
+                  crate-a (0.1.0)
+                  crate-b (0.2.0)"},
+        );
+        session.select_item(0);
+        session.wait_for("> Add crate to graduation queue");
+        session.assert_screen(
+            "action menu after add",
+            indoc! {"
+                What would you like to do?: Add crate to graduation queue
+                Select a crate to graduate (move to graduation queue): crate-a (0.1.0)
+                What would you like to do?:
+                > Add crate to graduation queue
+                  Remove crate from graduation queue
+                  Done"},
+        );
+        session.select_item(1);
+        session.wait_for_exit();
+
+        let path = workspace.path().join(".changeset/graduation.toml");
+        assert!(path.exists(), "graduation.toml should be created");
+        let content = fs::read_to_string(&path).expect("read graduation.toml");
+        assert!(content.contains("crate-a"));
+    }
+
+    #[test]
+    fn interactive_graduation_remove_full_flow() {
+        let workspace = workspace_with_changeset_dir();
+        assert_cmd::cargo::cargo_bin_cmd!("cargo-changeset")
+            .args(["manage", "graduation", "--add", "crate-a"])
+            .current_dir(workspace.path())
+            .assert()
+            .success();
+
+        let mut session = spawn_graduation(&workspace);
+        session.wait_for("> Add crate to graduation queue");
+        session.assert_screen(
+            "action menu",
+            indoc! {"
+                What would you like to do?:
+                > Add crate to graduation queue
+                  Remove crate from graduation queue
+                  Done"},
+        );
+        session.select_item(0);
+        session.wait_for("Select a crate to remove from graduation queue");
+        session.assert_screen(
+            "crate selection",
+            indoc! {"
+                What would you like to do?: Remove crate from graduation queue
+                Select a crate to remove from graduation queue:
+                  crate-a"},
+        );
+        session.select_item(0);
+        session.wait_for("> Add crate to graduation queue");
+        session.assert_screen(
+            "action menu after remove",
+            indoc! {"
+                What would you like to do?: Remove crate from graduation queue
+                Select a crate to remove from graduation queue: crate-a
+                What would you like to do?:
+                > Add crate to graduation queue
+                  Remove crate from graduation queue
+                  Done"},
+        );
+        session.select_item(1);
+        session.wait_for_exit();
+
+        assert!(
+            !workspace.path().join(".changeset/graduation.toml").exists(),
+            "graduation.toml should be deleted after removing last entry"
+        );
+    }
+
+    #[test]
+    fn interactive_graduation_remove_no_packages_shows_message() {
+        let workspace = workspace_with_changeset_dir();
+
+        let mut session = spawn_graduation(&workspace);
+        session.wait_for("What would you like to do?");
+        session.assert_screen(
+            "action menu",
+            indoc! {"
+                What would you like to do?:
+                > Add crate to graduation queue
+                  Remove crate from graduation queue
+                  Done"},
+        );
+        session.select_item(0);
+        session.wait_for("What would you like to do?");
+        session.assert_screen(
+            "action menu after remove attempt",
+            indoc! {"
+                What would you like to do?: Remove crate from graduation queue
+                What would you like to do?:
+                > Add crate to graduation queue
+                  Remove crate from graduation queue
+                  Done"},
+        );
+        session.select_item(1);
+        session.wait_for("No packages are currently queued for graduation");
+        session.wait_for_exit();
+    }
+}
