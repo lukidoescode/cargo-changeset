@@ -1,9 +1,6 @@
 use std::fs;
-use std::path::PathBuf;
 
-use changeset_test_helpers::terminal_session::TerminalSession;
 use changeset_test_helpers::workspaces::{WorkspaceBuilder, create_virtual_workspace};
-use indoc::indoc;
 use predicates::str::contains;
 use tempfile::TempDir;
 
@@ -590,6 +587,11 @@ mod manage_graduation {
 
 #[cfg(not(windows))]
 mod interactive_prerelease_tests {
+    use std::path::PathBuf;
+
+    use changeset_test_helpers::terminal_session::TerminalSession;
+    use indoc::indoc;
+
     use super::*;
 
     fn bin_path() -> PathBuf {
@@ -937,6 +939,11 @@ mod interactive_prerelease_tests {
 
 #[cfg(not(windows))]
 mod interactive_graduation_tests {
+    use std::path::PathBuf;
+
+    use changeset_test_helpers::terminal_session::TerminalSession;
+    use indoc::indoc;
+
     use super::*;
 
     fn bin_path() -> PathBuf {
