@@ -146,6 +146,15 @@ impl TerminalSession {
         self
     }
 
+    pub fn toggle_item(&mut self, index: usize) -> &mut Self {
+        for _ in 0..index {
+            self.pty.send(ARROW_DOWN).expect("send arrow-down key");
+            std::thread::sleep(KEY_DELAY);
+        }
+        self.pty.send(" ").expect("send space to toggle item");
+        self
+    }
+
     pub fn cancel(&mut self) -> &mut Self {
         self.pty.send(ESC).expect("send escape key");
         self
