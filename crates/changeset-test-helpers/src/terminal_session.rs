@@ -39,7 +39,7 @@ impl TerminalSessionBuilder<'_> {
         let pty = OsSession::spawn(cmd).expect("failed to spawn session");
         TerminalSession {
             pty,
-            vt: vt100::Parser::new(24, 120, 100),
+            vt: vt100::Parser::new(1200, 400, 0),
         }
     }
 }
@@ -135,36 +135,6 @@ impl TerminalSession {
             .trim_end_matches('\n')
             .to_owned();
         assert_eq!(actual, expected_trimmed, "{message}");
-    }
-
-    pub fn assert_screen_starts_with(&mut self, message: &str, prefix: &str) {
-        let actual = self.screen();
-        let prefix_trimmed = prefix
-            .lines()
-            .map(str::trim_end)
-            .collect::<Vec<_>>()
-            .join("\n")
-            .trim_end_matches('\n')
-            .to_owned();
-        assert!(
-            actual.starts_with(&prefix_trimmed),
-            "{message}\nexpected screen to start with:\n{prefix_trimmed}\n\nbut got:\n{actual}"
-        );
-    }
-
-    pub fn assert_screen_ends_with(&mut self, message: &str, suffix: &str) {
-        let actual = self.screen();
-        let suffix_trimmed = suffix
-            .lines()
-            .map(str::trim_end)
-            .collect::<Vec<_>>()
-            .join("\n")
-            .trim_end_matches('\n')
-            .to_owned();
-        assert!(
-            actual.ends_with(&suffix_trimmed),
-            "{message}\nexpected screen to end with:\n{suffix_trimmed}\n\nbut got:\n{actual}"
-        );
     }
 
     pub fn select_item(&mut self, index: usize) -> &mut Self {

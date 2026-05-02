@@ -844,20 +844,26 @@ mod interactive_init_tests {
         skip_all_sections(&mut session);
         session.wait_for("Proceed with initialization?");
         session.wait_for("No configuration will be written (using defaults).");
-        session.assert_screen_starts_with(
-            "final confirmation with defaults (start)",
-            indoc! {"
-                Configure git settings? no
-                Configure changelog settings? no
-                Configure version settings? no
-                Configure file filtering? no"},
-        );
-        session.assert_screen_ends_with(
-            "final confirmation with defaults (end)",
-            indoc! {"
-                No configuration will be written (using defaults).
+        let canonical = dir.path().canonicalize().expect("canonicalize temp dir");
+        session.assert_screen(
+            "final confirmation with defaults",
+            &format!(
+                indoc! {"
+                    Configure git settings? no
+                    Configure changelog settings? no
+                    Configure version settings? no
+                    Configure file filtering? no
 
-                Proceed with initialization? [Y/n]"},
+                    === Initialization Summary ===
+
+                    Directory: {}/.changeset (will be created)
+                      - .gitkeep file will be created
+
+                    No configuration will be written (using defaults).
+
+                    Proceed with initialization? [Y/n]"},
+                canonical.display()
+            ),
         );
         session.send_raw("y");
         session.wait_for_exit();
@@ -876,20 +882,26 @@ mod interactive_init_tests {
         skip_all_sections(&mut session);
         session.wait_for("Proceed with initialization?");
         session.wait_for("No configuration will be written (using defaults).");
-        session.assert_screen_starts_with(
-            "final confirmation with defaults before cancel (start)",
-            indoc! {"
-                Configure git settings? no
-                Configure changelog settings? no
-                Configure version settings? no
-                Configure file filtering? no"},
-        );
-        session.assert_screen_ends_with(
-            "final confirmation with defaults before cancel (end)",
-            indoc! {"
-                No configuration will be written (using defaults).
+        let canonical = dir.path().canonicalize().expect("canonicalize temp dir");
+        session.assert_screen(
+            "final confirmation with defaults before cancel",
+            &format!(
+                indoc! {"
+                    Configure git settings? no
+                    Configure changelog settings? no
+                    Configure version settings? no
+                    Configure file filtering? no
 
-                Proceed with initialization? [Y/n]"},
+                    === Initialization Summary ===
+
+                    Directory: {}/.changeset (will be created)
+                      - .gitkeep file will be created
+
+                    No configuration will be written (using defaults).
+
+                    Proceed with initialization? [Y/n]"},
+                canonical.display()
+            ),
         );
         session.send_raw("n");
         session.wait_for_exit();
@@ -1297,9 +1309,40 @@ mod interactive_init_tests {
         );
         session.send_raw("n");
         session.wait_for("Proceed with initialization?");
-        session.assert_screen_ends_with(
-            "final confirmation after git settings (end)",
-            "Proceed with initialization? [Y/n]",
+        let canonical = dir.path().canonicalize().expect("canonicalize temp dir");
+        session.assert_screen(
+            "final confirmation after git settings",
+            &format!(
+                indoc! {"
+                    Configure git settings? yes
+                    Create git commits on release? yes
+                    Create git tags on release? no
+                    Keep changeset files after release? yes
+                    Select tag format: version-only - Tags like v1.0.0
+                    Default base branch for git comparisons: main
+                    Commit title template (placeholder: {{new-version}}): {{new-version}}
+                    Include version details in commit body? yes
+                    Configure changelog settings? no
+                    Configure version settings? no
+                    Configure file filtering? no
+
+                    === Initialization Summary ===
+
+                    Directory: {}/.changeset (will be created)
+                      - .gitkeep file will be created
+
+                    Configuration to be written to [package.metadata.changeset]:
+                      commit = true
+                      tags = false
+                      keep_changesets = true
+                      tag_format = \"version-only\"
+                      base_branch = \"main\"
+                      commit_title_template = \"{{new-version}}\"
+                      changes_in_body = true
+
+                    Proceed with initialization? [Y/n]"},
+                canonical.display()
+            ),
         );
         session.send_raw("y");
         session.wait_for_exit();
@@ -1430,9 +1473,36 @@ mod interactive_init_tests {
         );
         session.send_raw("n");
         session.wait_for("Proceed with initialization?");
-        session.assert_screen_ends_with(
-            "final confirmation after git no-commit (end)",
-            "Proceed with initialization? [Y/n]",
+        let canonical = dir.path().canonicalize().expect("canonicalize temp dir");
+        session.assert_screen(
+            "final confirmation after git no-commit",
+            &format!(
+                indoc! {"
+                    Configure git settings? yes
+                    Create git commits on release? no
+                    Create git tags on release? yes
+                    Keep changeset files after release? no
+                    Select tag format: version-only - Tags like v1.0.0
+                    Default base branch for git comparisons: main
+                    Configure changelog settings? no
+                    Configure version settings? no
+                    Configure file filtering? no
+
+                    === Initialization Summary ===
+
+                    Directory: {}/.changeset (will be created)
+                      - .gitkeep file will be created
+
+                    Configuration to be written to [package.metadata.changeset]:
+                      commit = false
+                      tags = true
+                      keep_changesets = false
+                      tag_format = \"version-only\"
+                      base_branch = \"main\"
+
+                    Proceed with initialization? [Y/n]"},
+                canonical.display()
+            ),
         );
         session.send_raw("y");
         session.wait_for_exit();
@@ -1527,37 +1597,59 @@ mod interactive_init_tests {
         session.confirm();
 
         session.wait_for("Configure version settings?");
-        session.assert_screen_starts_with(
-            "version settings prompt after changelog (start)",
+        session.assert_screen(
+            "version settings prompt after changelog",
             indoc! {"
                 Configure git settings? no
                 Configure changelog settings? yes
                 Select changelog location: per-package - CHANGELOG.md in each package directory
-                Select comparison links mode: enabled - Always generate comparison links"},
-        );
-        session.assert_screen_ends_with(
-            "version settings prompt after changelog (end)",
-            "Configure version settings? [Y/n]",
+                Select comparison links mode: enabled - Always generate comparison links
+                Comparison links template (empty=auto-detect, placeholders: {repository}, {base}, {target}):
+                Dependency bump changelog template (placeholders: {dependency}, {version}): Updated dependency `{dependency}` to v{version}
+                Configure version settings? [Y/n]"},
         );
         session.send_raw("n");
         session.wait_for("Configure file filtering?");
-        session.assert_screen_starts_with(
-            "file filtering prompt after changelog (start)",
+        session.assert_screen(
+            "file filtering prompt after changelog",
             indoc! {"
                 Configure git settings? no
                 Configure changelog settings? yes
                 Select changelog location: per-package - CHANGELOG.md in each package directory
-                Select comparison links mode: enabled - Always generate comparison links"},
-        );
-        session.assert_screen_ends_with(
-            "file filtering prompt after changelog (end)",
-            "Configure file filtering? [y/N]",
+                Select comparison links mode: enabled - Always generate comparison links
+                Comparison links template (empty=auto-detect, placeholders: {repository}, {base}, {target}):
+                Dependency bump changelog template (placeholders: {dependency}, {version}): Updated dependency `{dependency}` to v{version}
+                Configure version settings? no
+                Configure file filtering? [y/N]"},
         );
         session.send_raw("n");
         session.wait_for("Proceed with initialization?");
-        session.assert_screen_ends_with(
-            "final confirmation after changelog settings (end)",
-            "Proceed with initialization? [Y/n]",
+        let canonical = dir.path().canonicalize().expect("canonicalize temp dir");
+        session.assert_screen(
+            "final confirmation after changelog settings",
+            &format!(
+                indoc! {"
+                    Configure git settings? no
+                    Configure changelog settings? yes
+                    Select changelog location: per-package - CHANGELOG.md in each package directory
+                    Select comparison links mode: enabled - Always generate comparison links
+                    Comparison links template (empty=auto-detect, placeholders: {{repository}}, {{base}}, {{target}}):
+                    Dependency bump changelog template (placeholders: {{dependency}}, {{version}}): Updated dependency `{{dependency}}` to v{{version}}
+                    Configure version settings? no
+                    Configure file filtering? no
+
+                    === Initialization Summary ===
+
+                    Directory: {}/.changeset (will be created)
+                      - .gitkeep file will be created
+
+                    Configuration to be written to [workspace.metadata.changeset]:
+                      changelog = \"per-package\"
+                      comparison_links = \"enabled\"
+
+                    Proceed with initialization? [Y/n]"},
+                canonical.display()
+            ),
         );
         session.send_raw("y");
         session.wait_for_exit();
@@ -1656,20 +1748,32 @@ mod interactive_init_tests {
         );
         session.send_raw("n");
         session.wait_for("Proceed with initialization?");
-        session.assert_screen_starts_with(
-            "final confirmation after version settings (start)",
-            indoc! {"
-                Configure git settings? no
-                Configure changelog settings? no
-                Configure version settings? yes
-                Select zero version (0.x.y) behavior: effective-minor - Major bump on 0.x increments minor (default)
-                Select none bump behavior: promote-to-patch - Treat none bumps as patch releases (default)
-                Changelog message template for promoted none bumps: Internal architectural changes
-                Configure file filtering? no"},
-        );
-        session.assert_screen_ends_with(
-            "final confirmation after version settings (end)",
-            "Proceed with initialization? [Y/n]",
+        let canonical = dir.path().canonicalize().expect("canonicalize temp dir");
+        session.assert_screen(
+            "final confirmation after version settings",
+            &format!(
+                indoc! {"
+                    Configure git settings? no
+                    Configure changelog settings? no
+                    Configure version settings? yes
+                    Select zero version (0.x.y) behavior: effective-minor - Major bump on 0.x increments minor (default)
+                    Select none bump behavior: promote-to-patch - Treat none bumps as patch releases (default)
+                    Changelog message template for promoted none bumps: Internal architectural changes
+                    Configure file filtering? no
+
+                    === Initialization Summary ===
+
+                    Directory: {}/.changeset (will be created)
+                      - .gitkeep file will be created
+
+                    Configuration to be written to [package.metadata.changeset]:
+                      zero_version_behavior = \"effective-minor\"
+                      none_bump_behavior = \"promote-to-patch\"
+                      none_bump_promote_message_template = \"Internal architectural changes\"
+
+                    Proceed with initialization? [Y/n]"},
+                canonical.display()
+            ),
         );
         session.send_raw("y");
         session.wait_for_exit();
@@ -1754,19 +1858,30 @@ mod interactive_init_tests {
         );
         session.send_raw("n");
         session.wait_for("Proceed with initialization?");
-        session.assert_screen_starts_with(
-            "final confirmation after version allow (start)",
-            indoc! {"
-                Configure git settings? no
-                Configure changelog settings? no
-                Configure version settings? yes
-                Select zero version (0.x.y) behavior: effective-minor - Major bump on 0.x increments minor (default)
-                Select none bump behavior: allow - Allow none bumps without version change
-                Configure file filtering? no"},
-        );
-        session.assert_screen_ends_with(
-            "final confirmation after version allow (end)",
-            "Proceed with initialization? [Y/n]",
+        let canonical = dir.path().canonicalize().expect("canonicalize temp dir");
+        session.assert_screen(
+            "final confirmation after version allow",
+            &format!(
+                indoc! {"
+                    Configure git settings? no
+                    Configure changelog settings? no
+                    Configure version settings? yes
+                    Select zero version (0.x.y) behavior: effective-minor - Major bump on 0.x increments minor (default)
+                    Select none bump behavior: allow - Allow none bumps without version change
+                    Configure file filtering? no
+
+                    === Initialization Summary ===
+
+                    Directory: {}/.changeset (will be created)
+                      - .gitkeep file will be created
+
+                    Configuration to be written to [package.metadata.changeset]:
+                      zero_version_behavior = \"effective-minor\"
+                      none_bump_behavior = \"allow\"
+
+                    Proceed with initialization? [Y/n]"},
+                canonical.display()
+            ),
         );
         session.send_raw("y");
         session.wait_for_exit();
@@ -1858,21 +1973,31 @@ mod interactive_init_tests {
         );
         session.type_line("");
         session.wait_for("Proceed with initialization?");
-        session.assert_screen_starts_with(
-            "final confirmation after filtering (start)",
-            indoc! {"
-                Configure git settings? no
-                Configure changelog settings? no
-                Configure version settings? no
-                Configure file filtering? yes
-                Enter file patterns to exclude from change detection (one per line, empty line to finish):
-                Ignore pattern: *.log
-                Additional pattern: tmp/**
-                Additional pattern:"},
-        );
-        session.assert_screen_ends_with(
-            "final confirmation after filtering (end)",
-            "Proceed with initialization? [Y/n]",
+        let canonical = dir.path().canonicalize().expect("canonicalize temp dir");
+        session.assert_screen(
+            "final confirmation after filtering",
+            &format!(
+                indoc! {"
+                    Configure git settings? no
+                    Configure changelog settings? no
+                    Configure version settings? no
+                    Configure file filtering? yes
+                    Enter file patterns to exclude from change detection (one per line, empty line to finish):
+                    Ignore pattern: *.log
+                    Additional pattern: tmp/**
+                    Additional pattern:
+
+                    === Initialization Summary ===
+
+                    Directory: {}/.changeset (will be created)
+                      - .gitkeep file will be created
+
+                    Configuration to be written to [package.metadata.changeset]:
+                      ignored_files = [\"*.log\", \"tmp/**\"]
+
+                    Proceed with initialization? [Y/n]"},
+                canonical.display()
+            ),
         );
         session.send_raw("y");
         session.wait_for_exit();
@@ -1941,19 +2066,28 @@ mod interactive_init_tests {
         );
         session.type_line("");
         session.wait_for("Proceed with initialization?");
-        session.assert_screen_starts_with(
-            "final confirmation after empty filtering (start)",
-            indoc! {"
-                Configure git settings? no
-                Configure changelog settings? no
-                Configure version settings? no
-                Configure file filtering? yes
-                Enter file patterns to exclude from change detection (one per line, empty line to finish):
-                Ignore pattern:"},
-        );
-        session.assert_screen_ends_with(
-            "final confirmation after empty filtering (end)",
-            "Proceed with initialization? [Y/n]",
+        let canonical = dir.path().canonicalize().expect("canonicalize temp dir");
+        session.assert_screen(
+            "final confirmation after empty filtering",
+            &format!(
+                indoc! {"
+                    Configure git settings? no
+                    Configure changelog settings? no
+                    Configure version settings? no
+                    Configure file filtering? yes
+                    Enter file patterns to exclude from change detection (one per line, empty line to finish):
+                    Ignore pattern:
+
+                    === Initialization Summary ===
+
+                    Directory: {}/.changeset (will be created)
+                      - .gitkeep file will be created
+
+                    No configuration will be written (using defaults).
+
+                    Proceed with initialization? [Y/n]"},
+                canonical.display()
+            ),
         );
         session.send_raw("y");
         session.wait_for_exit();
@@ -2162,8 +2296,8 @@ mod interactive_init_tests {
         session.confirm();
 
         session.wait_for("Configure version settings?");
-        session.assert_screen_starts_with(
-            "version settings prompt in full flow (start)",
+        session.assert_screen(
+            "version settings prompt in full flow",
             indoc! {"
                 Configure git settings? yes
                 Create git commits on release? yes
@@ -2174,18 +2308,31 @@ mod interactive_init_tests {
                 Commit title template (placeholder: {new-version}): release: {new-version}
                 Include version details in commit body? no
                 Configure changelog settings? yes
-                Select changelog location: per-package - CHANGELOG.md in each package directory"},
-        );
-        session.assert_screen_ends_with(
-            "version settings prompt in full flow (end)",
-            "Configure version settings? [Y/n]",
+                Select changelog location: per-package - CHANGELOG.md in each package directory
+                Select comparison links mode: auto - Generate links if git remote detected (default)
+                Comparison links template (empty=auto-detect, placeholders: {repository}, {base}, {target}):
+                Dependency bump changelog template (placeholders: {dependency}, {version}): Updated dependency `{dependency}` to v{version}
+                Configure version settings? [Y/n]"},
         );
         session.send_raw("y");
 
         session.wait_for("Select zero version");
-        session.assert_screen_ends_with(
+        session.assert_screen(
             "zero version menu in full flow",
             indoc! {"
+                Configure git settings? yes
+                Create git commits on release? yes
+                Create git tags on release? yes
+                Keep changeset files after release? no
+                Select tag format: version-only - Tags like v1.0.0
+                Default base branch for git comparisons: develop
+                Commit title template (placeholder: {new-version}): release: {new-version}
+                Include version details in commit body? no
+                Configure changelog settings? yes
+                Select changelog location: per-package - CHANGELOG.md in each package directory
+                Select comparison links mode: auto - Generate links if git remote detected (default)
+                Comparison links template (empty=auto-detect, placeholders: {repository}, {base}, {target}):
+                Dependency bump changelog template (placeholders: {dependency}, {version}): Updated dependency `{dependency}` to v{version}
                 Configure version settings? yes
                 Select zero version (0.x.y) behavior:
                 > effective-minor - Major bump on 0.x increments minor (default)
@@ -2194,9 +2341,23 @@ mod interactive_init_tests {
         session.select_item(0);
 
         session.wait_for("Select none bump behavior");
-        session.assert_screen_ends_with(
+        session.assert_screen(
             "none bump menu in full flow",
             indoc! {"
+                Configure git settings? yes
+                Create git commits on release? yes
+                Create git tags on release? yes
+                Keep changeset files after release? no
+                Select tag format: version-only - Tags like v1.0.0
+                Default base branch for git comparisons: develop
+                Commit title template (placeholder: {new-version}): release: {new-version}
+                Include version details in commit body? no
+                Configure changelog settings? yes
+                Select changelog location: per-package - CHANGELOG.md in each package directory
+                Select comparison links mode: auto - Generate links if git remote detected (default)
+                Comparison links template (empty=auto-detect, placeholders: {repository}, {base}, {target}):
+                Dependency bump changelog template (placeholders: {dependency}, {version}): Updated dependency `{dependency}` to v{version}
+                Configure version settings? yes
                 Select zero version (0.x.y) behavior: auto-promote-on-major - Major bump on 0.x promotes to 1.0.0
                 Select none bump behavior:
                 > promote-to-patch - Treat none bumps as patch releases (default)
@@ -2206,36 +2367,130 @@ mod interactive_init_tests {
         session.select_item(1);
 
         session.wait_for("Configure file filtering?");
-        session.assert_screen_ends_with(
+        session.assert_screen(
             "file filtering prompt in full flow",
             indoc! {"
+                Configure git settings? yes
+                Create git commits on release? yes
+                Create git tags on release? yes
+                Keep changeset files after release? no
+                Select tag format: version-only - Tags like v1.0.0
+                Default base branch for git comparisons: develop
+                Commit title template (placeholder: {new-version}): release: {new-version}
+                Include version details in commit body? no
+                Configure changelog settings? yes
+                Select changelog location: per-package - CHANGELOG.md in each package directory
+                Select comparison links mode: auto - Generate links if git remote detected (default)
+                Comparison links template (empty=auto-detect, placeholders: {repository}, {base}, {target}):
+                Dependency bump changelog template (placeholders: {dependency}, {version}): Updated dependency `{dependency}` to v{version}
+                Configure version settings? yes
+                Select zero version (0.x.y) behavior: auto-promote-on-major - Major bump on 0.x promotes to 1.0.0
                 Select none bump behavior: disallow - Reject changesets with none bump type
                 Configure file filtering? [y/N]"},
         );
         session.send_raw("y");
 
         session.wait_for("Ignore pattern");
-        session.assert_screen_ends_with(
+        session.assert_screen(
             "ignore pattern prompt in full flow",
             indoc! {"
+                Configure git settings? yes
+                Create git commits on release? yes
+                Create git tags on release? yes
+                Keep changeset files after release? no
+                Select tag format: version-only - Tags like v1.0.0
+                Default base branch for git comparisons: develop
+                Commit title template (placeholder: {new-version}): release: {new-version}
+                Include version details in commit body? no
+                Configure changelog settings? yes
+                Select changelog location: per-package - CHANGELOG.md in each package directory
+                Select comparison links mode: auto - Generate links if git remote detected (default)
+                Comparison links template (empty=auto-detect, placeholders: {repository}, {base}, {target}):
+                Dependency bump changelog template (placeholders: {dependency}, {version}): Updated dependency `{dependency}` to v{version}
+                Configure version settings? yes
+                Select zero version (0.x.y) behavior: auto-promote-on-major - Major bump on 0.x promotes to 1.0.0
+                Select none bump behavior: disallow - Reject changesets with none bump type
                 Configure file filtering? yes
                 Enter file patterns to exclude from change detection (one per line, empty line to finish):
                 Ignore pattern:"},
         );
         session.type_line("*.tmp");
         session.wait_for("Additional pattern");
-        session.assert_screen_ends_with(
+        session.assert_screen(
             "additional pattern prompt in full flow",
             indoc! {"
+                Configure git settings? yes
+                Create git commits on release? yes
+                Create git tags on release? yes
+                Keep changeset files after release? no
+                Select tag format: version-only - Tags like v1.0.0
+                Default base branch for git comparisons: develop
+                Commit title template (placeholder: {new-version}): release: {new-version}
+                Include version details in commit body? no
+                Configure changelog settings? yes
+                Select changelog location: per-package - CHANGELOG.md in each package directory
+                Select comparison links mode: auto - Generate links if git remote detected (default)
+                Comparison links template (empty=auto-detect, placeholders: {repository}, {base}, {target}):
+                Dependency bump changelog template (placeholders: {dependency}, {version}): Updated dependency `{dependency}` to v{version}
+                Configure version settings? yes
+                Select zero version (0.x.y) behavior: auto-promote-on-major - Major bump on 0.x promotes to 1.0.0
+                Select none bump behavior: disallow - Reject changesets with none bump type
+                Configure file filtering? yes
+                Enter file patterns to exclude from change detection (one per line, empty line to finish):
                 Ignore pattern: *.tmp
                 Additional pattern:"},
         );
         session.type_line("");
 
         session.wait_for("Proceed with initialization?");
-        session.assert_screen_ends_with(
+        let canonical = dir.path().canonicalize().expect("canonicalize temp dir");
+        session.assert_screen(
             "final confirmation in full flow",
-            "Proceed with initialization? [Y/n]",
+            &format!(
+                indoc! {"
+                    Configure git settings? yes
+                    Create git commits on release? yes
+                    Create git tags on release? yes
+                    Keep changeset files after release? no
+                    Select tag format: version-only - Tags like v1.0.0
+                    Default base branch for git comparisons: develop
+                    Commit title template (placeholder: {{new-version}}): release: {{new-version}}
+                    Include version details in commit body? no
+                    Configure changelog settings? yes
+                    Select changelog location: per-package - CHANGELOG.md in each package directory
+                    Select comparison links mode: auto - Generate links if git remote detected (default)
+                    Comparison links template (empty=auto-detect, placeholders: {{repository}}, {{base}}, {{target}}):
+                    Dependency bump changelog template (placeholders: {{dependency}}, {{version}}): Updated dependency `{{dependency}}` to v{{version}}
+                    Configure version settings? yes
+                    Select zero version (0.x.y) behavior: auto-promote-on-major - Major bump on 0.x promotes to 1.0.0
+                    Select none bump behavior: disallow - Reject changesets with none bump type
+                    Configure file filtering? yes
+                    Enter file patterns to exclude from change detection (one per line, empty line to finish):
+                    Ignore pattern: *.tmp
+                    Additional pattern:
+
+                    === Initialization Summary ===
+
+                    Directory: {}/.changeset (will be created)
+                      - .gitkeep file will be created
+
+                    Configuration to be written to [workspace.metadata.changeset]:
+                      commit = true
+                      tags = true
+                      keep_changesets = false
+                      tag_format = \"version-only\"
+                      changelog = \"per-package\"
+                      comparison_links = \"auto\"
+                      zero_version_behavior = \"auto-promote-on-major\"
+                      base_branch = \"develop\"
+                      none_bump_behavior = \"disallow\"
+                      commit_title_template = \"release: {{new-version}}\"
+                      changes_in_body = false
+                      ignored_files = [\"*.tmp\"]
+
+                    Proceed with initialization? [Y/n]"},
+                canonical.display()
+            ),
         );
         session.send_raw("y");
         session.wait_for_exit();
