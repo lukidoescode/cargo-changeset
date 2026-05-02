@@ -2,7 +2,9 @@ use std::borrow::Cow;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-use changeset_core::{BumpType, ChangeCategory, Changeset, PackageInfo, PackageRelease};
+use changeset_core::{
+    BumpType, ChangeCategory, Changeset, NoneBumpBehavior, PackageInfo, PackageRelease,
+};
 use indexmap::IndexSet;
 
 use crate::Result;
@@ -139,7 +141,9 @@ where
             Vec::new()
         };
 
-        let Some(releases) = self.collect_releases(&packages, input)? else {
+        let Some(releases) =
+            self.collect_releases(&packages, input, root_config.none_bump_behavior())?
+        else {
             return Ok(AddResult::Cancelled);
         };
 
@@ -203,6 +207,7 @@ where
         &self,
         packages: &[PackageInfo],
         input: &AddInput,
+        none_bump_behavior: NoneBumpBehavior,
     ) -> Result<Option<Vec<PackageRelease>>> {
         let mut releases = Vec::with_capacity(packages.len());
 
@@ -219,6 +224,19 @@ where
             };
 
             releases.push(PackageRelease::new(package.name().clone(), bump_type));
+        }
+
+        if none_bump_behavior == NoneBumpBehavior::Disallow {
+            let disallowed: Vec<String> = releases
+                .iter()
+                .filter(|r| r.bump_type().is_noop())
+                .map(|r| r.name().clone())
+                .collect();
+            if !disallowed.is_empty() {
+                return Err(OperationError::NoneBumpDisallowed {
+                    packages: disallowed,
+                });
+            }
         }
 
         Ok(Some(releases))
@@ -1022,6 +1040,183 @@ mod tests {
             }
             _ => panic!("Expected AddResult::Created"),
         }
+    }
+
+    #[test]
+    fn none_bump_rejected_when_disallowed_explicit_bump() {
+        let root_config = changeset_project::RootChangesetConfig::default()
+            .with_none_bump_behavior(NoneBumpBehavior::Disallow);
+        let project_provider =
+            MockProjectProvider::single_package("my-crate", "1.0.0").with_root_config(root_config);
+        let writer = MockChangesetWriter::new();
+        let interaction = MockInteractionProvider::all_cancelled();
+
+        let operation = AddOperation::new(project_provider, writer, interaction);
+
+        let input = AddInput {
+            packages: vec!["my-crate".to_string()],
+            bump: Some(BumpType::None),
+            description: Some("Internal change".to_string()),
+            ..Default::default()
+        };
+
+        let result = operation.execute(Path::new("/any"), &input);
+
+        assert!(result.is_err());
+        let err = result.expect_err("should reject none bump when disallowed");
+        assert!(matches!(
+            err,
+            crate::OperationError::NoneBumpDisallowed { ref packages }
+            if packages == &["my-crate"]
+        ));
+    }
+
+    #[test]
+    fn none_bump_rejected_when_disallowed_package_bumps() {
+        let root_config = changeset_project::RootChangesetConfig::default()
+            .with_none_bump_behavior(NoneBumpBehavior::Disallow);
+        let project_provider =
+            MockProjectProvider::workspace(vec![("crate-a", "1.0.0"), ("crate-b", "2.0.0")])
+                .with_root_config(root_config);
+        let writer = MockChangesetWriter::new();
+        let interaction = MockInteractionProvider::all_cancelled();
+
+        let operation = AddOperation::new(project_provider, writer, interaction);
+
+        let mut package_bumps = HashMap::new();
+        package_bumps.insert("crate-a".to_string(), BumpType::None);
+        package_bumps.insert("crate-b".to_string(), BumpType::Patch);
+
+        let input = AddInput {
+            package_bumps,
+            description: Some("Some change".to_string()),
+            ..Default::default()
+        };
+
+        let result = operation.execute(Path::new("/any"), &input);
+
+        assert!(result.is_err());
+        let err = result.expect_err("should reject none bump when disallowed");
+        assert!(matches!(
+            err,
+            crate::OperationError::NoneBumpDisallowed { ref packages }
+            if packages == &["crate-a"]
+        ));
+    }
+
+    #[test]
+    fn none_bump_allowed_when_behavior_is_allow() {
+        let root_config = changeset_project::RootChangesetConfig::default()
+            .with_none_bump_behavior(NoneBumpBehavior::Allow);
+        let project_provider =
+            MockProjectProvider::single_package("my-crate", "1.0.0").with_root_config(root_config);
+        let writer = MockChangesetWriter::new();
+        let interaction = MockInteractionProvider::all_cancelled();
+
+        let operation = AddOperation::new(project_provider, writer, interaction);
+
+        let input = AddInput {
+            packages: vec!["my-crate".to_string()],
+            bump: Some(BumpType::None),
+            description: Some("Internal change".to_string()),
+            ..Default::default()
+        };
+
+        let result = operation
+            .execute(Path::new("/any"), &input)
+            .expect("none bump should be allowed when behavior is Allow");
+
+        assert!(matches!(result, AddResult::Created { .. }));
+    }
+
+    #[test]
+    fn none_bump_allowed_when_behavior_is_promote_to_patch() {
+        let project_provider = MockProjectProvider::single_package("my-crate", "1.0.0");
+        let writer = MockChangesetWriter::new();
+        let interaction = MockInteractionProvider::all_cancelled();
+
+        let operation = AddOperation::new(project_provider, writer, interaction);
+
+        let input = AddInput {
+            packages: vec!["my-crate".to_string()],
+            bump: Some(BumpType::None),
+            description: Some("Internal change".to_string()),
+            ..Default::default()
+        };
+
+        let result = operation
+            .execute(Path::new("/any"), &input)
+            .expect("none bump should be allowed when behavior is PromoteToPatch (default)");
+
+        assert!(matches!(result, AddResult::Created { .. }));
+    }
+
+    #[test]
+    fn mixed_bumps_with_none_rejected_when_disallowed() {
+        let root_config = changeset_project::RootChangesetConfig::default()
+            .with_none_bump_behavior(NoneBumpBehavior::Disallow);
+        let project_provider = MockProjectProvider::workspace(vec![
+            ("crate-a", "1.0.0"),
+            ("crate-b", "2.0.0"),
+            ("crate-c", "3.0.0"),
+        ])
+        .with_root_config(root_config);
+        let writer = MockChangesetWriter::new();
+        let interaction = MockInteractionProvider::all_cancelled();
+
+        let operation = AddOperation::new(project_provider, writer, interaction);
+
+        let mut package_bumps = HashMap::new();
+        package_bumps.insert("crate-a".to_string(), BumpType::None);
+        package_bumps.insert("crate-b".to_string(), BumpType::Patch);
+        package_bumps.insert("crate-c".to_string(), BumpType::None);
+
+        let input = AddInput {
+            package_bumps,
+            description: Some("Some change".to_string()),
+            ..Default::default()
+        };
+
+        let result = operation.execute(Path::new("/any"), &input);
+
+        assert!(result.is_err());
+        let err = result.expect_err("should reject none bumps when disallowed");
+        match err {
+            crate::OperationError::NoneBumpDisallowed { ref packages } => {
+                assert_eq!(packages.len(), 2);
+                assert!(packages.contains(&"crate-a".to_string()));
+                assert!(packages.contains(&"crate-c".to_string()));
+            }
+            _ => panic!("Expected NoneBumpDisallowed error, got: {err:?}"),
+        }
+    }
+
+    #[test]
+    fn none_bump_rejected_when_disallowed_interactive() {
+        let packages = vec![make_package("my-crate", "1.0.0")];
+        let root_config = changeset_project::RootChangesetConfig::default()
+            .with_none_bump_behavior(NoneBumpBehavior::Disallow);
+        let project_provider =
+            MockProjectProvider::single_package("my-crate", "1.0.0").with_root_config(root_config);
+        let writer = MockChangesetWriter::new();
+        let interaction = MockInteractionProvider {
+            package_selection: PackageSelection::Selected(packages),
+            bump_selections: std::sync::Mutex::new(vec![BumpType::None]),
+            category_selection: CategorySelection::Selected(ChangeCategory::Changed),
+            description: DescriptionInput::Provided("test".to_string()),
+        };
+
+        let operation = AddOperation::new(project_provider, writer, interaction);
+
+        let result = operation.execute(Path::new("/any"), &AddInput::default());
+
+        assert!(result.is_err());
+        let err = result.expect_err("should reject none bump from interactive selection");
+        assert!(matches!(
+            err,
+            crate::OperationError::NoneBumpDisallowed { ref packages }
+            if packages == &["my-crate"]
+        ));
     }
 
     #[test]

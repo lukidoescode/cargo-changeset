@@ -29,12 +29,16 @@ pub(super) fn run(args: AddArgs, start_path: &Path, writer: &dyn CliWriter) -> R
         );
     }
 
+    let (root_config, _) = project_provider.load_configs(&project)?;
+    let none_bump_behavior = root_config.none_bump_behavior();
+
     let changeset_writer = FileSystemChangesetIO::new(project.root());
 
     let input = build_input(&args)?;
 
     let result = if is_interactive() {
-        let interaction_provider = TerminalInteractionProvider::new(args.editor);
+        let interaction_provider =
+            TerminalInteractionProvider::new(args.editor, none_bump_behavior);
         let operation = AddOperation::new(project_provider, changeset_writer, interaction_provider);
         operation.execute(start_path, &input)?
     } else {
