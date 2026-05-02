@@ -11,7 +11,7 @@ const ARROW_DOWN: &str = "\x1b[B";
 const ENTER: &str = "\r";
 const ESC: &str = "\x1b";
 const TIMEOUT: Duration = Duration::from_secs(30);
-const KEY_DELAY: Duration = Duration::from_millis(10);
+const KEY_DELAY: Duration = Duration::from_millis(20);
 const POLL_INTERVAL: Duration = Duration::from_millis(10);
 
 pub struct TerminalSessionBuilder<'a> {
