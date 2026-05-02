@@ -137,6 +137,36 @@ impl TerminalSession {
         assert_eq!(actual, expected_trimmed, "{message}");
     }
 
+    pub fn assert_screen_starts_with(&mut self, message: &str, prefix: &str) {
+        let actual = self.screen();
+        let prefix_trimmed = prefix
+            .lines()
+            .map(str::trim_end)
+            .collect::<Vec<_>>()
+            .join("\n")
+            .trim_end_matches('\n')
+            .to_owned();
+        assert!(
+            actual.starts_with(&prefix_trimmed),
+            "{message}\nexpected screen to start with:\n{prefix_trimmed}\n\nbut got:\n{actual}"
+        );
+    }
+
+    pub fn assert_screen_ends_with(&mut self, message: &str, suffix: &str) {
+        let actual = self.screen();
+        let suffix_trimmed = suffix
+            .lines()
+            .map(str::trim_end)
+            .collect::<Vec<_>>()
+            .join("\n")
+            .trim_end_matches('\n')
+            .to_owned();
+        assert!(
+            actual.ends_with(&suffix_trimmed),
+            "{message}\nexpected screen to end with:\n{suffix_trimmed}\n\nbut got:\n{actual}"
+        );
+    }
+
     pub fn select_item(&mut self, index: usize) -> &mut Self {
         for _ in 0..=index {
             self.pty.send(ARROW_DOWN).expect("send arrow-down key");

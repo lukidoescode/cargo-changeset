@@ -1363,7 +1363,7 @@ mod interactive_add_tests {
                 Additional pattern:"},
         );
         session.type_line("charts/shared/**");
-        session.wait_for("Additional pattern: charts/shared/**");
+        session.wait_for("charts/shared/**\nAdditional pattern:");
         session.assert_screen(
             "third influence pattern prompt",
             indoc! {"
