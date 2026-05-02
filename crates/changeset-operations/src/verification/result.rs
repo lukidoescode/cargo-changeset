@@ -25,7 +25,8 @@ pub struct VerificationResult {
 }
 
 impl VerificationResult {
-    pub(crate) fn new(
+    #[must_use]
+    pub fn new(
         affected_packages: Vec<PackageInfo>,
         transitive_dependents: HashSet<String>,
         project_files: Vec<PathBuf>,
@@ -43,19 +44,19 @@ impl VerificationResult {
         }
     }
 
-    pub(crate) fn insert_covered_package(&mut self, name: String) {
+    pub fn insert_covered_package(&mut self, name: String) {
         self.covered_packages.insert(name);
     }
 
-    pub(crate) fn set_uncovered_packages(&mut self, uncovered: Vec<PackageInfo>) {
+    pub fn set_uncovered_packages(&mut self, uncovered: Vec<PackageInfo>) {
         self.uncovered_packages = uncovered;
     }
 
-    pub(crate) fn set_deleted_changesets(&mut self, deleted: Vec<PathBuf>) {
+    pub fn set_deleted_changesets(&mut self, deleted: Vec<PathBuf>) {
         self.deleted_changesets = deleted;
     }
 
-    pub(crate) fn set_none_bump_violations(&mut self, violations: Vec<String>) {
+    pub fn set_none_bump_violations(&mut self, violations: Vec<String>) {
         self.none_bump_violations = violations;
     }
 

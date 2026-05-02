@@ -7,9 +7,9 @@ use changeset_operations::providers::{
 use changeset_operations::traits::ProjectProvider;
 
 use crate::error::Result;
-use crate::output::{PlainTextStatusFormatter, StatusFormatter};
+use crate::output::{CliWriter, PlainTextStatusFormatter, StatusFormatter};
 
-pub(crate) fn run(start_path: &Path) -> Result<()> {
+pub(super) fn run(start_path: &Path, writer: &dyn CliWriter) -> Result<()> {
     let project_provider = FileSystemProjectProvider::new();
     let project = project_provider.discover_project(start_path)?;
     let changeset_reader = FileSystemChangesetIO::new(project.root());
@@ -19,7 +19,7 @@ pub(crate) fn run(start_path: &Path) -> Result<()> {
     let output = operation.execute(start_path)?;
 
     let formatter = PlainTextStatusFormatter;
-    print!("{}", formatter.format_status(&output));
+    writer.raw(&formatter.format_status(&output));
 
     Ok(())
 }

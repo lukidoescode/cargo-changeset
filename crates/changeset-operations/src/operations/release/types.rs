@@ -174,12 +174,8 @@ pub struct ChangelogUpdate {
 }
 
 impl ChangelogUpdate {
-    pub(crate) fn new(
-        path: PathBuf,
-        package: Option<String>,
-        version: Version,
-        created: bool,
-    ) -> Self {
+    #[must_use]
+    pub fn new(path: PathBuf, package: Option<String>, version: Version, created: bool) -> Self {
         Self {
             path,
             package,
@@ -198,7 +194,8 @@ pub struct CommitResult {
 }
 
 impl CommitResult {
-    pub(crate) fn new(sha: String, message: String) -> Self {
+    #[must_use]
+    pub fn new(sha: String, message: String) -> Self {
         Self { sha, message }
     }
 }
@@ -212,7 +209,8 @@ pub struct TagResult {
 }
 
 impl TagResult {
-    pub(crate) fn new(name: String, target_sha: String) -> Self {
+    #[must_use]
+    pub fn new(name: String, target_sha: String) -> Self {
         Self { name, target_sha }
     }
 }
@@ -228,7 +226,8 @@ pub struct GitOperationResult {
 }
 
 impl GitOperationResult {
-    pub(crate) fn new(
+    #[must_use]
+    pub fn new(
         commit: Option<CommitResult>,
         tags_created: Vec<TagResult>,
         changesets_deleted: Vec<PathBuf>,
@@ -257,7 +256,7 @@ pub struct ReleaseOutput {
 }
 
 impl ReleaseOutput {
-    pub(crate) fn new(
+    pub fn new(
         planned_releases: Vec<PackageVersion>,
         unchanged_packages: Vec<String>,
         changesets_consumed: Vec<PathBuf>,

@@ -17,6 +17,7 @@ use changeset_manifest::{
 use changeset_operations::OperationError;
 
 use crate::error::Result;
+use crate::output::StdoutCliWriter;
 
 #[derive(Args)]
 pub(crate) struct AddArgs {
@@ -361,24 +362,37 @@ Use 'cargo changeset manage' to configure these files."
 
 impl Commands {
     pub(crate) fn execute(self, start_path: &Path) -> (Result<()>, ExecuteResult) {
+        let writer = StdoutCliWriter;
         match self {
-            Self::Add(args) => (add::run(args, start_path), ExecuteResult { quiet: false }),
-            Self::Verify(args) => {
-                let quiet = args.quiet;
-                (verify::run(args, start_path), ExecuteResult { quiet })
-            }
-            Self::Status => (status::run(start_path), ExecuteResult { quiet: false }),
-            Self::Release(args) => (
-                release::run(args, start_path),
+            Self::Add(args) => (
+                add::run(args, start_path, &writer),
                 ExecuteResult { quiet: false },
             ),
-            Self::Init(args) => (init::run(args, start_path), ExecuteResult { quiet: false }),
+            Self::Verify(args) => {
+                let quiet = args.quiet;
+                (
+                    verify::run(args, start_path, &writer),
+                    ExecuteResult { quiet },
+                )
+            }
+            Self::Status => (
+                status::run(start_path, &writer),
+                ExecuteResult { quiet: false },
+            ),
+            Self::Release(args) => (
+                release::run(args, start_path, &writer),
+                ExecuteResult { quiet: false },
+            ),
+            Self::Init(args) => (
+                init::run(args, start_path, &writer),
+                ExecuteResult { quiet: false },
+            ),
             Self::Manage(args) => (
-                manage::run(args, start_path),
+                manage::run(args, start_path, &writer),
                 ExecuteResult { quiet: false },
             ),
             Self::AdditionalPackages(args) => (
-                additional_packages::run(args, start_path),
+                additional_packages::run(args, start_path, &writer),
                 ExecuteResult { quiet: false },
             ),
         }

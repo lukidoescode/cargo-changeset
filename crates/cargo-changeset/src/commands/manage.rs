@@ -17,6 +17,7 @@ use super::{ManageArgs, ManageCommand, ManageGraduationArgs, ManagePrereleaseArg
 use crate::environment::is_interactive;
 use crate::error::{CliError, Result};
 use crate::interaction::select_from_options;
+use crate::output::CliWriter;
 
 struct TerminalManageInteractionProvider;
 
@@ -153,14 +154,22 @@ impl GraduationInteractionProvider for TerminalManageInteractionProvider {
     }
 }
 
-pub(crate) fn run(args: ManageArgs, start_path: &Path) -> Result<()> {
+pub(super) fn run(args: ManageArgs, start_path: &Path, writer: &dyn CliWriter) -> Result<()> {
     match args.command {
-        ManageCommand::Prerelease(prerelease_args) => run_prerelease(prerelease_args, start_path),
-        ManageCommand::Graduation(graduation_args) => run_graduation(graduation_args, start_path),
+        ManageCommand::Prerelease(prerelease_args) => {
+            run_prerelease(prerelease_args, start_path, writer)
+        }
+        ManageCommand::Graduation(graduation_args) => {
+            run_graduation(graduation_args, start_path, writer)
+        }
     }
 }
 
-fn run_prerelease(args: ManagePrereleaseArgs, start_path: &Path) -> Result<()> {
+fn run_prerelease(
+    args: ManagePrereleaseArgs,
+    start_path: &Path,
+    writer: &dyn CliWriter,
+) -> Result<()> {
     let no_flags_provided =
         args.add.is_empty() && args.remove.is_empty() && args.graduate.is_empty() && !args.list;
 
@@ -185,11 +194,15 @@ fn run_prerelease(args: ManagePrereleaseArgs, start_path: &Path) -> Result<()> {
         operation.execute(start_path, &input)?
     };
 
-    print_prerelease_events(&events);
+    print_prerelease_events(&events, writer);
     Ok(())
 }
 
-fn run_graduation(args: ManageGraduationArgs, start_path: &Path) -> Result<()> {
+fn run_graduation(
+    args: ManageGraduationArgs,
+    start_path: &Path,
+    writer: &dyn CliWriter,
+) -> Result<()> {
     let no_flags_provided = args.add.is_empty() && args.remove.is_empty() && !args.list;
 
     let events = if no_flags_provided {
@@ -213,82 +226,175 @@ fn run_graduation(args: ManageGraduationArgs, start_path: &Path) -> Result<()> {
         operation.execute(start_path, &input)?
     };
 
-    print_graduation_events(&events);
+    print_graduation_events(&events, writer);
     Ok(())
 }
 
-fn print_prerelease_events(events: &[PrereleaseEvent]) {
+fn print_prerelease_events(events: &[PrereleaseEvent], writer: &dyn CliWriter) {
     for event in events {
         match event {
             PrereleaseEvent::DisplayState(items) => {
-                println!();
+                writer.blank();
                 if items.is_empty() {
-                    println!("(No packages in pre-release mode)");
+                    writer.line("(No packages in pre-release mode)");
                 } else {
-                    println!("Pre-release configuration (.changeset/pre-release.toml):");
+                    writer.heading("Pre-release configuration (.changeset/pre-release.toml):");
                     let mut sorted = items.clone();
                     sorted.sort_by(|a, b| a.0.cmp(&b.0));
                     for (crate_name, tag) in &sorted {
-                        println!("  {crate_name}: {tag}");
+                        writer.indented(&format!("{crate_name}: {tag}"));
                     }
                 }
-                println!();
+                writer.blank();
             }
             PrereleaseEvent::Added { crate_name, tag } => {
-                println!("Added {crate_name} to pre-release configuration with tag '{tag}'");
+                writer.line(&format!(
+                    "Added {crate_name} to pre-release configuration with tag '{tag}'"
+                ));
             }
             PrereleaseEvent::Removed { crate_name } => {
-                println!("Removed {crate_name} from pre-release configuration");
+                writer.line(&format!(
+                    "Removed {crate_name} from pre-release configuration"
+                ));
             }
             PrereleaseEvent::MovedToGraduation { crate_name } => {
-                println!("Moved {crate_name} to graduation queue");
+                writer.line(&format!("Moved {crate_name} to graduation queue"));
             }
             PrereleaseEvent::AllPackagesInPrerelease => {
-                println!("All packages are already in pre-release mode.");
+                writer.line("All packages are already in pre-release mode.");
             }
             PrereleaseEvent::NoPrereleasePackages => {
-                println!("No packages are currently in pre-release mode.");
+                writer.line("No packages are currently in pre-release mode.");
             }
             PrereleaseEvent::NoEligibleForGraduation => {
-                println!(
-                    "No eligible packages for graduation (must be 0.x stable version and not already queued)."
+                writer.line(
+                    "No eligible packages for graduation (must be 0.x stable version and not already queued).",
                 );
             }
         }
     }
 }
 
-fn print_graduation_events(events: &[GraduationEvent]) {
+fn print_graduation_events(events: &[GraduationEvent], writer: &dyn CliWriter) {
     for event in events {
         match event {
             GraduationEvent::DisplayState(items) => {
-                println!();
+                writer.blank();
                 if items.is_empty() {
-                    println!("(No packages queued for graduation)");
+                    writer.line("(No packages queued for graduation)");
                 } else {
-                    println!("Graduation queue (.changeset/graduation.toml):");
+                    writer.heading("Graduation queue (.changeset/graduation.toml):");
                     let mut sorted = items.clone();
                     sorted.sort();
                     for crate_name in &sorted {
-                        println!("  - {crate_name}");
+                        writer.list_item(crate_name);
                     }
                 }
-                println!();
+                writer.blank();
             }
             GraduationEvent::Added { crate_name } => {
-                println!("Added {crate_name} to graduation queue");
+                writer.line(&format!("Added {crate_name} to graduation queue"));
             }
             GraduationEvent::Removed { crate_name } => {
-                println!("Removed {crate_name} from graduation queue");
+                writer.line(&format!("Removed {crate_name} from graduation queue"));
             }
             GraduationEvent::NoEligibleForGraduation => {
-                println!(
-                    "No eligible packages for graduation (must be 0.x stable version and not already queued)."
+                writer.line(
+                    "No eligible packages for graduation (must be 0.x stable version and not already queued).",
                 );
             }
             GraduationEvent::NoGraduationPackages => {
-                println!("No packages are currently queued for graduation.");
+                writer.line("No packages are currently queued for graduation.");
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use changeset_operations::operations::{GraduationEvent, PrereleaseEvent};
+
+    use super::{print_graduation_events, print_prerelease_events};
+    use crate::output::{BufferCliWriter, OutputEntry};
+
+    #[test]
+    fn prerelease_display_state_empty_shows_no_packages_message() {
+        let writer = BufferCliWriter::new();
+        let events = vec![PrereleaseEvent::DisplayState(vec![])];
+
+        print_prerelease_events(&events, &writer);
+
+        let text = writer.stdout_text();
+        assert!(text.contains("(No packages in pre-release mode)"));
+    }
+
+    #[test]
+    fn prerelease_display_state_with_entries_shows_sorted() {
+        let writer = BufferCliWriter::new();
+        let events = vec![PrereleaseEvent::DisplayState(vec![
+            ("z-crate".to_string(), "beta".to_string()),
+            ("a-crate".to_string(), "alpha".to_string()),
+        ])];
+
+        print_prerelease_events(&events, &writer);
+
+        let text = writer.stdout_text();
+        assert!(text.contains("Pre-release configuration"));
+        let a_pos = text.find("a-crate").expect("a-crate present");
+        let z_pos = text.find("z-crate").expect("z-crate present");
+        assert!(a_pos < z_pos, "entries should be sorted");
+    }
+
+    #[test]
+    fn prerelease_added_shows_confirmation() {
+        let writer = BufferCliWriter::new();
+        let events = vec![PrereleaseEvent::Added {
+            crate_name: "my-crate".to_string(),
+            tag: "rc".to_string(),
+        }];
+
+        print_prerelease_events(&events, &writer);
+
+        let text = writer.stdout_text();
+        assert!(text.contains("Added my-crate to pre-release configuration with tag 'rc'"));
+    }
+
+    #[test]
+    fn graduation_display_state_empty() {
+        let writer = BufferCliWriter::new();
+        let events = vec![GraduationEvent::DisplayState(vec![])];
+
+        print_graduation_events(&events, &writer);
+
+        let text = writer.stdout_text();
+        assert!(text.contains("(No packages queued for graduation)"));
+    }
+
+    #[test]
+    fn graduation_display_state_with_entries_shows_sorted_list_items() {
+        let writer = BufferCliWriter::new();
+        let events = vec![GraduationEvent::DisplayState(vec![
+            "z-pkg".to_string(),
+            "a-pkg".to_string(),
+        ])];
+
+        print_graduation_events(&events, &writer);
+
+        let entries = writer.stdout_entries();
+        assert!(entries.contains(&OutputEntry::ListItem("a-pkg".to_string())));
+        assert!(entries.contains(&OutputEntry::ListItem("z-pkg".to_string())));
+    }
+
+    #[test]
+    fn graduation_added_shows_confirmation() {
+        let writer = BufferCliWriter::new();
+        let events = vec![GraduationEvent::Added {
+            crate_name: "my-lib".to_string(),
+        }];
+
+        print_graduation_events(&events, &writer);
+
+        let text = writer.stdout_text();
+        assert!(text.contains("Added my-lib to graduation queue"));
     }
 }

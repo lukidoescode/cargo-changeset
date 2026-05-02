@@ -12,8 +12,9 @@ use super::AddArgs;
 use crate::environment::is_interactive;
 use crate::error::{CliError, Result};
 use crate::interaction::{NonInteractiveProvider, TerminalInteractionProvider};
+use crate::output::CliWriter;
 
-pub(super) fn run(args: AddArgs, start_path: &Path) -> Result<()> {
+pub(super) fn run(args: AddArgs, start_path: &Path, writer: &dyn CliWriter) -> Result<()> {
     validate_package_bump_args(&args.package_bumps)?;
 
     let project_provider = FileSystemProjectProvider::new();
@@ -22,7 +23,10 @@ pub(super) fn run(args: AddArgs, start_path: &Path) -> Result<()> {
     let is_single_package =
         *project.kind() == ProjectKind::SinglePackage && args.packages.is_empty();
     if is_single_package && let Some(pkg) = project.packages().first() {
-        println!("Using package: {} ({})", pkg.name(), pkg.version());
+        writer.message(
+            crate::output::MessageLevel::Info,
+            &format!("Using package: {} ({})", pkg.name(), pkg.version()),
+        );
     }
 
     let changeset_writer = FileSystemChangesetIO::new(project.root());
@@ -39,33 +43,41 @@ pub(super) fn run(args: AddArgs, start_path: &Path) -> Result<()> {
         operation.execute(start_path, &input)?
     };
 
+    print_add_result(&result, writer);
+    Ok(())
+}
+
+fn print_add_result(result: &AddResult, writer: &dyn CliWriter) {
     match result {
         AddResult::Created {
             changeset,
             file_path,
             uncovered_dependents,
         } => {
-            println!();
-            println!("Created changeset: {}", file_path.display());
-            println!();
-            println!("Summary: {}", changeset.summary());
-            println!("Category: {}", changeset.category());
-            println!();
-            println!("Releases:");
+            writer.blank();
+            writer.line(&format!("Created changeset: {}", file_path.display()));
+            writer.blank();
+            writer.line(&format!("Summary: {}", changeset.summary()));
+            writer.line(&format!("Category: {}", changeset.category()));
+            writer.blank();
+            writer.heading("Releases:");
             for release in changeset.releases() {
-                println!("  - {}: {}", release.name(), release.bump_type());
+                writer.list_item(&format!("{}: {}", release.name(), release.bump_type()));
             }
             if !uncovered_dependents.is_empty() {
-                println!();
-                println!(
-                    "Info: The following transitive dependents are not covered by this changeset:"
+                writer.blank();
+                writer.message(
+                    crate::output::MessageLevel::Info,
+                    "Info: The following transitive dependents are not covered by this changeset:",
                 );
-                println!("  {}", uncovered_dependents.join(", "));
-                println!("Consider creating separate changesets for these packages.");
+                writer.indented(&uncovered_dependents.join(", "));
+                writer.message(
+                    crate::output::MessageLevel::Hint,
+                    "Consider creating separate changesets for these packages.",
+                );
             }
-            Ok(())
         }
-        AddResult::Cancelled | AddResult::NoPackages => Ok(()),
+        AddResult::Cancelled | AddResult::NoPackages => {}
     }
 }
 
@@ -136,10 +148,14 @@ fn read_description_from_stdin() -> Result<String> {
 
 #[cfg(test)]
 mod tests {
-    use changeset_core::BumpType;
+    use std::path::PathBuf;
 
-    use super::{parse_package_bump, parse_package_bumps};
+    use changeset_core::{BumpType, ChangeCategory, Changeset, PackageRelease};
+    use changeset_operations::operations::AddResult;
+
+    use super::{parse_package_bump, parse_package_bumps, print_add_result};
     use crate::error::CliError;
+    use crate::output::{BufferCliWriter, MessageLevel, OutputEntry};
 
     #[test]
     fn parse_package_bump_valid_major() {
@@ -220,5 +236,72 @@ mod tests {
         let map = parse_package_bumps(&[]).expect("should parse");
 
         assert!(map.is_empty());
+    }
+
+    #[test]
+    fn created_changeset_output_includes_summary_and_releases() {
+        let writer = BufferCliWriter::new();
+        let changeset = Changeset::new(
+            "Fix login bug".to_string(),
+            vec![PackageRelease::new("my-crate".to_string(), BumpType::Patch)],
+            ChangeCategory::Fixed,
+        );
+        let result = AddResult::Created {
+            changeset,
+            file_path: PathBuf::from(".changeset/abc123.md"),
+            uncovered_dependents: vec![],
+        };
+
+        print_add_result(&result, &writer);
+
+        let text = writer.stdout_text();
+        assert!(text.contains("Created changeset: .changeset/abc123.md"));
+        assert!(text.contains("Summary: Fix login bug"));
+        assert!(text.contains("Category: Fixed"));
+        assert!(text.contains("my-crate: patch"));
+    }
+
+    #[test]
+    fn created_changeset_with_uncovered_dependents_shows_warning() {
+        let writer = BufferCliWriter::new();
+        let changeset = Changeset::new(
+            "Update API".to_string(),
+            vec![PackageRelease::new("core".to_string(), BumpType::Minor)],
+            ChangeCategory::Changed,
+        );
+        let result = AddResult::Created {
+            changeset,
+            file_path: PathBuf::from(".changeset/def456.md"),
+            uncovered_dependents: vec!["pkg-a".to_string(), "pkg-b".to_string()],
+        };
+
+        print_add_result(&result, &writer);
+
+        let entries = writer.stdout_entries();
+        assert!(
+            entries.contains(&OutputEntry::Message {
+                level: MessageLevel::Info,
+                text:
+                    "Info: The following transitive dependents are not covered by this changeset:"
+                        .to_string(),
+            })
+        );
+        assert!(entries.contains(&OutputEntry::Indented("pkg-a, pkg-b".to_string())));
+    }
+
+    #[test]
+    fn cancelled_produces_no_output() {
+        let writer = BufferCliWriter::new();
+        print_add_result(&AddResult::Cancelled, &writer);
+
+        assert!(writer.stdout_entries().is_empty());
+    }
+
+    #[test]
+    fn no_packages_produces_no_output() {
+        let writer = BufferCliWriter::new();
+        print_add_result(&AddResult::NoPackages, &writer);
+
+        assert!(writer.stdout_entries().is_empty());
     }
 }
