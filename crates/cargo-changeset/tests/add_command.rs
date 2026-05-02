@@ -15,6 +15,8 @@ fn create_workspace_with_underscored_crate() -> TempDir {
 }
 
 mod non_interactive {
+    use indoc::indoc;
+
     use super::*;
 
     #[test]
@@ -410,6 +412,91 @@ mod non_interactive {
         assert!(
             content.contains("Internal refactoring"),
             "should contain message"
+        );
+    }
+
+    #[test]
+    fn add_with_bump_none_rejected_when_disallowed() {
+        let workspace = WorkspaceBuilder::single_package("test-crate", "1.0.0")
+            .workspace_toml_extra("[package.metadata.changeset]\nnone-bump-behavior = \"disallow\"")
+            .build();
+
+        assert_cmd::cargo::cargo_bin_cmd!("cargo-changeset")
+            .arg("add")
+            .arg("--bump")
+            .arg("none")
+            .arg("-m")
+            .arg("Internal refactoring")
+            .current_dir(workspace.path())
+            .assert()
+            .failure()
+            .stdout(indoc! {"
+                Using package: test-crate (1.0.0)
+            "})
+            .stderr(indoc! {"
+                error: changesets with bump type 'none' are disallowed; affected packages: test-crate
+            "});
+    }
+
+    #[test]
+    fn add_with_package_bump_none_rejected_when_disallowed() {
+        let workspace = WorkspaceBuilder::virtual_workspace()
+            .crate_member("crate-a", "0.1.0")
+            .crate_member("crate-b", "0.2.0")
+            .workspace_toml_extra(
+                "[workspace.metadata.changeset]\nnone-bump-behavior = \"disallow\"",
+            )
+            .build();
+
+        assert_cmd::cargo::cargo_bin_cmd!("cargo-changeset")
+            .arg("add")
+            .arg("--package-bump")
+            .arg("crate-a:none")
+            .arg("-m")
+            .arg("Internal refactoring")
+            .current_dir(workspace.path())
+            .assert()
+            .failure()
+            .stdout("")
+            .stderr(indoc! {"
+                error: changesets with bump type 'none' are disallowed; affected packages: crate-a
+            "});
+    }
+
+    #[test]
+    fn add_with_bump_patch_succeeds_when_none_disallowed() {
+        let workspace = WorkspaceBuilder::single_package("test-crate", "1.0.0")
+            .workspace_toml_extra("[package.metadata.changeset]\nnone-bump-behavior = \"disallow\"")
+            .build();
+
+        assert_cmd::cargo::cargo_bin_cmd!("cargo-changeset")
+            .arg("add")
+            .arg("--bump")
+            .arg("patch")
+            .arg("-m")
+            .arg("Fix a bug")
+            .current_dir(workspace.path())
+            .assert()
+            .success()
+            .stderr("");
+
+        let changeset_dir = workspace.path().join(".changeset/changesets");
+        let files: Vec<_> = fs::read_dir(&changeset_dir)
+            .expect("read dir")
+            .filter_map(|e| e.ok())
+            .filter(|e| e.path().extension().is_some_and(|ext| ext == "md"))
+            .collect();
+        assert_eq!(files.len(), 1, "should have one changeset file");
+
+        let content = fs::read_to_string(files[0].path()).expect("read changeset file");
+        assert_eq!(
+            content,
+            indoc! {"
+                ---
+                test-crate: patch
+                ---
+                Fix a bug
+            "},
         );
     }
 
@@ -1087,6 +1174,106 @@ MOCK_EDITOR_EOF
             content.contains("Description from mock editor"),
             "File should contain editor content: {content}"
         );
+    }
+
+    #[test]
+    fn interactive_bump_type_menu_hides_none_when_disallowed() {
+        let workspace = WorkspaceBuilder::virtual_workspace()
+            .crate_member("crate-a", "0.1.0")
+            .crate_member("crate-b", "0.2.0")
+            .workspace_toml_extra(
+                "[workspace.metadata.changeset]\nnone-bump-behavior = \"disallow\"",
+            )
+            .build();
+        let mut session = spawn_add_in_workspace(&workspace);
+
+        session.wait_for("Select packages to include in changeset");
+        session.toggle_item(0);
+        session.confirm();
+        session.wait_for("Select bump type for 'crate-a'");
+        session.assert_screen(
+            "bump type menu without none option",
+            indoc! {"
+                Select packages to include in changeset: crate-a (0.1.0)
+                Select bump type for 'crate-a':
+                > patch - Bug fixes (backwards compatible)
+                  minor - New features (backwards compatible)
+                  major - Breaking changes"},
+        );
+
+        session.cancel();
+        session.wait_for_exit();
+    }
+
+    #[test]
+    fn interactive_full_flow_with_none_disallowed() {
+        let workspace = WorkspaceBuilder::single_package("test-crate", "1.0.0")
+            .workspace_toml_extra("[package.metadata.changeset]\nnone-bump-behavior = \"disallow\"")
+            .build();
+        let mut session = spawn_add_in_workspace(&workspace);
+
+        session.wait_for("Select bump type for 'test-crate'");
+        session.assert_screen(
+            "single-crate bump type menu without none",
+            indoc! {"
+                Using package: test-crate (1.0.0)
+                Select bump type for 'test-crate':
+                > patch - Bug fixes (backwards compatible)
+                  minor - New features (backwards compatible)
+                  major - Breaking changes"},
+        );
+        session.confirm();
+
+        session.wait_for("Select change category");
+        session.assert_screen(
+            "category menu after bump type",
+            indoc! {"
+                Using package: test-crate (1.0.0)
+                Select bump type for 'test-crate': patch - Bug fixes (backwards compatible)
+                Select change category:
+                > changed - General changes (default)
+                  added - New features
+                  fixed - Bug fixes
+                  deprecated - Deprecated features
+                  removed - Removed features
+                  security - Security fixes"},
+        );
+        session.confirm();
+
+        session.wait_for("Enter description (press Enter 3 times to finish):");
+        session.assert_screen(
+            "description prompt",
+            indoc! {"
+                Using package: test-crate (1.0.0)
+                Select bump type for 'test-crate': patch - Bug fixes (backwards compatible)
+                Select change category: changed - General changes (default)
+
+                Enter description (press Enter 3 times to finish):"},
+        );
+        session.type_line("Test with none disallowed");
+        session.type_line("");
+        session.type_line("");
+
+        session.wait_for("Created changeset");
+        session.wait_for_exit();
+
+        let changeset_dir = workspace.path().join(".changeset/changesets");
+        assert!(
+            changeset_dir.exists(),
+            ".changeset/changesets directory should exist"
+        );
+
+        let files: Vec<_> = fs::read_dir(&changeset_dir)
+            .expect("read dir")
+            .filter_map(|e| e.ok())
+            .filter(|e| e.path().extension().is_some_and(|ext| ext == "md"))
+            .collect();
+        assert_eq!(files.len(), 1, "should have one changeset file");
+
+        let content = fs::read_to_string(files[0].path()).expect("read file");
+        assert!(content.contains("test-crate"));
+        assert!(content.contains("patch"));
+        assert!(content.contains("Test with none disallowed"));
     }
 
     #[test]
