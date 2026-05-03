@@ -1,6 +1,9 @@
 name: Publish Docker Image
 
 on:
+  push:
+    tags:
+      - "cargo-changeset@v*"
   workflow_dispatch:
     inputs:
       tag:
