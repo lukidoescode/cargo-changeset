@@ -26,7 +26,16 @@ RUN cargo build --release --package cargo-changeset
 
 FROM alpine:3.21
 
-RUN apk add --no-cache git su-exec
+RUN apk add --no-cache git su-exec curl gcc musl-dev
+
+ENV RUSTUP_HOME="/usr/local/rustup" \
+    CARGO_HOME="/usr/local/cargo" \
+    PATH="/usr/local/cargo/bin:${PATH}"
+
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | \
+    sh -s -- -y --profile minimal --default-toolchain stable && \
+    chmod -R a+rX /usr/local/rustup /usr/local/cargo && \
+    cargo --version
 
 RUN addgroup -g 1000 changeset && \
     adduser -u 1000 -G changeset -h /home/changeset -s /bin/sh -D changeset

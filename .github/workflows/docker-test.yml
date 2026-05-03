@@ -91,3 +91,19 @@ jobs:
             cargo-changeset-test release --dry-run
 
           test -z "$(git status --porcelain)"
+
+      - name: Test release — non-dry-run (exercises lockfile update)
+        run: |
+          cd .github/test-fixtures/workspace
+
+          docker run --rm \
+            -v "$(pwd):/workspace" -w /workspace \
+            -e GIT_AUTHOR_NAME="Test" -e GIT_AUTHOR_EMAIL="test@test.com" \
+            -e GIT_COMMITTER_NAME="Test" -e GIT_COMMITTER_EMAIL="test@test.com" \
+            cargo-changeset-test release
+
+          # Verify Cargo.lock was created by the lockfile update step
+          test -f Cargo.lock
+
+          # Verify a release commit was created (commit message contains the version tag)
+          git log --oneline -1 | grep -q "crate-a@v"
