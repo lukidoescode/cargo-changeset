@@ -31,10 +31,10 @@ changeset-core = { path = "crates/changeset-core", version = "0.0.4" }
 changeset-parse = { path = "crates/changeset-parse", version = "0.0.4" }
 changeset-git = { path = "crates/changeset-git", version = "0.0.4" }
 changeset-version = { path = "crates/changeset-version", version = "0.0.4" }
-changeset-project = { path = "crates/changeset-project", version = "0.1.3" }
+changeset-project = { path = "crates/changeset-project", version = "0.1.4" }
 changeset-changelog = { path = "crates/changeset-changelog", version = "0.0.4" }
-changeset-operations = { path = "crates/changeset-operations", version = "0.2.0" }
-changeset-manifest = { path = "crates/changeset-manifest", version = "0.0.4" }
+changeset-operations = { path = "crates/changeset-operations", version = "0.2.1" }
+changeset-manifest = { path = "crates/changeset-manifest", version = "0.0.5" }
 changeset-saga = { path = "crates/changeset-saga", version = "0.0.2" }
 
 # External dependencies

@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.1] - 2026-05-03
+### Added
+
+- **changeset-manifest**: Update dependency versions in `[target.'...'.dependencies]`, `[target.'...'.dev-dependencies]`, and `[target.'...'.build-dependencies]` sections
+- **cargo-changeset**: Add end-to-end tests for target-specific dependency version updates during release
+- **changeset-project**: Support `[target.'...'.dependencies]` and `[target.'...'.build-dependencies]` sections in the workspace dependency graph
+- **changeset-operations**: Add integration tests for target-specific dependency handling during release
+
+### Changed
+
+- **changeset-manifest**: Handle simple string dependency entries during version updates
+- **cargo-changeset**: Handle simple string dependency entries during version updates
+
 ## [0.2.0] - 2026-05-03
 ### Added
 
@@ -219,3 +232,5 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 [0.1.5]: https://github.com/lukidoescode/cargo-changeset/compare/v0.1.4...v0.1.5
 
 [0.2.0]: https://github.com/lukidoescode/cargo-changeset/compare/v0.1.5...v0.2.0
+
+[0.2.1]: https://github.com/lukidoescode/cargo-changeset/compare/v0.2.0...v0.2.1
