@@ -18,18 +18,30 @@ pub(crate) struct CargoManifest {
     pub(crate) dependencies: Option<HashMap<String, DependencyEntry>>,
     #[serde(default, rename = "build-dependencies")]
     pub(crate) build_dependencies: Option<HashMap<String, DependencyEntry>>,
+    #[serde(default)]
+    pub(crate) target: Option<HashMap<String, TargetDependencies>>,
 }
 
 #[derive(Debug, Deserialize)]
 #[serde(untagged)]
 pub(crate) enum DependencyEntry {
-    Simple(IgnoredAny),
     Table(DependencyTable),
+    Simple(IgnoredAny),
 }
 
 #[derive(Debug, Deserialize)]
 pub(crate) struct DependencyTable {
     pub(crate) package: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+pub(crate) struct TargetDependencies {
+    #[serde(default)]
+    pub(crate) dependencies: Option<HashMap<String, DependencyEntry>>,
+    #[serde(default, rename = "dev-dependencies")]
+    _dev_dependencies: Option<HashMap<String, DependencyEntry>>,
+    #[serde(default, rename = "build-dependencies")]
+    pub(crate) build_dependencies: Option<HashMap<String, DependencyEntry>>,
 }
 
 #[derive(Debug, Deserialize)]

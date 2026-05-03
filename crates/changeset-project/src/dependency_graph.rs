@@ -12,8 +12,9 @@ pub struct WorkspaceDependencyGraph {
 }
 
 impl WorkspaceDependencyGraph {
-    /// Builds the dependency graph from the workspace, considering only `[dependencies]` and
-    /// `[build-dependencies]`.
+    /// Builds the dependency graph from the workspace, considering `[dependencies]`,
+    /// `[build-dependencies]`, and their target-specific equivalents under
+    /// `[target.'...'.dependencies]` and `[target.'...'.build-dependencies]`.
     ///
     /// # Errors
     ///
@@ -51,6 +52,28 @@ impl WorkspaceDependencyGraph {
                         }
                         if let Some(set) = depended_on_by.get_mut(resolved_name) {
                             set.insert(package.name().clone());
+                        }
+                    }
+                }
+            }
+
+            if let Some(ref target_map) = manifest.target {
+                for target_deps in target_map.values() {
+                    let target_sections = [
+                        target_deps.dependencies.as_ref(),
+                        target_deps.build_dependencies.as_ref(),
+                    ];
+                    for section in target_sections.into_iter().flatten() {
+                        for (key, entry) in section {
+                            let resolved_name = resolve_package_name(key, entry);
+                            if member_names.contains(resolved_name) {
+                                if let Some(set) = depends_on.get_mut(package.name()) {
+                                    set.insert(resolved_name.to_string());
+                                }
+                                if let Some(set) = depended_on_by.get_mut(resolved_name) {
+                                    set.insert(package.name().clone());
+                                }
+                            }
                         }
                     }
                 }

@@ -70,10 +70,26 @@ For detailed usage beyond what is covered here, run
 
 ### When to add a changeset
 
-Add a changeset whenever your changes affect the behavior, API, or
-dependencies of one or more crates in this workspace. Do NOT add a changeset
-for changes that are invisible to users of the crate, such as CI
-configuration, documentation-only edits, or test-only refactors.
+Run `cargo changeset verify` to determine which crates need changeset
+coverage. It is the single source of truth — add changesets for every crate
+it reports as uncovered.
+
+### IMPORTANT: Changeset workflow
+
+`cargo changeset verify` operates in two modes:
+
+1. **Dirty working directory** — verifies only the uncommitted changes
+2. **Clean working directory** — verifies all branch changes against the base branch
+
+The correct workflow is:
+
+1. Make code changes (working directory is now dirty)
+2. Run `cargo changeset verify` — dirty mode reports which crates need coverage
+3. Add changesets for uncovered crates
+4. Run `cargo changeset verify` again — should now pass (dirty state includes both code + changesets)
+5. Commit everything together
+
+**NEVER commit without `cargo changeset verify` passing first.**
 
 ### How to add a changeset
 
@@ -81,9 +97,13 @@ Run the following command (no interactive prompts):
 
 ```bash
 cargo changeset add \
-  --package-bump <crate-name>:<major|minor|patch> \
+  --package-bump <crate-name>:<major|minor|patch|none> \
+  --category <added|changed|deprecated|removed|fixed|security> \
   -m "<description>"
 ```
+
+The `--category` flag defaults to `changed` if omitted. It determines which
+CHANGELOG section the entry appears under.
 
 For changes affecting multiple crates, repeat `--package-bump` for each:
 
@@ -99,28 +119,20 @@ cargo changeset add \
 - `major` — breaking changes to the public API
 - `minor` — new functionality that is backwards compatible
 - `patch` — bug fixes and backwards-compatible corrections
+- `none` — internal changes invisible to crate consumers
 
 ### Writing the description
 
 The changeset description appears in the CHANGELOG and is read by users of
 the crate, not its developers. Write it from the perspective of someone who
 depends on the crate and wants to know what changed and how it affects them.
-Keep it to a single sentence when possible.
+Keep it to a single sentence when possible. Use markdown notation where
+appropriate (e.g. backticks for code references).
 
 Good: "Add `--timeout` flag to control request deadline"
 Good: "Fix panic when parsing empty configuration files"
 Bad:  "Refactored the timeout module and added a CLI flag"
 Bad:  "Fixed bug in config.rs line 42"
-
-### Verifying coverage
-
-After adding a changeset, verify that all affected crates are covered:
-
-```bash
-cargo changeset verify --base main
-```
-
-Exit code 0 means all changed crates have coverage.
 ````
 
 ---

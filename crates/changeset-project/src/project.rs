@@ -481,6 +481,7 @@ mod tests {
             }),
             dependencies: None,
             build_dependencies: None,
+            target: None,
         };
         assert_eq!(
             determine_project_kind(&manifest),
@@ -504,6 +505,7 @@ mod tests {
             }),
             dependencies: None,
             build_dependencies: None,
+            target: None,
         };
         assert_eq!(
             determine_project_kind(&manifest),
@@ -522,6 +524,7 @@ mod tests {
             workspace: None,
             dependencies: None,
             build_dependencies: None,
+            target: None,
         };
         assert_eq!(
             determine_project_kind(&manifest),
