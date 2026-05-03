@@ -40,3 +40,4 @@ indexmap = { workspace = true }
 semver = { workspace = true }
 serde_json = { workspace = true }
 indoc = "2.0.7"
+temp-env = "0.3.6"
