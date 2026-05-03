@@ -5,6 +5,66 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.0] - 2026-05-03
+### Added
+
+- **changeset-test-helpers**: Added helpers for sending Ctrl+C to the virtual terminal. Added helper for toggling items in interactive mode.
+- **changeset-test-helpers**: Extracted end-to-end test helpers into `changeset-test-helpers` crate
+
+### Changed
+
+- **cargo-changeset**: Add additional-packages dependencies add/remove/list subcommands, and automatically patch-bump non-Rust packages whose version-tracking dependencies are released.
+- **cargo-changeset**: Internal architectural changes
+- **cargo-changeset**: Internal architectural changes
+- **cargo-changeset**: Additional non-Rust packages are now discoverable and selectable via cargo changeset add, and tracked by cargo changeset verify
+- **cargo-changeset**: Release command now versions additional non-Rust packages (Helm charts, etc.) alongside Cargo crates
+- **cargo-changeset**: Add 'additional-packages' subcommand for managing non-Rust package declarations in Cargo.toml metadata; the subcommand requires a Cargo workspace and exits with a clear error in single-package projects
+- **cargo-changeset**: Internal architectural changes
+- **cargo-changeset**: Internal architectural changes
+- **cargo-changeset**: Internal architectural changes
+- **cargo-changeset**: Update crate keywords for better discoverability on crates.io
+- **cargo-changeset**: Improve interactive ignored-files prompt in `init` command
+- **cargo-changeset**: Internal architectural changes
+- **changeset-operations**: Additional packages (Helm charts, Docker configs, etc.) now participate in verify and add operations via influence globs
+- **changeset-operations**: Add operations, traits, and providers for managing additional (non-Rust) package declarations; additional-packages operations require a Cargo workspace and return a clear error for single-package projects
+- **changeset-operations**: Internal architectural changes
+- **changeset-operations**: Add ExternalManifestVersionWriter trait and discover_additional_packages to ProjectProvider for non-Rust package support
+- **changeset-operations**: Expose public constructors for result types (`VerificationResult`, `ChangelogUpdate`, `CommitResult`, `TagResult`, `GitOperationResult`, `ReleaseOutput`)
+- **changeset-operations**: Add non-Rust package support to the release saga, enabling version bumps of additional packages (YAML, JSON, TOML manifests) alongside Cargo crates
+- **changeset-operations**: Internal architectural changes
+- **changeset-operations**: Internal architectural changes
+- **changeset-operations**: Add `WriteVersionTrackingStep` saga step that updates tracked external manifest fields during release, and config validation for circular, unknown, and duplicate version-tracking dependency declarations.
+- **changeset-operations**: AddOperation::execute() now takes &AddInput instead of owned AddInput.
+- **changeset-operations**: Include additional non-Rust packages in status output
+- **changeset-operations**: Return full file path from write_changeset to fix incorrect path in add command output
+- **changeset-manifest**: Add functions to read and write version-tracking dependencies in TOML, YAML, and JSON external manifests.
+- **changeset-manifest**: Add functions for reading and writing non-Rust package declarations in Cargo.toml metadata
+- **changeset-manifest**: Add support for writing and verifying versions in external non-Rust manifests in TOML, YAML, and JSON formats
+- **changeset-core**: Add `VersionTrackingManifest` and `VersionTrackingDependency` types for declaring external manifest fields to update when a dependency's version changes.
+- **changeset-core**: Internal architectural changes
+- **changeset-core**: Add `ManifestFormat`, `AdditionalPackageManifest`, and `AdditionalPackageDeclaration` types for declaring non-Rust packages in workspace configuration
+- **changeset-project**: Internal architectural changes
+- **changeset-project**: Internal architectural changes
+- **changeset-project**: Add `discover_additional_packages`, `compile_influence_patterns`, and `map_files_to_all_packages` for non-Rust package support
+- **changeset-project**: Support declaring non-Rust packages via additional-packages in `Cargo.toml` workspace metadata; they are now available through `RootChangesetConfig`
+- **changeset-project**: Add `add_members()` and `extend_with_edges()` to `WorkspaceDependencyGraph`, and `collect_version_tracking_info()` / `tracking_edges()` for integrating non-Rust packages into the dependency graph.
+- **changeset-project**: Add support for reading versions from external non-Rust manifests in TOML, YAML, and JSON formats
+- **changeset-changelog**: Internal architectural changes
+- **changeset-changelog**: Internal architectural changes
+- **changeset-parse**: Internal architectural changes
+- **changeset-version**: Internal architectural changes
+- **changeset-test-helpers**: Any timeout now prints the screen when tests fail
+- **changeset-test-helpers**: Internal architectural changes
+- **changeset-test-helpers**: Changed virtual terminal size to 1200x400
+
+### Fixed
+
+- **cargo-changeset**: Fixed typo in `README.md`
+- **cargo-changeset**: Pressing ESC now aborts interactive mode instead of selecting the default
+- **cargo-changeset**: Enforce `none_bump_behavior: disallow` during changeset creation, preventing `none` bumps in both interactive and non-interactive modes.
+- **cargo-changeset**: Fix new changeset path in `add` command
+- **changeset-operations**: Enforce `none_bump_behavior: disallow` during changeset creation
+
 ## [0.1.5] - 2026-03-30
 ### Changed
 
@@ -157,3 +217,5 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 [0.1.4]: https://github.com/lukidoescode/cargo-changeset/compare/v0.1.3...v0.1.4
 
 [0.1.5]: https://github.com/lukidoescode/cargo-changeset/compare/v0.1.4...v0.1.5
+
+[0.2.0]: https://github.com/lukidoescode/cargo-changeset/compare/v0.1.5...v0.2.0
