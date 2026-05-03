@@ -7,10 +7,11 @@ use std::process::Command;
 use dialoguer::{Confirm, Input, MultiSelect, Select};
 use strum::{EnumMessage, VariantArray};
 
-use changeset_core::{ChangeCategory, PackageInfo};
+use changeset_core::{ChangeCategory, NoneBumpBehavior, PackageInfo};
 use changeset_git::DEFAULT_BASE_BRANCH;
 use changeset_manifest::{
-    ChangelogLocation, ComparisonLinks, NoneBumpBehavior, ZeroVersionBehavior,
+    ChangelogLocation, ComparisonLinks, NoneBumpBehavior as ManifestNoneBumpBehavior,
+    ZeroVersionBehavior,
 };
 use changeset_operations::traits::{
     BumpSelection, CategorySelection, ChangelogSettingsInput, DescriptionInput,
@@ -31,12 +32,16 @@ pub(crate) use selection_options::{
 
 pub(crate) struct TerminalInteractionProvider {
     use_editor: bool,
+    none_bump_behavior: NoneBumpBehavior,
 }
 
 impl TerminalInteractionProvider {
     #[must_use]
-    pub(crate) fn new(use_editor: bool) -> Self {
-        Self { use_editor }
+    pub(crate) fn new(use_editor: bool, none_bump_behavior: NoneBumpBehavior) -> Self {
+        Self {
+            use_editor,
+            none_bump_behavior,
+        }
     }
 }
 
@@ -78,6 +83,27 @@ impl InteractionProvider for TerminalInteractionProvider {
     }
 
     fn select_bump_type(&self, package_name: &str) -> Result<BumpSelection> {
+        if self.none_bump_behavior == NoneBumpBehavior::Disallow {
+            let options: Vec<(changeset_core::BumpType, &str)> = BumpTypeSelectionOption::VARIANTS
+                .iter()
+                .filter(|v| !matches!(v, BumpTypeSelectionOption::None))
+                .filter_map(|v| {
+                    let label = v.get_message()?;
+                    Some(((*v).into(), label))
+                })
+                .collect();
+            let selection = select_from_options(
+                &format!("Select bump type for '{package_name}'"),
+                &options,
+                0,
+            )
+            .map_err(cli_error_to_operation_error)?;
+            return Ok(match selection {
+                Some(bump) => BumpSelection::Selected(bump),
+                None => BumpSelection::Cancelled,
+            });
+        }
+
         let selection = select_variant::<BumpTypeSelectionOption>(
             &format!("Select bump type for '{package_name}'"),
             0,
@@ -281,7 +307,7 @@ impl InitInteractionProvider for TerminalInitInteractionProvider {
         let none_bump_behavior =
             select_none_bump_behavior().map_err(cli_error_to_operation_error)?;
         let none_bump_promote_message_template =
-            if none_bump_behavior == NoneBumpBehavior::PromoteToPatch {
+            if none_bump_behavior == ManifestNoneBumpBehavior::PromoteToPatch {
                 Some(
                     prompt_none_bump_promote_message_template()
                         .map_err(cli_error_to_operation_error)?,
@@ -519,7 +545,7 @@ fn select_zero_version_behavior() -> CliResult<ZeroVersionBehavior> {
         .into())
 }
 
-fn select_none_bump_behavior() -> CliResult<NoneBumpBehavior> {
+fn select_none_bump_behavior() -> CliResult<ManifestNoneBumpBehavior> {
     let selection =
         select_variant::<NoneBumpBehaviorSelectionOption>("Select none bump behavior", 0)?;
     Ok(selection
