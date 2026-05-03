@@ -54,109 +54,78 @@ fn detect_ci_env_var() -> Option<String> {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Mutex;
-
     use super::*;
 
-    static ENV_MUTEX: Mutex<()> = Mutex::new(());
-
-    fn with_env<F, R>(vars: &[(&str, &str)], clear: &[&str], f: F) -> R
-    where
-        F: FnOnce() -> R,
-    {
-        let _guard = ENV_MUTEX.lock().expect("mutex poisoned");
-
-        let mut old_values: Vec<(&str, Option<String>)> = Vec::new();
-
-        for var in clear {
-            old_values.push((var, std::env::var(var).ok()));
-            // SAFETY: Test code runs sequentially with ENV_MUTEX held.
-            unsafe { std::env::remove_var(var) };
-        }
-
-        for (key, value) in vars {
-            old_values.push((key, std::env::var(key).ok()));
-            // SAFETY: Test code runs sequentially with ENV_MUTEX held.
-            unsafe { std::env::set_var(key, value) };
-        }
-
-        let result = f();
-
-        for (key, old_value) in old_values {
-            match old_value {
-                // SAFETY: Test code runs sequentially with ENV_MUTEX held.
-                Some(v) => unsafe { std::env::set_var(key, v) },
-                // SAFETY: Test code runs sequentially with ENV_MUTEX held.
-                None => unsafe { std::env::remove_var(key) },
-            }
-        }
-
-        result
+    fn env_vars(
+        extra: &[(&'static str, Option<&'static str>)],
+    ) -> Vec<(&'static str, Option<&'static str>)> {
+        let mut vars: Vec<(&str, Option<&str>)> = [
+            "CI",
+            "GITHUB_ACTIONS",
+            "GITLAB_CI",
+            "CIRCLECI",
+            "TRAVIS",
+            "JENKINS_URL",
+            "BUILDKITE",
+            "TF_BUILD",
+            "CARGO_CHANGESET_NO_TTY",
+            "CARGO_CHANGESET_FORCE_TTY",
+        ]
+        .map(|var| (var, None))
+        .to_vec();
+        vars.extend_from_slice(extra);
+        vars
     }
-
-    const ALL_CI_VARS: &[&str] = &[
-        "CI",
-        "GITHUB_ACTIONS",
-        "GITLAB_CI",
-        "CIRCLECI",
-        "TRAVIS",
-        "JENKINS_URL",
-        "BUILDKITE",
-        "TF_BUILD",
-        "CARGO_CHANGESET_NO_TTY",
-        "CARGO_CHANGESET_FORCE_TTY",
-    ];
 
     mod detect_ci_env_var {
         use super::*;
 
         #[test]
         fn returns_none_when_no_ci_vars_set() {
-            with_env(&[], ALL_CI_VARS, || {
+            temp_env::with_vars(env_vars(&[]), || {
                 assert!(detect_ci_env_var().is_none());
             });
         }
 
         #[test]
         fn detects_ci() {
-            with_env(&[("CI", "true")], ALL_CI_VARS, || {
+            temp_env::with_vars(env_vars(&[("CI", Some("true"))]), || {
                 assert_eq!(detect_ci_env_var(), Some("CI".to_string()));
             });
         }
 
         #[test]
         fn detects_github_actions() {
-            with_env(&[("GITHUB_ACTIONS", "true")], ALL_CI_VARS, || {
+            temp_env::with_vars(env_vars(&[("GITHUB_ACTIONS", Some("true"))]), || {
                 assert_eq!(detect_ci_env_var(), Some("GITHUB_ACTIONS".to_string()));
             });
         }
 
         #[test]
         fn detects_gitlab_ci() {
-            with_env(&[("GITLAB_CI", "true")], ALL_CI_VARS, || {
+            temp_env::with_vars(env_vars(&[("GITLAB_CI", Some("true"))]), || {
                 assert_eq!(detect_ci_env_var(), Some("GITLAB_CI".to_string()));
             });
         }
 
         #[test]
         fn detects_circleci() {
-            with_env(&[("CIRCLECI", "true")], ALL_CI_VARS, || {
+            temp_env::with_vars(env_vars(&[("CIRCLECI", Some("true"))]), || {
                 assert_eq!(detect_ci_env_var(), Some("CIRCLECI".to_string()));
             });
         }
 
         #[test]
         fn detects_travis() {
-            with_env(&[("TRAVIS", "true")], ALL_CI_VARS, || {
+            temp_env::with_vars(env_vars(&[("TRAVIS", Some("true"))]), || {
                 assert_eq!(detect_ci_env_var(), Some("TRAVIS".to_string()));
             });
         }
 
         #[test]
         fn detects_jenkins() {
-            with_env(
-                &[("JENKINS_URL", "http://jenkins.local")],
-                ALL_CI_VARS,
+            temp_env::with_vars(
+                env_vars(&[("JENKINS_URL", Some("http://jenkins.local"))]),
                 || {
                     assert_eq!(detect_ci_env_var(), Some("JENKINS_URL".to_string()));
                 },
@@ -165,14 +134,14 @@ mod tests {
 
         #[test]
         fn detects_buildkite() {
-            with_env(&[("BUILDKITE", "true")], ALL_CI_VARS, || {
+            temp_env::with_vars(env_vars(&[("BUILDKITE", Some("true"))]), || {
                 assert_eq!(detect_ci_env_var(), Some("BUILDKITE".to_string()));
             });
         }
 
         #[test]
         fn detects_azure_devops() {
-            with_env(&[("TF_BUILD", "True")], ALL_CI_VARS, || {
+            temp_env::with_vars(env_vars(&[("TF_BUILD", Some("True"))]), || {
                 assert_eq!(detect_ci_env_var(), Some("TF_BUILD".to_string()));
             });
         }
@@ -183,13 +152,12 @@ mod tests {
 
         #[test]
         fn no_tty_takes_highest_priority() {
-            with_env(
-                &[
-                    ("CARGO_CHANGESET_NO_TTY", "1"),
-                    ("CARGO_CHANGESET_FORCE_TTY", "1"),
-                    ("CI", "true"),
-                ],
-                ALL_CI_VARS,
+            temp_env::with_vars(
+                env_vars(&[
+                    ("CARGO_CHANGESET_NO_TTY", Some("1")),
+                    ("CARGO_CHANGESET_FORCE_TTY", Some("1")),
+                    ("CI", Some("true")),
+                ]),
                 || {
                     assert_eq!(
                         non_interactive_reason(),
@@ -201,9 +169,11 @@ mod tests {
 
         #[test]
         fn force_tty_takes_priority_over_ci_detection() {
-            with_env(
-                &[("CI", "true"), ("CARGO_CHANGESET_FORCE_TTY", "1")],
-                ALL_CI_VARS,
+            temp_env::with_vars(
+                env_vars(&[
+                    ("CI", Some("true")),
+                    ("CARGO_CHANGESET_FORCE_TTY", Some("1")),
+                ]),
                 || {
                     assert!(non_interactive_reason().is_none());
                 },
@@ -212,14 +182,17 @@ mod tests {
 
         #[test]
         fn force_tty_allows_interactivity_when_no_ci() {
-            with_env(&[("CARGO_CHANGESET_FORCE_TTY", "1")], ALL_CI_VARS, || {
-                assert!(non_interactive_reason().is_none());
-            });
+            temp_env::with_vars(
+                env_vars(&[("CARGO_CHANGESET_FORCE_TTY", Some("1"))]),
+                || {
+                    assert!(non_interactive_reason().is_none());
+                },
+            );
         }
 
         #[test]
         fn explicit_disable_returns_correct_reason() {
-            with_env(&[("CARGO_CHANGESET_NO_TTY", "1")], ALL_CI_VARS, || {
+            temp_env::with_vars(env_vars(&[("CARGO_CHANGESET_NO_TTY", Some("1"))]), || {
                 assert_eq!(
                     non_interactive_reason(),
                     Some(NonInteractiveReason::ExplicitDisable)
@@ -229,7 +202,7 @@ mod tests {
 
         #[test]
         fn ci_detection_returns_correct_env_var() {
-            with_env(&[("GITHUB_ACTIONS", "true")], ALL_CI_VARS, || {
+            temp_env::with_vars(env_vars(&[("GITHUB_ACTIONS", Some("true"))]), || {
                 assert_eq!(
                     non_interactive_reason(),
                     Some(NonInteractiveReason::CiDetected {
@@ -245,30 +218,35 @@ mod tests {
 
         #[test]
         fn returns_false_when_no_tty_set() {
-            with_env(&[("CARGO_CHANGESET_NO_TTY", "1")], ALL_CI_VARS, || {
+            temp_env::with_vars(env_vars(&[("CARGO_CHANGESET_NO_TTY", Some("1"))]), || {
                 assert!(!is_interactive());
             });
         }
 
         #[test]
         fn returns_false_when_ci_detected() {
-            with_env(&[("CI", "true")], ALL_CI_VARS, || {
+            temp_env::with_vars(env_vars(&[("CI", Some("true"))]), || {
                 assert!(!is_interactive());
             });
         }
 
         #[test]
         fn returns_true_when_force_tty_and_no_ci() {
-            with_env(&[("CARGO_CHANGESET_FORCE_TTY", "1")], ALL_CI_VARS, || {
-                assert!(is_interactive());
-            });
+            temp_env::with_vars(
+                env_vars(&[("CARGO_CHANGESET_FORCE_TTY", Some("1"))]),
+                || {
+                    assert!(is_interactive());
+                },
+            );
         }
 
         #[test]
         fn returns_true_when_force_tty_overrides_ci() {
-            with_env(
-                &[("CI", "true"), ("CARGO_CHANGESET_FORCE_TTY", "1")],
-                ALL_CI_VARS,
+            temp_env::with_vars(
+                env_vars(&[
+                    ("CI", Some("true")),
+                    ("CARGO_CHANGESET_FORCE_TTY", Some("1")),
+                ]),
                 || {
                     assert!(is_interactive());
                 },
