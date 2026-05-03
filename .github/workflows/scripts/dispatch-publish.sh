@@ -49,4 +49,9 @@ while IFS=" " read -r depth crate; do
   echo "Dispatching publish for $tag (depth=$depth)"
   gh workflow run publish.yml --repo "$GITHUB_REPOSITORY" --ref "refs/tags/$tag"
 
+  if [ "$crate" = "cargo-changeset" ]; then
+    echo "Dispatching docker for $tag (depth=$depth)"
+    gh workflow run docker.yml --repo "$GITHUB_REPOSITORY" --ref "refs/tags/$tag"
+  fi
+
 done <<< "$depth_order"
