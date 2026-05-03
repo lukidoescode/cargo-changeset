@@ -45,4 +45,4 @@ jobs:
         with:
           persist-credentials: false
 
-      - uses: zizmorcore/zizmor-action@v0.5.0
+      - uses: zizmorcore/zizmor-action@v0.5.3
