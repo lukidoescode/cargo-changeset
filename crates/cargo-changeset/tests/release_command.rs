@@ -4,7 +4,7 @@ use std::process::Command;
 use changeset_test_helpers::changesets::{write_changeset, write_multi_changeset};
 use changeset_test_helpers::git::{git_add_and_commit, init_git_repo};
 use changeset_test_helpers::workspaces::{
-    add_helm_chart_config, create_workspace_with_cascade_chain,
+    WorkspaceBuilder, add_helm_chart_config, create_workspace_with_cascade_chain,
     create_workspace_with_circular_version_tracking,
     create_workspace_with_deeply_nested_json_field, create_workspace_with_duplicate_dependency,
     create_workspace_with_helm_chart, create_workspace_with_invalid_version_field_path,
@@ -673,5 +673,167 @@ fn release_version_tracking_deeply_nested_field_paths() {
         upstream_version,
         Some("1.0.1"),
         "expected deeply nested upstream_crate version updated to 1.0.1, got:\n{manifest_json}"
+    );
+}
+
+#[test]
+fn release_updates_target_specific_dependency_versions() {
+    let workspace = WorkspaceBuilder::virtual_workspace()
+        .with_git()
+        .with_changeset_dir()
+        .crate_member("crate-a", "1.0.0")
+        .crate_member("crate-b", "2.0.0")
+        .crate_toml_extra(
+            "crate-b",
+            r#"
+[dependencies]
+crate-a = { path = "../crate-a", version = "1.0.0" }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+crate-a = { path = "../crate-a", version = "1.0.0" }
+"#,
+        )
+        .build();
+
+    let lockfile_output = Command::new("cargo")
+        .args(["generate-lockfile"])
+        .current_dir(workspace.path())
+        .output()
+        .expect("failed to run cargo generate-lockfile");
+    assert!(
+        lockfile_output.status.success(),
+        "cargo generate-lockfile failed: {}",
+        String::from_utf8_lossy(&lockfile_output.stderr)
+    );
+
+    git_add_and_commit(&workspace, "Initial commit");
+    write_changeset(&workspace, "bump-a.md", "crate-a", "minor", "Add feature");
+    git_add_and_commit(&workspace, "Add changeset");
+
+    assert_cmd::cargo::cargo_bin_cmd!("cargo-changeset")
+        .arg("release")
+        .current_dir(workspace.path())
+        .assert()
+        .success();
+
+    let content = fs::read_to_string(workspace.path().join("crates/crate-b/Cargo.toml"))
+        .expect("read crate-b Cargo.toml");
+
+    assert!(
+        !content.contains(r#"version = "1.0.0""#),
+        "old version should not remain in crate-b Cargo.toml, got:\n{content}"
+    );
+    assert_eq!(
+        content.matches(r#"version = "1.1.0""#).count(),
+        2,
+        "both [dependencies] and target-specific section should have 1.1.0, got:\n{content}"
+    );
+}
+
+#[test]
+fn release_skips_path_only_dependency() {
+    let workspace = WorkspaceBuilder::virtual_workspace()
+        .with_git()
+        .with_changeset_dir()
+        .crate_member("crate-a", "1.0.0")
+        .crate_member("crate-b", "2.0.0")
+        .crate_toml_extra(
+            "crate-b",
+            r#"
+[dependencies]
+crate-a = { path = "../crate-a" }
+"#,
+        )
+        .build();
+
+    let lockfile_output = Command::new("cargo")
+        .args(["generate-lockfile"])
+        .current_dir(workspace.path())
+        .output()
+        .expect("failed to run cargo generate-lockfile");
+    assert!(
+        lockfile_output.status.success(),
+        "cargo generate-lockfile failed: {}",
+        String::from_utf8_lossy(&lockfile_output.stderr)
+    );
+
+    git_add_and_commit(&workspace, "Initial commit");
+    write_changeset(&workspace, "bump-a.md", "crate-a", "minor", "Add feature");
+    git_add_and_commit(&workspace, "Add changeset");
+
+    assert_cmd::cargo::cargo_bin_cmd!("cargo-changeset")
+        .arg("release")
+        .current_dir(workspace.path())
+        .assert()
+        .success();
+
+    let content = fs::read_to_string(workspace.path().join("crates/crate-b/Cargo.toml"))
+        .expect("read crate-b Cargo.toml");
+
+    assert!(
+        content.contains(r#"path = "../crate-a""#),
+        "path-only dependency should still have path, got:\n{content}"
+    );
+    assert!(
+        !content.contains("1.1.0"),
+        "path-only dependency should not get a version added, got:\n{content}"
+    );
+}
+
+#[test]
+fn release_skips_workspace_true_dependency() {
+    let workspace = WorkspaceBuilder::virtual_workspace()
+        .with_git()
+        .with_changeset_dir()
+        .crate_member("crate-a", "1.0.0")
+        .crate_member("crate-b", "2.0.0")
+        .workspace_toml_extra(
+            r#"
+[workspace.dependencies]
+crate-a = { path = "crates/crate-a", version = "1.0.0" }
+"#,
+        )
+        .crate_toml_extra(
+            "crate-b",
+            r#"
+[dependencies]
+crate-a = { workspace = true }
+"#,
+        )
+        .build();
+
+    let lockfile_output = Command::new("cargo")
+        .args(["generate-lockfile"])
+        .current_dir(workspace.path())
+        .output()
+        .expect("failed to run cargo generate-lockfile");
+    assert!(
+        lockfile_output.status.success(),
+        "cargo generate-lockfile failed: {}",
+        String::from_utf8_lossy(&lockfile_output.stderr)
+    );
+
+    git_add_and_commit(&workspace, "Initial commit");
+    write_changeset(&workspace, "bump-a.md", "crate-a", "minor", "Add feature");
+    git_add_and_commit(&workspace, "Add changeset");
+
+    assert_cmd::cargo::cargo_bin_cmd!("cargo-changeset")
+        .arg("release")
+        .current_dir(workspace.path())
+        .assert()
+        .success();
+
+    let crate_b_content = fs::read_to_string(workspace.path().join("crates/crate-b/Cargo.toml"))
+        .expect("read crate-b Cargo.toml");
+    assert!(
+        crate_b_content.contains("workspace = true"),
+        "workspace = true should remain unchanged in crate-b, got:\n{crate_b_content}"
+    );
+
+    let root_content =
+        fs::read_to_string(workspace.path().join("Cargo.toml")).expect("read root Cargo.toml");
+    assert!(
+        root_content.contains(r#"version = "1.1.0""#),
+        "workspace.dependencies version should be updated to 1.1.0, got:\n{root_content}"
     );
 }

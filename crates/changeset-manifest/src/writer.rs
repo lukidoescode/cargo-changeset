@@ -1,7 +1,7 @@
 use std::path::Path;
 
 use semver::Version;
-use toml_edit::{DocumentMut, Item, Table, value};
+use toml_edit::{DocumentMut, Item, Table, TableLike, value};
 
 use crate::config::{InitConfig, MetadataSection};
 use crate::error::ManifestError;
@@ -155,8 +155,10 @@ pub fn write_metadata_section(
 /// Updates the version of a dependency in all relevant sections of a Cargo.toml.
 ///
 /// Checks `[workspace.dependencies]`, `[dependencies]`, `[dev-dependencies]`,
-/// and `[build-dependencies]`. Only updates table-form entries that have an
-/// explicit `version` key and do NOT have `workspace = true`.
+/// `[build-dependencies]`, and all `[target.'...'.dependencies]` (including
+/// `dev-dependencies` and `build-dependencies` under each target). Only updates
+/// table-form entries that have an explicit `version` key and do NOT have
+/// `workspace = true`.
 ///
 /// # Errors
 ///
@@ -184,6 +186,20 @@ pub fn update_dependency_version(
         }
     }
 
+    if let Some(target_table) = doc.get_mut("target")
+        && let Some(target_table) = target_table.as_table_like_mut()
+    {
+        for (_, target_value) in target_table.iter_mut() {
+            for section in &DEPENDENCY_SECTIONS {
+                if let Some(deps) = target_value.get_mut(section)
+                    && update_dep_entry(deps, dependency_name, new_version)
+                {
+                    changed = true;
+                }
+            }
+        }
+    }
+
     if changed {
         std::fs::write(path, doc.to_string()).map_err(|source| ManifestError::Write {
             path: path.to_path_buf(),
@@ -200,18 +216,29 @@ fn update_dep_entry(deps: &mut Item, dep_name: &str, new_version: &Version) -> b
     };
 
     if let Some(table) = entry.as_table_like_mut() {
-        let has_workspace_true = table
-            .get("workspace")
-            .and_then(toml_edit::Item::as_bool)
-            .unwrap_or(false);
-        if has_workspace_true {
-            return false;
-        }
+        return update_versioned_table(table, new_version);
+    }
 
-        if table.get("version").is_some() {
-            table.insert("version", value(new_version.to_string()));
-            return true;
-        }
+    if entry.is_str() {
+        *entry = value(new_version.to_string());
+        return true;
+    }
+
+    false
+}
+
+fn update_versioned_table(table: &mut dyn TableLike, new_version: &Version) -> bool {
+    let has_workspace_true = table
+        .get("workspace")
+        .and_then(toml_edit::Item::as_bool)
+        .unwrap_or(false);
+    if has_workspace_true {
+        return false;
+    }
+
+    if table.get("version").is_some() {
+        table.insert("version", value(new_version.to_string()));
+        return true;
     }
 
     false
@@ -947,7 +974,7 @@ my-crate = { path = "crates/my-crate", version = "1.0.0" }
     }
 
     #[test]
-    fn update_dep_version_skips_simple_string() {
+    fn update_dep_version_updates_simple_string() {
         let toml = r#"
 [package]
 name = "other-crate"
@@ -962,10 +989,10 @@ my-crate = "1.0.0"
 
         let result =
             update_dependency_version(&path, "my-crate", &Version::new(2, 0, 0)).expect("update");
-        assert!(!result);
+        assert!(result);
 
         let content = std::fs::read_to_string(&path).expect("read file");
-        assert!(content.contains(r#"my-crate = "1.0.0""#));
+        assert!(content.contains(r#"my-crate = "2.0.0""#));
     }
 
     #[test]
@@ -1218,5 +1245,214 @@ members = ["crates/*"]
         let content = std::fs::read_to_string(&path).expect("read file");
         assert!(!content.contains("ignored-files"));
         assert!(content.contains("commit = true"));
+    }
+
+    #[test]
+    fn update_dep_version_updates_target_deps() {
+        let toml = r#"
+[package]
+name = "other-crate"
+version = "0.1.0"
+
+[target.'cfg(target_os = "linux")'.dependencies]
+my-crate = { path = "../my-crate", version = "1.0.0" }
+"#;
+        let dir = tempfile::tempdir().expect("create temp dir");
+        let path = dir.path().join("Cargo.toml");
+        std::fs::write(&path, toml).expect("write test file");
+
+        let result =
+            update_dependency_version(&path, "my-crate", &Version::new(2, 0, 0)).expect("update");
+        assert!(result);
+
+        let content = std::fs::read_to_string(&path).expect("read file");
+        assert!(content.contains(r#"version = "2.0.0""#));
+        assert!(!content.contains(r#"version = "1.0.0""#));
+    }
+
+    #[test]
+    fn update_dep_version_updates_target_dev_deps() {
+        let toml = r#"
+[package]
+name = "other-crate"
+version = "0.1.0"
+
+[target.'cfg(target_os = "linux")'.dev-dependencies]
+my-crate = { path = "../my-crate", version = "1.0.0" }
+"#;
+        let dir = tempfile::tempdir().expect("create temp dir");
+        let path = dir.path().join("Cargo.toml");
+        std::fs::write(&path, toml).expect("write test file");
+
+        let result =
+            update_dependency_version(&path, "my-crate", &Version::new(2, 0, 0)).expect("update");
+        assert!(result);
+
+        let content = std::fs::read_to_string(&path).expect("read file");
+        assert!(content.contains(r#"version = "2.0.0""#));
+    }
+
+    #[test]
+    fn update_dep_version_updates_target_build_deps() {
+        let toml = r#"
+[package]
+name = "other-crate"
+version = "0.1.0"
+
+[target.'cfg(target_os = "linux")'.build-dependencies]
+my-crate = { path = "../my-crate", version = "1.0.0" }
+"#;
+        let dir = tempfile::tempdir().expect("create temp dir");
+        let path = dir.path().join("Cargo.toml");
+        std::fs::write(&path, toml).expect("write test file");
+
+        let result =
+            update_dependency_version(&path, "my-crate", &Version::new(2, 0, 0)).expect("update");
+        assert!(result);
+
+        let content = std::fs::read_to_string(&path).expect("read file");
+        assert!(content.contains(r#"version = "2.0.0""#));
+    }
+
+    #[test]
+    fn update_dep_version_updates_multiple_targets() {
+        let toml = r#"
+[package]
+name = "other-crate"
+version = "0.1.0"
+
+[target.'cfg(target_os = "linux")'.dependencies]
+my-crate = { path = "../my-crate", version = "1.0.0" }
+
+[target.'cfg(target_os = "windows")'.dependencies]
+my-crate = { path = "../my-crate", version = "1.0.0" }
+"#;
+        let dir = tempfile::tempdir().expect("create temp dir");
+        let path = dir.path().join("Cargo.toml");
+        std::fs::write(&path, toml).expect("write test file");
+
+        let result =
+            update_dependency_version(&path, "my-crate", &Version::new(2, 0, 0)).expect("update");
+        assert!(result);
+
+        let content = std::fs::read_to_string(&path).expect("read file");
+        assert!(!content.contains(r#"version = "1.0.0""#));
+        assert_eq!(content.matches(r#"version = "2.0.0""#).count(), 2);
+    }
+
+    #[test]
+    fn update_dep_version_skips_target_workspace_true() {
+        let toml = r#"
+[package]
+name = "other-crate"
+version = "0.1.0"
+
+[target.'cfg(target_os = "linux")'.dependencies]
+my-crate = { workspace = true }
+"#;
+        let dir = tempfile::tempdir().expect("create temp dir");
+        let path = dir.path().join("Cargo.toml");
+        std::fs::write(&path, toml).expect("write test file");
+
+        let result =
+            update_dependency_version(&path, "my-crate", &Version::new(2, 0, 0)).expect("update");
+        assert!(!result);
+
+        let content = std::fs::read_to_string(&path).expect("read file");
+        assert!(content.contains("workspace = true"));
+        assert!(!content.contains(r#"version = "2.0.0""#));
+    }
+
+    #[test]
+    fn update_dep_version_skips_target_no_version_key() {
+        let toml = r#"
+[package]
+name = "other-crate"
+version = "0.1.0"
+
+[target.'cfg(target_os = "linux")'.dependencies]
+my-crate = { path = "../my-crate" }
+"#;
+        let dir = tempfile::tempdir().expect("create temp dir");
+        let path = dir.path().join("Cargo.toml");
+        std::fs::write(&path, toml).expect("write test file");
+
+        let result =
+            update_dependency_version(&path, "my-crate", &Version::new(2, 0, 0)).expect("update");
+        assert!(!result);
+
+        let content = std::fs::read_to_string(&path).expect("read file");
+        assert!(!content.contains(r#"version = "2.0.0""#));
+    }
+
+    #[test]
+    fn update_dep_version_updates_target_and_regular() {
+        let toml = r#"
+[package]
+name = "other-crate"
+version = "0.1.0"
+
+[dependencies]
+my-crate = { path = "../my-crate", version = "1.0.0" }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+my-crate = { path = "../my-crate", version = "1.0.0" }
+"#;
+        let dir = tempfile::tempdir().expect("create temp dir");
+        let path = dir.path().join("Cargo.toml");
+        std::fs::write(&path, toml).expect("write test file");
+
+        let result =
+            update_dependency_version(&path, "my-crate", &Version::new(2, 0, 0)).expect("update");
+        assert!(result);
+
+        let content = std::fs::read_to_string(&path).expect("read file");
+        assert!(!content.contains(r#"version = "1.0.0""#));
+        assert_eq!(content.matches(r#"version = "2.0.0""#).count(), 2);
+    }
+
+    #[test]
+    fn update_dep_version_preserves_target_formatting() {
+        let toml = r#"# Package manifest
+[package]
+name = "other-crate"
+version = "0.1.0"
+
+# Linux-specific deps
+[target.'cfg(target_os = "linux")'.dependencies]
+my-crate = { path = "../my-crate", version = "1.0.0" }
+"#;
+        let dir = tempfile::tempdir().expect("create temp dir");
+        let path = dir.path().join("Cargo.toml");
+        std::fs::write(&path, toml).expect("write test file");
+
+        update_dependency_version(&path, "my-crate", &Version::new(2, 0, 0)).expect("update");
+
+        let content = std::fs::read_to_string(&path).expect("read file");
+        assert!(content.contains("# Package manifest"));
+        assert!(content.contains("# Linux-specific deps"));
+        assert!(content.contains(r#"version = "2.0.0""#));
+    }
+
+    #[test]
+    fn update_dep_version_updates_target_simple_string() {
+        let toml = r#"
+[package]
+name = "other-crate"
+version = "0.1.0"
+
+[target.'cfg(target_os = "linux")'.dependencies]
+my-crate = "1.0.0"
+"#;
+        let dir = tempfile::tempdir().expect("create temp dir");
+        let path = dir.path().join("Cargo.toml");
+        std::fs::write(&path, toml).expect("write test file");
+
+        let result =
+            update_dependency_version(&path, "my-crate", &Version::new(2, 0, 0)).expect("update");
+        assert!(result);
+
+        let content = std::fs::read_to_string(&path).expect("read file");
+        assert!(content.contains(r#"my-crate = "2.0.0""#));
     }
 }

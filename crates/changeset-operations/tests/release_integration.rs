@@ -124,6 +124,99 @@ edition.workspace = true
     dir
 }
 
+fn create_workspace_with_target_deps() -> TempDir {
+    let dir = TempDir::new().expect("create temp dir");
+
+    fs::write(
+        dir.path().join("Cargo.toml"),
+        r#"[workspace]
+members = ["crates/*"]
+resolver = "2"
+"#,
+    )
+    .expect("write workspace Cargo.toml");
+
+    fs::create_dir_all(dir.path().join("crates/crate-a/src")).expect("create crate-a dir");
+    fs::write(
+        dir.path().join("crates/crate-a/Cargo.toml"),
+        r#"[package]
+name = "crate-a"
+version = "1.0.0"
+edition = "2021"
+"#,
+    )
+    .expect("write crate-a Cargo.toml");
+    fs::write(dir.path().join("crates/crate-a/src/lib.rs"), "").expect("write lib.rs");
+
+    fs::create_dir_all(dir.path().join("crates/crate-b/src")).expect("create crate-b dir");
+    fs::write(
+        dir.path().join("crates/crate-b/Cargo.toml"),
+        r#"[package]
+name = "crate-b"
+version = "2.0.0"
+edition = "2021"
+
+[target.'cfg(target_os = "linux")'.dependencies]
+crate-a = { path = "../crate-a", version = "1.0.0" }
+"#,
+    )
+    .expect("write crate-b Cargo.toml");
+    fs::write(dir.path().join("crates/crate-b/src/lib.rs"), "").expect("write lib.rs");
+
+    fs::create_dir_all(dir.path().join(".changeset/changesets"))
+        .expect("create .changeset/changesets dir");
+
+    dir
+}
+
+fn create_workspace_with_standard_and_target_deps() -> TempDir {
+    let dir = TempDir::new().expect("create temp dir");
+
+    fs::write(
+        dir.path().join("Cargo.toml"),
+        r#"[workspace]
+members = ["crates/*"]
+resolver = "2"
+"#,
+    )
+    .expect("write workspace Cargo.toml");
+
+    fs::create_dir_all(dir.path().join("crates/crate-a/src")).expect("create crate-a dir");
+    fs::write(
+        dir.path().join("crates/crate-a/Cargo.toml"),
+        r#"[package]
+name = "crate-a"
+version = "1.0.0"
+edition = "2021"
+"#,
+    )
+    .expect("write crate-a Cargo.toml");
+    fs::write(dir.path().join("crates/crate-a/src/lib.rs"), "").expect("write lib.rs");
+
+    fs::create_dir_all(dir.path().join("crates/crate-b/src")).expect("create crate-b dir");
+    fs::write(
+        dir.path().join("crates/crate-b/Cargo.toml"),
+        r#"[package]
+name = "crate-b"
+version = "2.0.0"
+edition = "2021"
+
+[dependencies]
+crate-a = { path = "../crate-a", version = "1.0.0" }
+
+[target.'cfg(target_os = "windows")'.dependencies]
+crate-a = { path = "../crate-a", version = "1.0.0" }
+"#,
+    )
+    .expect("write crate-b Cargo.toml");
+    fs::write(dir.path().join("crates/crate-b/src/lib.rs"), "").expect("write lib.rs");
+
+    fs::create_dir_all(dir.path().join(".changeset/changesets"))
+        .expect("create .changeset/changesets dir");
+
+    dir
+}
+
 fn write_changeset(dir: &TempDir, filename: &str, package: &str, bump: &str, summary: &str) {
     let content = format!(
         r#"---
@@ -2544,5 +2637,44 @@ fn manage_remove_then_release_produces_normal_version() {
         release_a.new_version().to_string(),
         "1.1.0",
         "crate-a should get normal minor bump"
+    );
+}
+
+#[test]
+fn release_updates_target_specific_dep_versions() {
+    let dir = create_workspace_with_target_deps();
+    write_changeset(&dir, "bump-a.md", "crate-a", "minor", "Add feature");
+
+    let _outcome = run_release(&dir, false, false).expect("release should succeed");
+
+    let content =
+        fs::read_to_string(dir.path().join("crates/crate-b/Cargo.toml")).expect("read crate-b");
+    assert!(
+        content.contains(r#"version = "1.1.0""#),
+        "target-specific dep version should be updated to 1.1.0, got:\n{content}"
+    );
+    assert!(
+        !content.contains(r#"version = "1.0.0""#),
+        "old version should no longer appear"
+    );
+}
+
+#[test]
+fn release_updates_both_standard_and_target_deps() {
+    let dir = create_workspace_with_standard_and_target_deps();
+    write_changeset(&dir, "bump-a.md", "crate-a", "minor", "Add feature");
+
+    let _outcome = run_release(&dir, false, false).expect("release should succeed");
+
+    let content =
+        fs::read_to_string(dir.path().join("crates/crate-b/Cargo.toml")).expect("read crate-b");
+    assert!(
+        !content.contains(r#"version = "1.0.0""#),
+        "no old version should remain"
+    );
+    assert_eq!(
+        content.matches(r#"version = "1.1.0""#).count(),
+        2,
+        "both [dependencies] and target section should have updated version, got:\n{content}"
     );
 }
